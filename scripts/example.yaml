@@ -1,0 +1,106 @@
+# axiZero interconnect configuration
+# Run with: python axizero.py generate example.yaml
+
+designs:
+
+  # ── Example 1: simple 1-master × 4-slave AXI4-Lite crossbar ─────────────
+  - name: MyLite_1M4S
+    type: lite
+    arbitration: round_robin
+
+    masters:
+      - addr_width: 32
+        data_width: 32
+        reg_slice: false
+
+    slaves:
+      - base: 0x00000000    # SRAM
+        size: 0x1000
+        data_width: 32
+      - base: 0x00010000    # UART
+        size: 0x1000
+        data_width: 32
+      - base: 0x00020000    # GPIO
+        size: 0x1000
+        data_width: 32
+      - base: 0x00030000    # SPI
+        size: 0x1000
+        data_width: 32
+
+  # ── Example 2: 2 masters, register slices, weighted arbitration ──────────
+  - name: MyLite_2M2S_WRR
+    type: lite
+    arbitration: weighted_round_robin
+    weights: [3, 1]         # master 0 gets 3x the grants
+
+    masters:
+      - addr_width: 32
+        data_width: 32
+        reg_slice: true     # register slice on this master port
+      - addr_width: 32
+        data_width: 32
+        reg_slice: false
+
+    slaves:
+      - base: 0x00000000
+        size: 0x10000
+        data_width: 32
+        reg_slice: true     # register slice on this slave port
+      - base: 0x00010000
+        size: 0x10000
+        data_width: 32
+
+  # ── Example 3: full AXI4 (with IDs and bursts) ───────────────────────────
+  - name: MyFull_2M2S
+    type: full
+    arbitration: round_robin
+
+    masters:
+      - addr_width: 32
+        data_width: 64
+        id_width: 4
+
+    slaves:
+      - base: 0x00000000
+        size: 0x80000000    # 2 GB
+        data_width: 64
+      - base: 0x80000000
+        size: 0x20000000    # 512 MB
+        data_width: 64
+
+  # ── Example 4: mixed AXI4 + AXI4-Lite ports ──────────────────────────────
+  #
+  # A DMA engine (full AXI4, id_width=4) and a CPU config port (AXI4-Lite)
+  # share three slaves: DDR (full AXI4) plus UART and GPIO (AXI4-Lite).
+  #
+  # The script automatically:
+  #   • inserts Lite→Full adapters at Lite master ports
+  #   • inserts Full→Lite adapters at Lite slave ports
+  #   • computes the expanded slave ID width (effectiveIdW + masterIndexBits)
+  #   • uses the resource-efficient Lite crossbar only when ALL ports are Lite
+  #
+  - name: MyMixed_2M3S
+    arbitration: round_robin
+
+    masters:
+      - addr_width: 32
+        data_width: 32
+        id_width: 4
+        type: full          # DMA engine — full AXI4
+      - addr_width: 32
+        data_width: 32
+        type: lite          # CPU config port — AXI4-Lite
+
+    slaves:
+      - base: 0x00000000
+        size: 0x80000000    # DDR — full AXI4
+        data_width: 32
+        type: full
+      - base: 0x80000000
+        size: 0x1000        # UART — AXI4-Lite
+        data_width: 32
+        type: lite
+      - base: 0x80001000
+        size: 0x1000        # GPIO — AXI4-Lite
+        data_width: 32
+        type: lite
