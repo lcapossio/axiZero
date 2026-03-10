@@ -482,7 +482,11 @@ def main():
         vivado = find_vivado()
     if not vivado:
         err("Vivado not found. Set --vivado or add it to PATH.")
-        err("Common locations: C:\\Xilinx\\Vivado\\2023.1\\bin\\vivado.bat")
+        err("Common locations:")
+        err("  Windows: C:\\Xilinx\\Vivado\\2023.1\\bin\\vivado.bat")
+        err("           C:\\AMDDesignTools\\2025.2\\Vivado\\bin\\vivado.bat")
+        err("  Linux:   /tools/Xilinx/Vivado/2023.1/bin/vivado")
+        err("           /opt/Xilinx/Vivado/2023.1/bin/vivado")
         sys.exit(2)
     ok(f"Vivado    : {vivado}")
 

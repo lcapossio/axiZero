@@ -99,14 +99,23 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
   // -------------------------------------------------------------------------
   // Dispatch to selected arbitration policy.
   // -------------------------------------------------------------------------
-  def arbitrate(requests: Bits, rrPtr: UInt): Bits = cfg.arbitration match {
+  def arbitrate(requests: Bits, rrPtr: UInt, credits: Vec[UInt] = null): Bits = cfg.arbitration match {
     case RoundRobin            => rrGrant(requests, rrPtr)
     case FixedPriority         => OHMasking.first(requests)
     case QosBased              => rrGrant(requests, rrPtr)  // AXI4-Lite has no QoS field — RR is correct
-    case WeightedRoundRobin(_) =>
-      SpinalWarning("[axiZero] WeightedRoundRobin arbitration is not yet implemented " +
-        "— falling back to round-robin.")
-      rrGrant(requests, rrPtr)
+    case WeightedRoundRobin(_) => wrrGrant(requests, rrPtr, credits)
+  }
+
+  // -------------------------------------------------------------------------
+  // Weighted round-robin: only consider masters that still have credit.
+  // When no eligible master has credit, the caller resets all credits.
+  // -------------------------------------------------------------------------
+  def wrrGrant(requests: Bits, rrPtr: UInt, credits: Vec[UInt]): Bits = {
+    val eligible = Bits(M bits)
+    for (mi <- 0 until M) eligible(mi) := requests(mi) && (credits(mi) =/= 0)
+    Mux(eligible.orR,
+      rrGrant(eligible, rrPtr),
+      rrGrant(requests, rrPtr))
   }
 
   // -------------------------------------------------------------------------
@@ -132,6 +141,26 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
   val rdActive  = Vec(Seq.fill(S)(RegInit(False)))
   val rdGranted = Vec(Seq.fill(S)(RegInit(U(0, ptrW bits))))
   val rdRrPtr   = Vec(Seq.fill(S)(RegInit(U(0, ptrW bits))))
+
+  // ── WRR credit counters (only allocated when WeightedRoundRobin) ────────
+  val wrrWeights = cfg.arbitration match {
+    case WeightedRoundRobin(w) => w
+    case _ => Seq.fill(M)(1)
+  }
+  val creditW = log2Up(wrrWeights.max + 1)
+
+  val wrCredits = cfg.arbitration match {
+    case WeightedRoundRobin(_) =>
+      Vec(Seq.tabulate(S)(_ =>
+        Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits))))))
+    case _ => null
+  }
+  val rdCredits = cfg.arbitration match {
+    case WeightedRoundRobin(_) =>
+      Vec(Seq.tabulate(S)(_ =>
+        Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits))))))
+    case _ => null
+  }
 
   // =========================================================================
   // Safe defaults (every signal driven before any when() overrides it).
@@ -170,7 +199,7 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
                         addrDecodeOH(io.masters(mi).aw.addr)(si)
       }
 
-      val grant    = arbitrate(requests, wrRrPtr(si))
+      val grant    = arbitrate(requests, wrRrPtr(si), if (wrCredits != null) wrCredits(si) else null)
       val grantIdx = ohToIdx(grant)
       val anyReq   = requests.orR
 
@@ -194,6 +223,34 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
           wrActive(si)  := True
           wrGranted(si) := grantIdx
           wrRrPtr(si)   := (grantIdx + 1).resized  // advance RR pointer
+
+          // WRR: decrement credit; reset all when exhausted
+          if (wrCredits != null) {
+            for (mi <- 0 until M) {
+              when(grantIdx === mi && wrCredits(si)(mi) =/= 0) {
+                wrCredits(si)(mi) := wrCredits(si)(mi) - 1
+              }
+            }
+            // Check if all requesting masters now have zero credit
+            val allExhausted = Bool()
+            allExhausted := True
+            for (mi <- 0 until M) {
+              when(requests(mi)) {
+                // After this grant, what would the credit be?
+                val afterDec = UInt(creditW bits)
+                afterDec := wrCredits(si)(mi)
+                when(grantIdx === mi && wrCredits(si)(mi) =/= 0) {
+                  afterDec := wrCredits(si)(mi) - 1
+                }
+                when(afterDec =/= 0) { allExhausted := False }
+              }
+            }
+            when(allExhausted) {
+              for (mi <- 0 until M) {
+                wrCredits(si)(mi) := U(wrrWeights(mi), creditW bits)
+              }
+            }
+          }
         }
       }
 
@@ -230,7 +287,7 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
                         addrDecodeOH(io.masters(mi).ar.addr)(si)
       }
 
-      val grant    = arbitrate(requests, rdRrPtr(si))
+      val grant    = arbitrate(requests, rdRrPtr(si), if (rdCredits != null) rdCredits(si) else null)
       val grantIdx = ohToIdx(grant)
       val anyReq   = requests.orR
 
@@ -247,6 +304,32 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
           rdActive(si)  := True
           rdGranted(si) := grantIdx
           rdRrPtr(si)   := (grantIdx + 1).resized
+
+          // WRR: decrement credit; reset all when exhausted
+          if (rdCredits != null) {
+            for (mi <- 0 until M) {
+              when(grantIdx === mi && rdCredits(si)(mi) =/= 0) {
+                rdCredits(si)(mi) := rdCredits(si)(mi) - 1
+              }
+            }
+            val allExhausted = Bool()
+            allExhausted := True
+            for (mi <- 0 until M) {
+              when(requests(mi)) {
+                val afterDec = UInt(creditW bits)
+                afterDec := rdCredits(si)(mi)
+                when(grantIdx === mi && rdCredits(si)(mi) =/= 0) {
+                  afterDec := rdCredits(si)(mi) - 1
+                }
+                when(afterDec =/= 0) { allExhausted := False }
+              }
+            }
+            when(allExhausted) {
+              for (mi <- 0 until M) {
+                rdCredits(si)(mi) := U(wrrWeights(mi), creditW bits)
+              }
+            }
+          }
         }
       }
 

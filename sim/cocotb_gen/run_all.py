@@ -38,6 +38,12 @@ SUITES = {
         "module":   "test_full",
         "test_dir": HERE / "full",
     },
+    "wrr": {
+        "rtl":      REPO_ROOT / "generated" / "MyLite_2M2S_WRR.v",
+        "toplevel": "AxiZeroLiteTop",
+        "module":   "test_wrr",
+        "test_dir": HERE / "wrr",
+    },
 }
 
 

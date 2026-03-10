@@ -50,7 +50,38 @@ designs:
         size: 0x10000
         data_width: 32
 
-  # ── Example 3: full AXI4 (with IDs and bursts) ───────────────────────────
+  # ── Example 3: fixed-priority arbitration ────────────────────────────────
+  #
+  # Master 0 (CPU) has highest priority; master 1 (DMA) is preempted whenever
+  # the CPU also requests the same slave.  Priority is purely positional —
+  # first master listed wins.  No extra keys beyond `arbitration` are needed.
+  # Warning: master 1 may starve if master 0 never idles.
+  #
+  - name: MyLite_2M4S_FP
+    type: lite
+    arbitration: fixed_priority   # master 0 = highest, master 1 = lowest
+
+    masters:
+      - addr_width: 32             # master 0: CPU (highest priority)
+        data_width: 32
+      - addr_width: 32             # master 1: DMA (lowest priority)
+        data_width: 32
+
+    slaves:
+      - base: 0x00000000    # SRAM
+        size: 0x1000
+        data_width: 32
+      - base: 0x00010000    # UART
+        size: 0x1000
+        data_width: 32
+      - base: 0x00020000    # GPIO
+        size: 0x1000
+        data_width: 32
+      - base: 0x00030000    # SPI
+        size: 0x1000
+        data_width: 32
+
+  # ── Example 4: full AXI4 (with IDs and bursts) ───────────────────────────
   - name: MyFull_2M2S
     type: full
     arbitration: round_robin
@@ -68,7 +99,7 @@ designs:
         size: 0x20000000    # 512 MB
         data_width: 64
 
-  # ── Example 4: mixed AXI4 + AXI4-Lite ports ──────────────────────────────
+  # ── Example 5: mixed AXI4 + AXI4-Lite ports ──────────────────────────────
   #
   # A DMA engine (full AXI4, id_width=4) and a CPU config port (AXI4-Lite)
   # share three slaves: DDR (full AXI4) plus UART and GPIO (AXI4-Lite).

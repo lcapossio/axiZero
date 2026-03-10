@@ -188,4 +188,114 @@ class LiteCrossbarSpec extends AnyFunSuite {
       cd.waitSampling(5)
     }
   }
+
+  // ── WRR config ──────────────────────────────────────────────────────────────
+
+  private def make2M2S_WRR = AxiZeroConfig.allLite(
+    numMasters  = 2,
+    numSlaves   = 2,
+    addrWidth   = 32,
+    dataWidth   = 32,
+    addressMap  = Seq(slave0Base -> slaveSize, slave1Base -> slaveSize),
+    arbitration = WeightedRoundRobin(Seq(3, 1))
+  )
+
+  // ── Test 5: WRR — weighted master gets proportionally more grants ─────────
+  //
+  // weights = [3, 1]: master 0 should get ~75% of grants when both contend
+  // continuously for the same slave.  We track how many writes each master
+  // completes by a fixed cycle deadline.  Master 0 should complete more.
+
+  test("WRR: weighted master gets proportionally more bandwidth") {
+    simCfg.compile(new AxiZeroLiteTop(make2M2S_WRR)).doSim { dut =>
+      val cd = dut.clockDomain
+      cd.forkStimulus(10)
+
+      SimHelpers.initMaster(dut.io.masters(0))
+      SimHelpers.initMaster(dut.io.masters(1))
+      SimHelpers.spawnLiteSlave(dut.io.slaves(0), cd)
+      SimHelpers.spawnLiteSlave(dut.io.slaves(1), cd)
+
+      cd.waitSampling(5)
+
+      // Both masters fire writes concurrently to the same slave.
+      // We record which master's AW handshake fires on each cycle by
+      // observing the completion order: master 0 (weight 3) should
+      // finish its batch faster than master 1 (weight 1).
+      val N = 16
+      var done0at = 0L
+      var done1at = 0L
+
+      val f0 = fork {
+        for (i <- 0 until N) {
+          SimHelpers.liteWrite(dut.io.masters(0), cd,
+            addr = slave0Base.toLong + (i * 4).toLong, data = 0xA0000000L | i)
+        }
+        done0at = simTime()
+      }
+      val f1 = fork {
+        for (i <- 0 until N) {
+          SimHelpers.liteWrite(dut.io.masters(1), cd,
+            addr = slave0Base.toLong + 0x1000L + (i * 4).toLong, data = 0xB0000000L | i)
+        }
+        done1at = simTime()
+      }
+
+      f0.join()
+      f1.join()
+
+      // Master 0 (weight 3) should finish before master 1 (weight 1)
+      // when both contend for the same slave.
+      assert(done0at < done1at,
+        s"WRR: master-0 (weight=3) should finish before master-1 (weight=1). " +
+        s"done0at=$done0at, done1at=$done1at")
+
+      cd.waitSampling(5)
+    }
+  }
+
+  // ── Test 6: WRR — both masters still make progress (no starvation) ────────
+
+  test("WRR: low-weight master still completes all writes") {
+    simCfg.compile(new AxiZeroLiteTop(make2M2S_WRR)).doSim { dut =>
+      val cd = dut.clockDomain
+      cd.forkStimulus(10)
+
+      SimHelpers.initMaster(dut.io.masters(0))
+      SimHelpers.initMaster(dut.io.masters(1))
+      val mem0 = SimHelpers.spawnLiteSlave(dut.io.slaves(0), cd)
+      SimHelpers.spawnLiteSlave(dut.io.slaves(1), cd)
+
+      cd.waitSampling(5)
+
+      // Master 1 (low weight) writes 16 distinct values
+      val f1 = fork {
+        for (i <- 0 until 16) {
+          SimHelpers.liteWrite(dut.io.masters(1), cd,
+            addr = slave0Base.toLong + 0x2000L + (i * 4).toLong,
+            data = 0xDEAD0000L | i)
+        }
+      }
+      // Master 0 (high weight) writes concurrently
+      val f0 = fork {
+        for (i <- 0 until 16) {
+          SimHelpers.liteWrite(dut.io.masters(0), cd,
+            addr = slave0Base.toLong + (i * 4).toLong,
+            data = 0xBEEF0000L | i)
+        }
+      }
+
+      f0.join()
+      f1.join()
+
+      // Verify all master-1 writes arrived
+      for (i <- 0 until 16) {
+        val got = mem0.getOrElse(slave0Base.toLong + 0x2000L + (i * 4).toLong, -1L)
+        assert(got == (0xDEAD0000L | i),
+          f"master-1 write[$i] expected 0x${0xDEAD0000L | i}%08x, got 0x$got%08x")
+      }
+
+      cd.waitSampling(5)
+    }
+  }
 }

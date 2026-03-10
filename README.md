@@ -1,6 +1,6 @@
 # axiZero
 
-[![CI](https://github.com/YOUR_ORG/axiZero/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_ORG/axiZero/actions/workflows/ci.yml)
+[![CI](https://github.com/bard0-design/axiZero/actions/workflows/ci.yml/badge.svg)](https://github.com/bard0-design/axiZero/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Board](https://img.shields.io/badge/HW--validated-Arty%20A7--100T-green)](hw/vivado/arty_a7/)
 
@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 26 SpinalSim + 12 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 28 SpinalSim + 18 cocotb tests pass.
 
 ---
 
@@ -25,14 +25,13 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - Per-port mixed AXI4 / AXI4-Lite with automatic adapter insertion
 - AXI4-Lite data-width conversion (zero-extend / truncate at port boundaries)
 - Register slices, per master and per slave port
-- Round-robin and fixed-priority arbitration
+- Round-robin, fixed-priority, and weighted round-robin arbitration
 - Pipelined mode (`max_outstanding > 1`) with per-slave W-route FIFOs and ID-based response routing
 - IPIF compatibility — AW and W are presented simultaneously to slaves that require it
 - YAML → Verilog generator with port-name post-processing for Vivado AXI naming conventions
 
 **Accepted in config but not yet implemented (falls back with elaboration warning):**
 
-- `weighted_round_robin` — falls back to round-robin
 - `qos` — falls back to round-robin (AXQOS field is ignored)
 
 **Not yet implemented:**
@@ -55,11 +54,12 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 | AXI4-Lite data-width conversion | ✓ | ✓ | ✓ | ✓ | — |
 | Full AXI4 data-width conversion | planned | ✓ | ✓ | ✓ | — |
 | Register slices | ✓ | ✓ | ✓ | ✓ | — |
-| Round-robin / fixed-priority arbitration | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Weighted / QoS arbitration | planned² | ✓ | — | — | ✓ |
+| Round-robin / fixed-priority | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Weighted round-robin | ✓ | ✓ | — | — | ✓ |
+| QoS arbitration | planned² | ✓ | — | — | ✓ |
 
 ¹ CERN-OHL-S is copyleft (share-alike); requires releasing your full digital design on request.
-² `weighted_round_robin` and `qos` are accepted as config values but currently fall back to round-robin with an elaboration warning.
+² `qos` is accepted as a config value but currently falls back to round-robin with an elaboration warning.
 
 ---
 
@@ -145,7 +145,7 @@ generated/
   AxiZeroLite_2M4S_RS.v     2 masters, 4 AXI4-Lite slaves, register slices on all ports
   AxiZeroLite_4M4S_FP.v     4 masters, 4 AXI4-Lite slaves, fixed priority
   MyFull_2M2S.v             2 masters, 2 AXI4 Full slaves, 64-bit, round-robin
-  MyLite_2M2S_WRR.v         2 masters, 2 AXI4-Lite slaves (WRR config, runs as round-robin)
+  MyLite_2M2S_WRR.v         2 masters, 2 AXI4-Lite slaves, weighted round-robin (3:1)
   MyMixed_2M3S.v            2 masters (Full + Lite), 3 mixed slaves
 ```
 
@@ -159,10 +159,25 @@ If none of these match your topology, generate a custom one with Option A.
 designs:
   - name: MySoC                  # output filename: MySoC.v
 
-    # Arbitration: round_robin and fixed_priority are fully implemented.
-    # weighted_round_robin and qos fall back to round_robin with a warning.
+    # Arbitration mode when multiple masters contend for the same slave.
+    #
+    # round_robin         — equal turns; no starvation (default)
+    #
+    # fixed_priority      — master 0 has highest priority, master N−1 lowest.
+    #                       Priority is determined solely by master order in the
+    #                       YAML (first listed = highest priority). No extra keys
+    #                       are needed. Lower-index masters always win contention,
+    #                       so higher-index masters may starve under sustained load.
+    #
+    # weighted_round_robin — like round_robin but master i receives weights[i]
+    #                        grants per arbitration round. Requires the `weights`
+    #                        key with one integer entry per master.
+    #
+    # qos                 — accepted but falls back to round_robin with a warning
+    #                       (AXQOS decoding not yet implemented)
+    #
     arbitration: round_robin     # round_robin | fixed_priority | weighted_round_robin | qos
-    weights: [3, 1]              # weighted_round_robin only; one entry per master
+    weights: [3, 1]              # weighted_round_robin only; one integer per master
 
     # Maximum outstanding transactions per slave per direction (AW and AR).
     # 1 = blocking: one transaction per slave at a time, no FIFOs.
@@ -220,11 +235,11 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-26 tests pass across 5 suites:
+28 tests pass across 5 suites:
 
 | Suite | Tests | Description |
 |---|---|---|
-| `LiteCrossbarSpec` | 4 | AXI4-Lite crossbar: arbitration, address decode |
+| `LiteCrossbarSpec` | 6 | AXI4-Lite crossbar: arbitration, address decode, WRR |
 | `PipelinedCrossbarSpec` | 8 | Full AXI4: bursts, back-pressure, outstanding transactions |
 | `MixedCrossbarSpec` | 4 | Full↔Lite adapters, mixed address maps |
 | `ArtySpec` | 5 | Sequence matching the Arty A7 hardware tests (T4, T5, T6, T9, combined) |
@@ -236,17 +251,19 @@ Tests the generated Verilog files directly using [cocotbext-axi](https://github.
 
 ```bash
 # requires: pip install cocotb cocotbext-axi
-python3 sim/cocotb_gen/run_all.py          # both suites
+python3 sim/cocotb_gen/run_all.py          # all suites
 python3 sim/cocotb_gen/run_all.py lite     # MyLite_1M4S.v only
 python3 sim/cocotb_gen/run_all.py full     # MyFull_2M2S.v only
+python3 sim/cocotb_gen/run_all.py wrr      # MyLite_2M2S_WRR.v only
 ```
 
-12 tests pass across 2 suites:
+18 tests pass across 3 suites:
 
 | Suite | DUT | Tests | Description |
 |---|---|---|---|
 | `lite` | `MyLite_1M4S.v` | 6 | AxiLiteMaster → 4-slave crossbar: single R/W, address routing, sequential writes, multi-slave pattern, overwrite isolation, 60× random |
 | `full` | `MyFull_2M2S.v` | 6 | AxiMaster → 2-slave crossbar: single R/W, address routing + isolation, 16-beat burst, 64-beat burst (AWLEN=63), alternating slaves, 40× random |
+| `wrr` | `MyLite_2M2S_WRR.v` | 6 | 2-master WRR crossbar: dual-master R/W, address routing, concurrent bandwidth, no starvation, concurrent different slaves, 80× random |
 
 ---
 
@@ -270,6 +287,18 @@ Vivado TCL scripts and MicroBlaze firmware: [`hw/vivado/arty_a7/`](hw/vivado/art
 ---
 
 ## Port naming
+
+```
+                          axiZero crossbar
+                  ┌──────────────────────────┐
+   CPU / DMA ────►│ s0_axi_*    m0_axi_*  ├────► BRAM
+                  │                          │
+   Config port ──►│ s1_axi_*    m1_axi_*  ├────► GPIO (Lite)
+                  │             m2_axi_*  ├────► UART (Lite)
+                  └──────────────────────────┘
+                 sN = slave-facing        mN = master-facing
+                (connect masters here)  (connect slaves here)
+```
 
 `sN_axi_*` are the slave-facing interfaces — connect your AXI masters (CPUs, DMAs) here.
 `mN_axi_*` are the master-facing interfaces — connect your AXI slaves (BRAMs, peripherals) here.

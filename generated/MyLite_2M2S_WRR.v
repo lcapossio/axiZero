@@ -1,7 +1,6 @@
-// Copyright (c) 2026 Leonardo Capossio — bard0 design  hello@bard0.com
-// SPDX-License-Identifier: MIT
 // Generator : SpinalHDL v1.10.1    git head : 2527c7c6b0fb0f95e5e1a5722a0be732b364ce43
 // Component : AxiZeroLiteTop
+// Git hash  : 5c15d51f991313b578825db8e4fa66a19c5ef423
 
 `timescale 1ns/1ps
 
@@ -659,14 +658,22 @@ module Axi4LiteCrossbar (
 
   wire       [1:0]    _zz_io_masters_0_b_payload_resp;
   wire       [1:0]    _zz_io_masters_1_b_payload_resp;
-  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l117_4;
-  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l117_4_1;
-  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l117_9;
-  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l117_9_1;
-  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l117_14;
-  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l117_14_1;
-  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l117_19;
-  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l117_19_1;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_9;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_9_1;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_9_2;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_9_3;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_19;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_19_1;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_19_2;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_19_3;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_29;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_29_1;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_29_2;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_29_3;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_39;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_39_1;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_39_2;
+  wire       [1:0]    _zz__zz_when_Axi4LiteCrossbar_l131_39_3;
   reg                 wrActive_0;
   reg                 wrActive_1;
   reg        [0:0]    wrGranted_0;
@@ -679,6 +686,14 @@ module Axi4LiteCrossbar (
   reg        [0:0]    rdGranted_1;
   reg        [0:0]    rdRrPtr_0;
   reg        [0:0]    rdRrPtr_1;
+  reg        [1:0]    wrCredits_0_0;
+  reg        [1:0]    wrCredits_0_1;
+  reg        [1:0]    wrCredits_1_0;
+  reg        [1:0]    wrCredits_1_1;
+  reg        [1:0]    rdCredits_0_0;
+  reg        [1:0]    rdCredits_0_1;
+  reg        [1:0]    rdCredits_1_0;
+  reg        [1:0]    rdCredits_1_1;
   wire       [33:0]   _zz_io_masters_0_r_payload_data;
   wire       [33:0]   _zz_io_masters_1_r_payload_data;
   wire       [34:0]   _zz_io_slaves_0_aw_payload_addr;
@@ -687,109 +702,185 @@ module Axi4LiteCrossbar (
   wire       [34:0]   _zz_io_slaves_1_aw_payload_addr;
   wire       [35:0]   _zz_io_slaves_1_w_payload_data;
   wire       [34:0]   _zz_io_slaves_1_ar_payload_addr;
-  wire                when_Axi4LiteCrossbar_l160;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l172;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l172_1;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l172_2;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l117;
-  wire                when_Axi4LiteCrossbar_l87;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_1;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_2;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_3;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_4;
+  wire                when_Axi4LiteCrossbar_l194;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l206;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l206_1;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l206_2;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l131;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l131_1;
+  wire                when_Axi4LiteCrossbar_l89;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_2;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_3;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_4;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l131_5;
+  wire                when_Axi4LiteCrossbar_l89_1;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_6;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_7;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_8;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_9;
   reg        [0:0]    _zz_wrGranted_0;
-  wire                when_Axi4LiteCrossbar_l117;
-  wire                when_Axi4LiteCrossbar_l117_1;
-  wire                when_Axi4LiteCrossbar_l172;
-  wire                when_Axi4LiteCrossbar_l176;
-  wire                when_Axi4LiteCrossbar_l176_1;
+  wire                when_Axi4LiteCrossbar_l131;
+  wire                when_Axi4LiteCrossbar_l131_1;
+  wire                when_Axi4LiteCrossbar_l206;
+  wire                when_Axi4LiteCrossbar_l210;
+  wire                when_Axi4LiteCrossbar_l210_1;
   wire                io_slaves_0_aw_fire;
-  wire                when_Axi4LiteCrossbar_l195;
-  wire                when_Axi4LiteCrossbar_l195_1;
-  wire                io_slaves_0_b_fire;
-  wire                when_Axi4LiteCrossbar_l160_1;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l172_3;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l172_4;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l172_5;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l117_5;
-  wire                when_Axi4LiteCrossbar_l87_1;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_6;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_7;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_8;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_9;
-  reg        [0:0]    _zz_wrGranted_1;
-  wire                when_Axi4LiteCrossbar_l117_2;
-  wire                when_Axi4LiteCrossbar_l117_3;
-  wire                when_Axi4LiteCrossbar_l172_1;
-  wire                when_Axi4LiteCrossbar_l176_2;
-  wire                when_Axi4LiteCrossbar_l176_3;
-  wire                io_slaves_1_aw_fire;
-  wire                when_Axi4LiteCrossbar_l195_2;
-  wire                when_Axi4LiteCrossbar_l195_3;
-  wire                io_slaves_1_b_fire;
-  wire                when_Axi4LiteCrossbar_l216;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l227;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l227_1;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l227_2;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l117_10;
-  wire                when_Axi4LiteCrossbar_l87_2;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_11;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_12;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_13;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_14;
-  reg        [0:0]    _zz_rdGranted_0;
-  wire                when_Axi4LiteCrossbar_l117_4;
-  wire                when_Axi4LiteCrossbar_l117_5;
-  wire                when_Axi4LiteCrossbar_l227;
   wire                when_Axi4LiteCrossbar_l230;
   wire                when_Axi4LiteCrossbar_l230_1;
-  wire                io_slaves_0_ar_fire;
-  wire                when_Axi4LiteCrossbar_l247;
-  wire                when_Axi4LiteCrossbar_l247_1;
-  wire                io_slaves_0_r_fire;
-  wire                when_Axi4LiteCrossbar_l216_1;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l227_3;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l227_4;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l227_5;
-  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l117_15;
-  wire                when_Axi4LiteCrossbar_l87_3;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_16;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_17;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_18;
-  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l117_19;
-  reg        [0:0]    _zz_rdGranted_1;
-  wire                when_Axi4LiteCrossbar_l117_6;
-  wire                when_Axi4LiteCrossbar_l117_7;
-  wire                when_Axi4LiteCrossbar_l227_1;
+  reg                 when_Axi4LiteCrossbar_l248;
+  wire                when_Axi4LiteCrossbar_l238;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l245;
+  wire                when_Axi4LiteCrossbar_l242;
+  wire                when_Axi4LiteCrossbar_l245;
+  wire                when_Axi4LiteCrossbar_l238_1;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l245_1;
+  wire                when_Axi4LiteCrossbar_l242_1;
+  wire                when_Axi4LiteCrossbar_l245_1;
+  wire                when_Axi4LiteCrossbar_l262;
+  wire                when_Axi4LiteCrossbar_l262_1;
+  wire                io_slaves_0_b_fire;
+  wire                when_Axi4LiteCrossbar_l194_1;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l206_3;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l206_4;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l206_5;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l131_10;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l131_11;
+  wire                when_Axi4LiteCrossbar_l89_2;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_12;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_13;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_14;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l131_15;
+  wire                when_Axi4LiteCrossbar_l89_3;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_16;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_17;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_18;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_19;
+  reg        [0:0]    _zz_wrGranted_1;
+  wire                when_Axi4LiteCrossbar_l131_2;
+  wire                when_Axi4LiteCrossbar_l131_3;
+  wire                when_Axi4LiteCrossbar_l206_1;
+  wire                when_Axi4LiteCrossbar_l210_2;
+  wire                when_Axi4LiteCrossbar_l210_3;
+  wire                io_slaves_1_aw_fire;
   wire                when_Axi4LiteCrossbar_l230_2;
   wire                when_Axi4LiteCrossbar_l230_3;
+  reg                 when_Axi4LiteCrossbar_l248_1;
+  wire                when_Axi4LiteCrossbar_l238_2;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l245_2;
+  wire                when_Axi4LiteCrossbar_l242_2;
+  wire                when_Axi4LiteCrossbar_l245_2;
+  wire                when_Axi4LiteCrossbar_l238_3;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l245_3;
+  wire                when_Axi4LiteCrossbar_l242_3;
+  wire                when_Axi4LiteCrossbar_l245_3;
+  wire                when_Axi4LiteCrossbar_l262_2;
+  wire                when_Axi4LiteCrossbar_l262_3;
+  wire                io_slaves_1_b_fire;
+  wire                when_Axi4LiteCrossbar_l283;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l294;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l294_1;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l294_2;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l131_20;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l131_21;
+  wire                when_Axi4LiteCrossbar_l89_4;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_22;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_23;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_24;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l131_25;
+  wire                when_Axi4LiteCrossbar_l89_5;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_26;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_27;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_28;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_29;
+  reg        [0:0]    _zz_rdGranted_0;
+  wire                when_Axi4LiteCrossbar_l131_4;
+  wire                when_Axi4LiteCrossbar_l131_5;
+  wire                when_Axi4LiteCrossbar_l294;
+  wire                when_Axi4LiteCrossbar_l297;
+  wire                when_Axi4LiteCrossbar_l297_1;
+  wire                io_slaves_0_ar_fire;
+  wire                when_Axi4LiteCrossbar_l311;
+  wire                when_Axi4LiteCrossbar_l311_1;
+  reg                 when_Axi4LiteCrossbar_l327;
+  wire                when_Axi4LiteCrossbar_l318;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l324;
+  wire                when_Axi4LiteCrossbar_l321;
+  wire                when_Axi4LiteCrossbar_l324;
+  wire                when_Axi4LiteCrossbar_l318_1;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l324_1;
+  wire                when_Axi4LiteCrossbar_l321_1;
+  wire                when_Axi4LiteCrossbar_l324_1;
+  wire                when_Axi4LiteCrossbar_l340;
+  wire                when_Axi4LiteCrossbar_l340_1;
+  wire                io_slaves_0_r_fire;
+  wire                when_Axi4LiteCrossbar_l283_1;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l294_3;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l294_4;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l294_5;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l131_30;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l131_31;
+  wire                when_Axi4LiteCrossbar_l89_6;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_32;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_33;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_34;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l131_35;
+  wire                when_Axi4LiteCrossbar_l89_7;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_36;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_37;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_38;
+  wire       [1:0]    _zz_when_Axi4LiteCrossbar_l131_39;
+  reg        [0:0]    _zz_rdGranted_1;
+  wire                when_Axi4LiteCrossbar_l131_6;
+  wire                when_Axi4LiteCrossbar_l131_7;
+  wire                when_Axi4LiteCrossbar_l294_1;
+  wire                when_Axi4LiteCrossbar_l297_2;
+  wire                when_Axi4LiteCrossbar_l297_3;
   wire                io_slaves_1_ar_fire;
-  wire                when_Axi4LiteCrossbar_l247_2;
-  wire                when_Axi4LiteCrossbar_l247_3;
+  wire                when_Axi4LiteCrossbar_l311_2;
+  wire                when_Axi4LiteCrossbar_l311_3;
+  reg                 when_Axi4LiteCrossbar_l327_1;
+  wire                when_Axi4LiteCrossbar_l318_2;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l324_2;
+  wire                when_Axi4LiteCrossbar_l321_2;
+  wire                when_Axi4LiteCrossbar_l324_2;
+  wire                when_Axi4LiteCrossbar_l318_3;
+  reg        [1:0]    _zz_when_Axi4LiteCrossbar_l324_3;
+  wire                when_Axi4LiteCrossbar_l321_3;
+  wire                when_Axi4LiteCrossbar_l324_3;
+  wire                when_Axi4LiteCrossbar_l340_2;
+  wire                when_Axi4LiteCrossbar_l340_3;
   wire                io_slaves_1_r_fire;
 
   assign _zz_io_masters_0_b_payload_resp = 2'b00;
   assign _zz_io_masters_1_b_payload_resp = 2'b00;
-  assign _zz__zz_when_Axi4LiteCrossbar_l117_4 = (_zz_when_Axi4LiteCrossbar_l117_2 - 2'b01);
-  assign _zz__zz_when_Axi4LiteCrossbar_l117_4_1 = (_zz_when_Axi4LiteCrossbar_l117_3 - 2'b01);
-  assign _zz__zz_when_Axi4LiteCrossbar_l117_9 = (_zz_when_Axi4LiteCrossbar_l117_7 - 2'b01);
-  assign _zz__zz_when_Axi4LiteCrossbar_l117_9_1 = (_zz_when_Axi4LiteCrossbar_l117_8 - 2'b01);
-  assign _zz__zz_when_Axi4LiteCrossbar_l117_14 = (_zz_when_Axi4LiteCrossbar_l117_12 - 2'b01);
-  assign _zz__zz_when_Axi4LiteCrossbar_l117_14_1 = (_zz_when_Axi4LiteCrossbar_l117_13 - 2'b01);
-  assign _zz__zz_when_Axi4LiteCrossbar_l117_19 = (_zz_when_Axi4LiteCrossbar_l117_17 - 2'b01);
-  assign _zz__zz_when_Axi4LiteCrossbar_l117_19_1 = (_zz_when_Axi4LiteCrossbar_l117_18 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_9 = (_zz_when_Axi4LiteCrossbar_l131_3 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_9_1 = (_zz_when_Axi4LiteCrossbar_l131_4 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_9_2 = (_zz_when_Axi4LiteCrossbar_l131_7 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_9_3 = (_zz_when_Axi4LiteCrossbar_l131_8 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_19 = (_zz_when_Axi4LiteCrossbar_l131_13 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_19_1 = (_zz_when_Axi4LiteCrossbar_l131_14 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_19_2 = (_zz_when_Axi4LiteCrossbar_l131_17 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_19_3 = (_zz_when_Axi4LiteCrossbar_l131_18 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_29 = (_zz_when_Axi4LiteCrossbar_l131_23 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_29_1 = (_zz_when_Axi4LiteCrossbar_l131_24 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_29_2 = (_zz_when_Axi4LiteCrossbar_l131_27 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_29_3 = (_zz_when_Axi4LiteCrossbar_l131_28 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_39 = (_zz_when_Axi4LiteCrossbar_l131_33 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_39_1 = (_zz_when_Axi4LiteCrossbar_l131_34 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_39_2 = (_zz_when_Axi4LiteCrossbar_l131_37 - 2'b01);
+  assign _zz__zz_when_Axi4LiteCrossbar_l131_39_3 = (_zz_when_Axi4LiteCrossbar_l131_38 - 2'b01);
   always @(*) begin
     s0_axi_awready = 1'b0;
-    if(when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l172) begin
-        if(when_Axi4LiteCrossbar_l176) begin
+    if(when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l206) begin
+        if(when_Axi4LiteCrossbar_l210) begin
           s0_axi_awready = m0_axi_awready;
         end
       end
     end
-    if(when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l172_1) begin
-        if(when_Axi4LiteCrossbar_l176_2) begin
+    if(when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l206_1) begin
+        if(when_Axi4LiteCrossbar_l210_2) begin
           s0_axi_awready = m1_axi_awready;
         end
       end
@@ -798,13 +889,25 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s0_axi_wready = 1'b0;
-    if(!when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l195) begin
+    if(when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l206) begin
+        if(when_Axi4LiteCrossbar_l210) begin
+          s0_axi_wready = m0_axi_wready;
+        end
+      end
+    end else begin
+      if(when_Axi4LiteCrossbar_l262) begin
         s0_axi_wready = m0_axi_wready;
       end
     end
-    if(!when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l195_2) begin
+    if(when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l206_1) begin
+        if(when_Axi4LiteCrossbar_l210_2) begin
+          s0_axi_wready = m1_axi_wready;
+        end
+      end
+    end else begin
+      if(when_Axi4LiteCrossbar_l262_2) begin
         s0_axi_wready = m1_axi_wready;
       end
     end
@@ -812,13 +915,13 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s0_axi_bvalid = 1'b0;
-    if(!when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l195) begin
+    if(!when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l262) begin
         s0_axi_bvalid = m0_axi_bvalid;
       end
     end
-    if(!when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l195_2) begin
+    if(!when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l262_2) begin
         s0_axi_bvalid = m1_axi_bvalid;
       end
     end
@@ -826,13 +929,13 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s0_axi_bresp = _zz_io_masters_0_b_payload_resp[1 : 0];
-    if(!when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l195) begin
+    if(!when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l262) begin
         s0_axi_bresp = m0_axi_bresp;
       end
     end
-    if(!when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l195_2) begin
+    if(!when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l262_2) begin
         s0_axi_bresp = m1_axi_bresp;
       end
     end
@@ -840,16 +943,16 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s0_axi_arready = 1'b0;
-    if(when_Axi4LiteCrossbar_l216) begin
-      if(when_Axi4LiteCrossbar_l227) begin
-        if(when_Axi4LiteCrossbar_l230) begin
+    if(when_Axi4LiteCrossbar_l283) begin
+      if(when_Axi4LiteCrossbar_l294) begin
+        if(when_Axi4LiteCrossbar_l297) begin
           s0_axi_arready = m0_axi_arready;
         end
       end
     end
-    if(when_Axi4LiteCrossbar_l216_1) begin
-      if(when_Axi4LiteCrossbar_l227_1) begin
-        if(when_Axi4LiteCrossbar_l230_2) begin
+    if(when_Axi4LiteCrossbar_l283_1) begin
+      if(when_Axi4LiteCrossbar_l294_1) begin
+        if(when_Axi4LiteCrossbar_l297_2) begin
           s0_axi_arready = m1_axi_arready;
         end
       end
@@ -858,13 +961,13 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s0_axi_rvalid = 1'b0;
-    if(!when_Axi4LiteCrossbar_l216) begin
-      if(when_Axi4LiteCrossbar_l247) begin
+    if(!when_Axi4LiteCrossbar_l283) begin
+      if(when_Axi4LiteCrossbar_l340) begin
         s0_axi_rvalid = m0_axi_rvalid;
       end
     end
-    if(!when_Axi4LiteCrossbar_l216_1) begin
-      if(when_Axi4LiteCrossbar_l247_2) begin
+    if(!when_Axi4LiteCrossbar_l283_1) begin
+      if(when_Axi4LiteCrossbar_l340_2) begin
         s0_axi_rvalid = m1_axi_rvalid;
       end
     end
@@ -873,13 +976,13 @@ module Axi4LiteCrossbar (
   assign _zz_io_masters_0_r_payload_data = 34'h000000000;
   always @(*) begin
     s0_axi_rdata = _zz_io_masters_0_r_payload_data[31 : 0];
-    if(!when_Axi4LiteCrossbar_l216) begin
-      if(when_Axi4LiteCrossbar_l247) begin
+    if(!when_Axi4LiteCrossbar_l283) begin
+      if(when_Axi4LiteCrossbar_l340) begin
         s0_axi_rdata = m0_axi_rdata;
       end
     end
-    if(!when_Axi4LiteCrossbar_l216_1) begin
-      if(when_Axi4LiteCrossbar_l247_2) begin
+    if(!when_Axi4LiteCrossbar_l283_1) begin
+      if(when_Axi4LiteCrossbar_l340_2) begin
         s0_axi_rdata = m1_axi_rdata;
       end
     end
@@ -887,13 +990,13 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s0_axi_rresp = _zz_io_masters_0_r_payload_data[33 : 32];
-    if(!when_Axi4LiteCrossbar_l216) begin
-      if(when_Axi4LiteCrossbar_l247) begin
+    if(!when_Axi4LiteCrossbar_l283) begin
+      if(when_Axi4LiteCrossbar_l340) begin
         s0_axi_rresp = m0_axi_rresp;
       end
     end
-    if(!when_Axi4LiteCrossbar_l216_1) begin
-      if(when_Axi4LiteCrossbar_l247_2) begin
+    if(!when_Axi4LiteCrossbar_l283_1) begin
+      if(when_Axi4LiteCrossbar_l340_2) begin
         s0_axi_rresp = m1_axi_rresp;
       end
     end
@@ -901,16 +1004,16 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s1_axi_awready = 1'b0;
-    if(when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l172) begin
-        if(when_Axi4LiteCrossbar_l176_1) begin
+    if(when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l206) begin
+        if(when_Axi4LiteCrossbar_l210_1) begin
           s1_axi_awready = m0_axi_awready;
         end
       end
     end
-    if(when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l172_1) begin
-        if(when_Axi4LiteCrossbar_l176_3) begin
+    if(when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l206_1) begin
+        if(when_Axi4LiteCrossbar_l210_3) begin
           s1_axi_awready = m1_axi_awready;
         end
       end
@@ -919,13 +1022,25 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s1_axi_wready = 1'b0;
-    if(!when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l195_1) begin
+    if(when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l206) begin
+        if(when_Axi4LiteCrossbar_l210_1) begin
+          s1_axi_wready = m0_axi_wready;
+        end
+      end
+    end else begin
+      if(when_Axi4LiteCrossbar_l262_1) begin
         s1_axi_wready = m0_axi_wready;
       end
     end
-    if(!when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l195_3) begin
+    if(when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l206_1) begin
+        if(when_Axi4LiteCrossbar_l210_3) begin
+          s1_axi_wready = m1_axi_wready;
+        end
+      end
+    end else begin
+      if(when_Axi4LiteCrossbar_l262_3) begin
         s1_axi_wready = m1_axi_wready;
       end
     end
@@ -933,13 +1048,13 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s1_axi_bvalid = 1'b0;
-    if(!when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l195_1) begin
+    if(!when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l262_1) begin
         s1_axi_bvalid = m0_axi_bvalid;
       end
     end
-    if(!when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l195_3) begin
+    if(!when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l262_3) begin
         s1_axi_bvalid = m1_axi_bvalid;
       end
     end
@@ -947,13 +1062,13 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s1_axi_bresp = _zz_io_masters_1_b_payload_resp[1 : 0];
-    if(!when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l195_1) begin
+    if(!when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l262_1) begin
         s1_axi_bresp = m0_axi_bresp;
       end
     end
-    if(!when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l195_3) begin
+    if(!when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l262_3) begin
         s1_axi_bresp = m1_axi_bresp;
       end
     end
@@ -961,16 +1076,16 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s1_axi_arready = 1'b0;
-    if(when_Axi4LiteCrossbar_l216) begin
-      if(when_Axi4LiteCrossbar_l227) begin
-        if(when_Axi4LiteCrossbar_l230_1) begin
+    if(when_Axi4LiteCrossbar_l283) begin
+      if(when_Axi4LiteCrossbar_l294) begin
+        if(when_Axi4LiteCrossbar_l297_1) begin
           s1_axi_arready = m0_axi_arready;
         end
       end
     end
-    if(when_Axi4LiteCrossbar_l216_1) begin
-      if(when_Axi4LiteCrossbar_l227_1) begin
-        if(when_Axi4LiteCrossbar_l230_3) begin
+    if(when_Axi4LiteCrossbar_l283_1) begin
+      if(when_Axi4LiteCrossbar_l294_1) begin
+        if(when_Axi4LiteCrossbar_l297_3) begin
           s1_axi_arready = m1_axi_arready;
         end
       end
@@ -979,13 +1094,13 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s1_axi_rvalid = 1'b0;
-    if(!when_Axi4LiteCrossbar_l216) begin
-      if(when_Axi4LiteCrossbar_l247_1) begin
+    if(!when_Axi4LiteCrossbar_l283) begin
+      if(when_Axi4LiteCrossbar_l340_1) begin
         s1_axi_rvalid = m0_axi_rvalid;
       end
     end
-    if(!when_Axi4LiteCrossbar_l216_1) begin
-      if(when_Axi4LiteCrossbar_l247_3) begin
+    if(!when_Axi4LiteCrossbar_l283_1) begin
+      if(when_Axi4LiteCrossbar_l340_3) begin
         s1_axi_rvalid = m1_axi_rvalid;
       end
     end
@@ -994,13 +1109,13 @@ module Axi4LiteCrossbar (
   assign _zz_io_masters_1_r_payload_data = 34'h000000000;
   always @(*) begin
     s1_axi_rdata = _zz_io_masters_1_r_payload_data[31 : 0];
-    if(!when_Axi4LiteCrossbar_l216) begin
-      if(when_Axi4LiteCrossbar_l247_1) begin
+    if(!when_Axi4LiteCrossbar_l283) begin
+      if(when_Axi4LiteCrossbar_l340_1) begin
         s1_axi_rdata = m0_axi_rdata;
       end
     end
-    if(!when_Axi4LiteCrossbar_l216_1) begin
-      if(when_Axi4LiteCrossbar_l247_3) begin
+    if(!when_Axi4LiteCrossbar_l283_1) begin
+      if(when_Axi4LiteCrossbar_l340_3) begin
         s1_axi_rdata = m1_axi_rdata;
       end
     end
@@ -1008,13 +1123,13 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     s1_axi_rresp = _zz_io_masters_1_r_payload_data[33 : 32];
-    if(!when_Axi4LiteCrossbar_l216) begin
-      if(when_Axi4LiteCrossbar_l247_1) begin
+    if(!when_Axi4LiteCrossbar_l283) begin
+      if(when_Axi4LiteCrossbar_l340_1) begin
         s1_axi_rresp = m0_axi_rresp;
       end
     end
-    if(!when_Axi4LiteCrossbar_l216_1) begin
-      if(when_Axi4LiteCrossbar_l247_3) begin
+    if(!when_Axi4LiteCrossbar_l283_1) begin
+      if(when_Axi4LiteCrossbar_l340_3) begin
         s1_axi_rresp = m1_axi_rresp;
       end
     end
@@ -1022,8 +1137,8 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m0_axi_awvalid = 1'b0;
-    if(when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l172) begin
+    if(when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l206) begin
         m0_axi_awvalid = 1'b1;
       end
     end
@@ -1032,12 +1147,12 @@ module Axi4LiteCrossbar (
   assign _zz_io_slaves_0_aw_payload_addr = 35'h000000000;
   always @(*) begin
     m0_axi_awaddr = _zz_io_slaves_0_aw_payload_addr[31 : 0];
-    if(when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l172) begin
-        if(when_Axi4LiteCrossbar_l176) begin
+    if(when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l206) begin
+        if(when_Axi4LiteCrossbar_l210) begin
           m0_axi_awaddr = s0_axi_awaddr;
         end
-        if(when_Axi4LiteCrossbar_l176_1) begin
+        if(when_Axi4LiteCrossbar_l210_1) begin
           m0_axi_awaddr = s1_axi_awaddr;
         end
       end
@@ -1046,12 +1161,12 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m0_axi_awprot = _zz_io_slaves_0_aw_payload_addr[34 : 32];
-    if(when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l172) begin
-        if(when_Axi4LiteCrossbar_l176) begin
+    if(when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l206) begin
+        if(when_Axi4LiteCrossbar_l210) begin
           m0_axi_awprot = s0_axi_awprot;
         end
-        if(when_Axi4LiteCrossbar_l176_1) begin
+        if(when_Axi4LiteCrossbar_l210_1) begin
           m0_axi_awprot = s1_axi_awprot;
         end
       end
@@ -1060,11 +1175,20 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m0_axi_wvalid = 1'b0;
-    if(!when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l195) begin
+    if(when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l206) begin
+        if(when_Axi4LiteCrossbar_l210) begin
+          m0_axi_wvalid = s0_axi_wvalid;
+        end
+        if(when_Axi4LiteCrossbar_l210_1) begin
+          m0_axi_wvalid = s1_axi_wvalid;
+        end
+      end
+    end else begin
+      if(when_Axi4LiteCrossbar_l262) begin
         m0_axi_wvalid = s0_axi_wvalid;
       end
-      if(when_Axi4LiteCrossbar_l195_1) begin
+      if(when_Axi4LiteCrossbar_l262_1) begin
         m0_axi_wvalid = s1_axi_wvalid;
       end
     end
@@ -1073,11 +1197,20 @@ module Axi4LiteCrossbar (
   assign _zz_io_slaves_0_w_payload_data = 36'h000000000;
   always @(*) begin
     m0_axi_wdata = _zz_io_slaves_0_w_payload_data[31 : 0];
-    if(!when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l195) begin
+    if(when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l206) begin
+        if(when_Axi4LiteCrossbar_l210) begin
+          m0_axi_wdata = s0_axi_wdata;
+        end
+        if(when_Axi4LiteCrossbar_l210_1) begin
+          m0_axi_wdata = s1_axi_wdata;
+        end
+      end
+    end else begin
+      if(when_Axi4LiteCrossbar_l262) begin
         m0_axi_wdata = s0_axi_wdata;
       end
-      if(when_Axi4LiteCrossbar_l195_1) begin
+      if(when_Axi4LiteCrossbar_l262_1) begin
         m0_axi_wdata = s1_axi_wdata;
       end
     end
@@ -1085,11 +1218,20 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m0_axi_wstrb = _zz_io_slaves_0_w_payload_data[35 : 32];
-    if(!when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l195) begin
+    if(when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l206) begin
+        if(when_Axi4LiteCrossbar_l210) begin
+          m0_axi_wstrb = s0_axi_wstrb;
+        end
+        if(when_Axi4LiteCrossbar_l210_1) begin
+          m0_axi_wstrb = s1_axi_wstrb;
+        end
+      end
+    end else begin
+      if(when_Axi4LiteCrossbar_l262) begin
         m0_axi_wstrb = s0_axi_wstrb;
       end
-      if(when_Axi4LiteCrossbar_l195_1) begin
+      if(when_Axi4LiteCrossbar_l262_1) begin
         m0_axi_wstrb = s1_axi_wstrb;
       end
     end
@@ -1097,11 +1239,11 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m0_axi_bready = 1'b0;
-    if(!when_Axi4LiteCrossbar_l160) begin
-      if(when_Axi4LiteCrossbar_l195) begin
+    if(!when_Axi4LiteCrossbar_l194) begin
+      if(when_Axi4LiteCrossbar_l262) begin
         m0_axi_bready = s0_axi_bready;
       end
-      if(when_Axi4LiteCrossbar_l195_1) begin
+      if(when_Axi4LiteCrossbar_l262_1) begin
         m0_axi_bready = s1_axi_bready;
       end
     end
@@ -1109,8 +1251,8 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m0_axi_arvalid = 1'b0;
-    if(when_Axi4LiteCrossbar_l216) begin
-      if(when_Axi4LiteCrossbar_l227) begin
+    if(when_Axi4LiteCrossbar_l283) begin
+      if(when_Axi4LiteCrossbar_l294) begin
         m0_axi_arvalid = 1'b1;
       end
     end
@@ -1119,12 +1261,12 @@ module Axi4LiteCrossbar (
   assign _zz_io_slaves_0_ar_payload_addr = 35'h000000000;
   always @(*) begin
     m0_axi_araddr = _zz_io_slaves_0_ar_payload_addr[31 : 0];
-    if(when_Axi4LiteCrossbar_l216) begin
-      if(when_Axi4LiteCrossbar_l227) begin
-        if(when_Axi4LiteCrossbar_l230) begin
+    if(when_Axi4LiteCrossbar_l283) begin
+      if(when_Axi4LiteCrossbar_l294) begin
+        if(when_Axi4LiteCrossbar_l297) begin
           m0_axi_araddr = s0_axi_araddr;
         end
-        if(when_Axi4LiteCrossbar_l230_1) begin
+        if(when_Axi4LiteCrossbar_l297_1) begin
           m0_axi_araddr = s1_axi_araddr;
         end
       end
@@ -1133,12 +1275,12 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m0_axi_arprot = _zz_io_slaves_0_ar_payload_addr[34 : 32];
-    if(when_Axi4LiteCrossbar_l216) begin
-      if(when_Axi4LiteCrossbar_l227) begin
-        if(when_Axi4LiteCrossbar_l230) begin
+    if(when_Axi4LiteCrossbar_l283) begin
+      if(when_Axi4LiteCrossbar_l294) begin
+        if(when_Axi4LiteCrossbar_l297) begin
           m0_axi_arprot = s0_axi_arprot;
         end
-        if(when_Axi4LiteCrossbar_l230_1) begin
+        if(when_Axi4LiteCrossbar_l297_1) begin
           m0_axi_arprot = s1_axi_arprot;
         end
       end
@@ -1147,11 +1289,11 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m0_axi_rready = 1'b0;
-    if(!when_Axi4LiteCrossbar_l216) begin
-      if(when_Axi4LiteCrossbar_l247) begin
+    if(!when_Axi4LiteCrossbar_l283) begin
+      if(when_Axi4LiteCrossbar_l340) begin
         m0_axi_rready = s0_axi_rready;
       end
-      if(when_Axi4LiteCrossbar_l247_1) begin
+      if(when_Axi4LiteCrossbar_l340_1) begin
         m0_axi_rready = s1_axi_rready;
       end
     end
@@ -1159,8 +1301,8 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m1_axi_awvalid = 1'b0;
-    if(when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l172_1) begin
+    if(when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l206_1) begin
         m1_axi_awvalid = 1'b1;
       end
     end
@@ -1169,12 +1311,12 @@ module Axi4LiteCrossbar (
   assign _zz_io_slaves_1_aw_payload_addr = 35'h000000000;
   always @(*) begin
     m1_axi_awaddr = _zz_io_slaves_1_aw_payload_addr[31 : 0];
-    if(when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l172_1) begin
-        if(when_Axi4LiteCrossbar_l176_2) begin
+    if(when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l206_1) begin
+        if(when_Axi4LiteCrossbar_l210_2) begin
           m1_axi_awaddr = s0_axi_awaddr;
         end
-        if(when_Axi4LiteCrossbar_l176_3) begin
+        if(when_Axi4LiteCrossbar_l210_3) begin
           m1_axi_awaddr = s1_axi_awaddr;
         end
       end
@@ -1183,12 +1325,12 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m1_axi_awprot = _zz_io_slaves_1_aw_payload_addr[34 : 32];
-    if(when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l172_1) begin
-        if(when_Axi4LiteCrossbar_l176_2) begin
+    if(when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l206_1) begin
+        if(when_Axi4LiteCrossbar_l210_2) begin
           m1_axi_awprot = s0_axi_awprot;
         end
-        if(when_Axi4LiteCrossbar_l176_3) begin
+        if(when_Axi4LiteCrossbar_l210_3) begin
           m1_axi_awprot = s1_axi_awprot;
         end
       end
@@ -1197,11 +1339,20 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m1_axi_wvalid = 1'b0;
-    if(!when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l195_2) begin
+    if(when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l206_1) begin
+        if(when_Axi4LiteCrossbar_l210_2) begin
+          m1_axi_wvalid = s0_axi_wvalid;
+        end
+        if(when_Axi4LiteCrossbar_l210_3) begin
+          m1_axi_wvalid = s1_axi_wvalid;
+        end
+      end
+    end else begin
+      if(when_Axi4LiteCrossbar_l262_2) begin
         m1_axi_wvalid = s0_axi_wvalid;
       end
-      if(when_Axi4LiteCrossbar_l195_3) begin
+      if(when_Axi4LiteCrossbar_l262_3) begin
         m1_axi_wvalid = s1_axi_wvalid;
       end
     end
@@ -1210,11 +1361,20 @@ module Axi4LiteCrossbar (
   assign _zz_io_slaves_1_w_payload_data = 36'h000000000;
   always @(*) begin
     m1_axi_wdata = _zz_io_slaves_1_w_payload_data[31 : 0];
-    if(!when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l195_2) begin
+    if(when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l206_1) begin
+        if(when_Axi4LiteCrossbar_l210_2) begin
+          m1_axi_wdata = s0_axi_wdata;
+        end
+        if(when_Axi4LiteCrossbar_l210_3) begin
+          m1_axi_wdata = s1_axi_wdata;
+        end
+      end
+    end else begin
+      if(when_Axi4LiteCrossbar_l262_2) begin
         m1_axi_wdata = s0_axi_wdata;
       end
-      if(when_Axi4LiteCrossbar_l195_3) begin
+      if(when_Axi4LiteCrossbar_l262_3) begin
         m1_axi_wdata = s1_axi_wdata;
       end
     end
@@ -1222,11 +1382,20 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m1_axi_wstrb = _zz_io_slaves_1_w_payload_data[35 : 32];
-    if(!when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l195_2) begin
+    if(when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l206_1) begin
+        if(when_Axi4LiteCrossbar_l210_2) begin
+          m1_axi_wstrb = s0_axi_wstrb;
+        end
+        if(when_Axi4LiteCrossbar_l210_3) begin
+          m1_axi_wstrb = s1_axi_wstrb;
+        end
+      end
+    end else begin
+      if(when_Axi4LiteCrossbar_l262_2) begin
         m1_axi_wstrb = s0_axi_wstrb;
       end
-      if(when_Axi4LiteCrossbar_l195_3) begin
+      if(when_Axi4LiteCrossbar_l262_3) begin
         m1_axi_wstrb = s1_axi_wstrb;
       end
     end
@@ -1234,11 +1403,11 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m1_axi_bready = 1'b0;
-    if(!when_Axi4LiteCrossbar_l160_1) begin
-      if(when_Axi4LiteCrossbar_l195_2) begin
+    if(!when_Axi4LiteCrossbar_l194_1) begin
+      if(when_Axi4LiteCrossbar_l262_2) begin
         m1_axi_bready = s0_axi_bready;
       end
-      if(when_Axi4LiteCrossbar_l195_3) begin
+      if(when_Axi4LiteCrossbar_l262_3) begin
         m1_axi_bready = s1_axi_bready;
       end
     end
@@ -1246,8 +1415,8 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m1_axi_arvalid = 1'b0;
-    if(when_Axi4LiteCrossbar_l216_1) begin
-      if(when_Axi4LiteCrossbar_l227_1) begin
+    if(when_Axi4LiteCrossbar_l283_1) begin
+      if(when_Axi4LiteCrossbar_l294_1) begin
         m1_axi_arvalid = 1'b1;
       end
     end
@@ -1256,12 +1425,12 @@ module Axi4LiteCrossbar (
   assign _zz_io_slaves_1_ar_payload_addr = 35'h000000000;
   always @(*) begin
     m1_axi_araddr = _zz_io_slaves_1_ar_payload_addr[31 : 0];
-    if(when_Axi4LiteCrossbar_l216_1) begin
-      if(when_Axi4LiteCrossbar_l227_1) begin
-        if(when_Axi4LiteCrossbar_l230_2) begin
+    if(when_Axi4LiteCrossbar_l283_1) begin
+      if(when_Axi4LiteCrossbar_l294_1) begin
+        if(when_Axi4LiteCrossbar_l297_2) begin
           m1_axi_araddr = s0_axi_araddr;
         end
-        if(when_Axi4LiteCrossbar_l230_3) begin
+        if(when_Axi4LiteCrossbar_l297_3) begin
           m1_axi_araddr = s1_axi_araddr;
         end
       end
@@ -1270,12 +1439,12 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m1_axi_arprot = _zz_io_slaves_1_ar_payload_addr[34 : 32];
-    if(when_Axi4LiteCrossbar_l216_1) begin
-      if(when_Axi4LiteCrossbar_l227_1) begin
-        if(when_Axi4LiteCrossbar_l230_2) begin
+    if(when_Axi4LiteCrossbar_l283_1) begin
+      if(when_Axi4LiteCrossbar_l294_1) begin
+        if(when_Axi4LiteCrossbar_l297_2) begin
           m1_axi_arprot = s0_axi_arprot;
         end
-        if(when_Axi4LiteCrossbar_l230_3) begin
+        if(when_Axi4LiteCrossbar_l297_3) begin
           m1_axi_arprot = s1_axi_arprot;
         end
       end
@@ -1284,203 +1453,411 @@ module Axi4LiteCrossbar (
 
   always @(*) begin
     m1_axi_rready = 1'b0;
-    if(!when_Axi4LiteCrossbar_l216_1) begin
-      if(when_Axi4LiteCrossbar_l247_2) begin
+    if(!when_Axi4LiteCrossbar_l283_1) begin
+      if(when_Axi4LiteCrossbar_l340_2) begin
         m1_axi_rready = s0_axi_rready;
       end
-      if(when_Axi4LiteCrossbar_l247_3) begin
+      if(when_Axi4LiteCrossbar_l340_3) begin
         m1_axi_rready = s1_axi_rready;
       end
     end
   end
 
-  assign when_Axi4LiteCrossbar_l160 = (! wrActive_0);
+  assign when_Axi4LiteCrossbar_l194 = (! wrActive_0);
   always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l172_1[0] = ((32'h00000000 <= s0_axi_awaddr) && (s0_axi_awaddr < 32'h00010000));
-    _zz_when_Axi4LiteCrossbar_l172_1[1] = ((32'h00010000 <= s0_axi_awaddr) && (s0_axi_awaddr < 32'h00020000));
+    _zz_when_Axi4LiteCrossbar_l206_1[0] = ((32'h00000000 <= s0_axi_awaddr) && (s0_axi_awaddr < 32'h00010000));
+    _zz_when_Axi4LiteCrossbar_l206_1[1] = ((32'h00010000 <= s0_axi_awaddr) && (s0_axi_awaddr < 32'h00020000));
   end
 
   always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l172[0] = (s0_axi_awvalid && _zz_when_Axi4LiteCrossbar_l172_1[0]);
-    _zz_when_Axi4LiteCrossbar_l172[1] = (s1_axi_awvalid && _zz_when_Axi4LiteCrossbar_l172_2[0]);
+    _zz_when_Axi4LiteCrossbar_l206[0] = (s0_axi_awvalid && _zz_when_Axi4LiteCrossbar_l206_1[0]);
+    _zz_when_Axi4LiteCrossbar_l206[1] = (s1_axi_awvalid && _zz_when_Axi4LiteCrossbar_l206_2[0]);
   end
 
   always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l172_2[0] = ((32'h00000000 <= s1_axi_awaddr) && (s1_axi_awaddr < 32'h00010000));
-    _zz_when_Axi4LiteCrossbar_l172_2[1] = ((32'h00010000 <= s1_axi_awaddr) && (s1_axi_awaddr < 32'h00020000));
+    _zz_when_Axi4LiteCrossbar_l206_2[0] = ((32'h00000000 <= s1_axi_awaddr) && (s1_axi_awaddr < 32'h00010000));
+    _zz_when_Axi4LiteCrossbar_l206_2[1] = ((32'h00010000 <= s1_axi_awaddr) && (s1_axi_awaddr < 32'h00020000));
   end
 
   always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l117 = 2'b00;
-    if(when_Axi4LiteCrossbar_l87) begin
-      _zz_when_Axi4LiteCrossbar_l117 = 2'b01;
+    _zz_when_Axi4LiteCrossbar_l131[0] = (_zz_when_Axi4LiteCrossbar_l206[0] && (wrCredits_0_0 != 2'b00));
+    _zz_when_Axi4LiteCrossbar_l131[1] = (_zz_when_Axi4LiteCrossbar_l206[1] && (wrCredits_0_1 != 2'b00));
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l131_1 = 2'b00;
+    if(when_Axi4LiteCrossbar_l89) begin
+      _zz_when_Axi4LiteCrossbar_l131_1 = 2'b01;
     end
   end
 
-  assign when_Axi4LiteCrossbar_l87 = (1'b1 <= wrRrPtr_0);
-  assign _zz_when_Axi4LiteCrossbar_l117_1 = (_zz_when_Axi4LiteCrossbar_l172 & (~ _zz_when_Axi4LiteCrossbar_l117));
-  assign _zz_when_Axi4LiteCrossbar_l117_2 = _zz_when_Axi4LiteCrossbar_l117_1;
-  assign _zz_when_Axi4LiteCrossbar_l117_3 = _zz_when_Axi4LiteCrossbar_l172;
-  assign _zz_when_Axi4LiteCrossbar_l117_4 = ((|_zz_when_Axi4LiteCrossbar_l117_1) ? (_zz_when_Axi4LiteCrossbar_l117_2 & (~ _zz__zz_when_Axi4LiteCrossbar_l117_4)) : (_zz_when_Axi4LiteCrossbar_l117_3 & (~ _zz__zz_when_Axi4LiteCrossbar_l117_4_1)));
+  assign when_Axi4LiteCrossbar_l89 = (1'b1 <= wrRrPtr_0);
+  assign _zz_when_Axi4LiteCrossbar_l131_2 = (_zz_when_Axi4LiteCrossbar_l131 & (~ _zz_when_Axi4LiteCrossbar_l131_1));
+  assign _zz_when_Axi4LiteCrossbar_l131_3 = _zz_when_Axi4LiteCrossbar_l131_2;
+  assign _zz_when_Axi4LiteCrossbar_l131_4 = _zz_when_Axi4LiteCrossbar_l131;
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l131_5 = 2'b00;
+    if(when_Axi4LiteCrossbar_l89_1) begin
+      _zz_when_Axi4LiteCrossbar_l131_5 = 2'b01;
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l89_1 = (1'b1 <= wrRrPtr_0);
+  assign _zz_when_Axi4LiteCrossbar_l131_6 = (_zz_when_Axi4LiteCrossbar_l206 & (~ _zz_when_Axi4LiteCrossbar_l131_5));
+  assign _zz_when_Axi4LiteCrossbar_l131_7 = _zz_when_Axi4LiteCrossbar_l131_6;
+  assign _zz_when_Axi4LiteCrossbar_l131_8 = _zz_when_Axi4LiteCrossbar_l206;
+  assign _zz_when_Axi4LiteCrossbar_l131_9 = ((|_zz_when_Axi4LiteCrossbar_l131) ? ((|_zz_when_Axi4LiteCrossbar_l131_2) ? (_zz_when_Axi4LiteCrossbar_l131_3 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_9)) : (_zz_when_Axi4LiteCrossbar_l131_4 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_9_1))) : ((|_zz_when_Axi4LiteCrossbar_l131_6) ? (_zz_when_Axi4LiteCrossbar_l131_7 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_9_2)) : (_zz_when_Axi4LiteCrossbar_l131_8 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_9_3))));
   always @(*) begin
     _zz_wrGranted_0 = 1'b0;
-    if(when_Axi4LiteCrossbar_l117) begin
+    if(when_Axi4LiteCrossbar_l131) begin
       _zz_wrGranted_0 = 1'b0;
     end
-    if(when_Axi4LiteCrossbar_l117_1) begin
+    if(when_Axi4LiteCrossbar_l131_1) begin
       _zz_wrGranted_0 = 1'b1;
     end
   end
 
-  assign when_Axi4LiteCrossbar_l117 = _zz_when_Axi4LiteCrossbar_l117_4[0];
-  assign when_Axi4LiteCrossbar_l117_1 = _zz_when_Axi4LiteCrossbar_l117_4[1];
-  assign when_Axi4LiteCrossbar_l172 = (|_zz_when_Axi4LiteCrossbar_l172);
-  assign when_Axi4LiteCrossbar_l176 = (_zz_wrGranted_0 == 1'b0);
-  assign when_Axi4LiteCrossbar_l176_1 = (_zz_wrGranted_0 == 1'b1);
+  assign when_Axi4LiteCrossbar_l131 = _zz_when_Axi4LiteCrossbar_l131_9[0];
+  assign when_Axi4LiteCrossbar_l131_1 = _zz_when_Axi4LiteCrossbar_l131_9[1];
+  assign when_Axi4LiteCrossbar_l206 = (|_zz_when_Axi4LiteCrossbar_l206);
+  assign when_Axi4LiteCrossbar_l210 = (_zz_wrGranted_0 == 1'b0);
+  assign when_Axi4LiteCrossbar_l210_1 = (_zz_wrGranted_0 == 1'b1);
   assign io_slaves_0_aw_fire = (m0_axi_awvalid && m0_axi_awready);
-  assign when_Axi4LiteCrossbar_l195 = (wrGranted_0 == 1'b0);
-  assign when_Axi4LiteCrossbar_l195_1 = (wrGranted_0 == 1'b1);
-  assign io_slaves_0_b_fire = (m0_axi_bvalid && m0_axi_bready);
-  assign when_Axi4LiteCrossbar_l160_1 = (! wrActive_1);
+  assign when_Axi4LiteCrossbar_l230 = ((_zz_wrGranted_0 == 1'b0) && (wrCredits_0_0 != 2'b00));
+  assign when_Axi4LiteCrossbar_l230_1 = ((_zz_wrGranted_0 == 1'b1) && (wrCredits_0_1 != 2'b00));
   always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l172_4[0] = ((32'h00000000 <= s0_axi_awaddr) && (s0_axi_awaddr < 32'h00010000));
-    _zz_when_Axi4LiteCrossbar_l172_4[1] = ((32'h00010000 <= s0_axi_awaddr) && (s0_axi_awaddr < 32'h00020000));
-  end
-
-  always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l172_3[0] = (s0_axi_awvalid && _zz_when_Axi4LiteCrossbar_l172_4[1]);
-    _zz_when_Axi4LiteCrossbar_l172_3[1] = (s1_axi_awvalid && _zz_when_Axi4LiteCrossbar_l172_5[1]);
-  end
-
-  always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l172_5[0] = ((32'h00000000 <= s1_axi_awaddr) && (s1_axi_awaddr < 32'h00010000));
-    _zz_when_Axi4LiteCrossbar_l172_5[1] = ((32'h00010000 <= s1_axi_awaddr) && (s1_axi_awaddr < 32'h00020000));
-  end
-
-  always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l117_5 = 2'b00;
-    if(when_Axi4LiteCrossbar_l87_1) begin
-      _zz_when_Axi4LiteCrossbar_l117_5 = 2'b01;
+    when_Axi4LiteCrossbar_l248 = 1'b1;
+    if(when_Axi4LiteCrossbar_l238) begin
+      if(when_Axi4LiteCrossbar_l245) begin
+        when_Axi4LiteCrossbar_l248 = 1'b0;
+      end
+    end
+    if(when_Axi4LiteCrossbar_l238_1) begin
+      if(when_Axi4LiteCrossbar_l245_1) begin
+        when_Axi4LiteCrossbar_l248 = 1'b0;
+      end
     end
   end
 
-  assign when_Axi4LiteCrossbar_l87_1 = (1'b1 <= wrRrPtr_1);
-  assign _zz_when_Axi4LiteCrossbar_l117_6 = (_zz_when_Axi4LiteCrossbar_l172_3 & (~ _zz_when_Axi4LiteCrossbar_l117_5));
-  assign _zz_when_Axi4LiteCrossbar_l117_7 = _zz_when_Axi4LiteCrossbar_l117_6;
-  assign _zz_when_Axi4LiteCrossbar_l117_8 = _zz_when_Axi4LiteCrossbar_l172_3;
-  assign _zz_when_Axi4LiteCrossbar_l117_9 = ((|_zz_when_Axi4LiteCrossbar_l117_6) ? (_zz_when_Axi4LiteCrossbar_l117_7 & (~ _zz__zz_when_Axi4LiteCrossbar_l117_9)) : (_zz_when_Axi4LiteCrossbar_l117_8 & (~ _zz__zz_when_Axi4LiteCrossbar_l117_9_1)));
+  assign when_Axi4LiteCrossbar_l238 = _zz_when_Axi4LiteCrossbar_l206[0];
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l245 = wrCredits_0_0;
+    if(when_Axi4LiteCrossbar_l242) begin
+      _zz_when_Axi4LiteCrossbar_l245 = (wrCredits_0_0 - 2'b01);
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l242 = ((_zz_wrGranted_0 == 1'b0) && (wrCredits_0_0 != 2'b00));
+  assign when_Axi4LiteCrossbar_l245 = (_zz_when_Axi4LiteCrossbar_l245 != 2'b00);
+  assign when_Axi4LiteCrossbar_l238_1 = _zz_when_Axi4LiteCrossbar_l206[1];
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l245_1 = wrCredits_0_1;
+    if(when_Axi4LiteCrossbar_l242_1) begin
+      _zz_when_Axi4LiteCrossbar_l245_1 = (wrCredits_0_1 - 2'b01);
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l242_1 = ((_zz_wrGranted_0 == 1'b1) && (wrCredits_0_1 != 2'b00));
+  assign when_Axi4LiteCrossbar_l245_1 = (_zz_when_Axi4LiteCrossbar_l245_1 != 2'b00);
+  assign when_Axi4LiteCrossbar_l262 = (wrGranted_0 == 1'b0);
+  assign when_Axi4LiteCrossbar_l262_1 = (wrGranted_0 == 1'b1);
+  assign io_slaves_0_b_fire = (m0_axi_bvalid && m0_axi_bready);
+  assign when_Axi4LiteCrossbar_l194_1 = (! wrActive_1);
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l206_4[0] = ((32'h00000000 <= s0_axi_awaddr) && (s0_axi_awaddr < 32'h00010000));
+    _zz_when_Axi4LiteCrossbar_l206_4[1] = ((32'h00010000 <= s0_axi_awaddr) && (s0_axi_awaddr < 32'h00020000));
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l206_3[0] = (s0_axi_awvalid && _zz_when_Axi4LiteCrossbar_l206_4[1]);
+    _zz_when_Axi4LiteCrossbar_l206_3[1] = (s1_axi_awvalid && _zz_when_Axi4LiteCrossbar_l206_5[1]);
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l206_5[0] = ((32'h00000000 <= s1_axi_awaddr) && (s1_axi_awaddr < 32'h00010000));
+    _zz_when_Axi4LiteCrossbar_l206_5[1] = ((32'h00010000 <= s1_axi_awaddr) && (s1_axi_awaddr < 32'h00020000));
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l131_10[0] = (_zz_when_Axi4LiteCrossbar_l206_3[0] && (wrCredits_1_0 != 2'b00));
+    _zz_when_Axi4LiteCrossbar_l131_10[1] = (_zz_when_Axi4LiteCrossbar_l206_3[1] && (wrCredits_1_1 != 2'b00));
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l131_11 = 2'b00;
+    if(when_Axi4LiteCrossbar_l89_2) begin
+      _zz_when_Axi4LiteCrossbar_l131_11 = 2'b01;
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l89_2 = (1'b1 <= wrRrPtr_1);
+  assign _zz_when_Axi4LiteCrossbar_l131_12 = (_zz_when_Axi4LiteCrossbar_l131_10 & (~ _zz_when_Axi4LiteCrossbar_l131_11));
+  assign _zz_when_Axi4LiteCrossbar_l131_13 = _zz_when_Axi4LiteCrossbar_l131_12;
+  assign _zz_when_Axi4LiteCrossbar_l131_14 = _zz_when_Axi4LiteCrossbar_l131_10;
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l131_15 = 2'b00;
+    if(when_Axi4LiteCrossbar_l89_3) begin
+      _zz_when_Axi4LiteCrossbar_l131_15 = 2'b01;
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l89_3 = (1'b1 <= wrRrPtr_1);
+  assign _zz_when_Axi4LiteCrossbar_l131_16 = (_zz_when_Axi4LiteCrossbar_l206_3 & (~ _zz_when_Axi4LiteCrossbar_l131_15));
+  assign _zz_when_Axi4LiteCrossbar_l131_17 = _zz_when_Axi4LiteCrossbar_l131_16;
+  assign _zz_when_Axi4LiteCrossbar_l131_18 = _zz_when_Axi4LiteCrossbar_l206_3;
+  assign _zz_when_Axi4LiteCrossbar_l131_19 = ((|_zz_when_Axi4LiteCrossbar_l131_10) ? ((|_zz_when_Axi4LiteCrossbar_l131_12) ? (_zz_when_Axi4LiteCrossbar_l131_13 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_19)) : (_zz_when_Axi4LiteCrossbar_l131_14 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_19_1))) : ((|_zz_when_Axi4LiteCrossbar_l131_16) ? (_zz_when_Axi4LiteCrossbar_l131_17 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_19_2)) : (_zz_when_Axi4LiteCrossbar_l131_18 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_19_3))));
   always @(*) begin
     _zz_wrGranted_1 = 1'b0;
-    if(when_Axi4LiteCrossbar_l117_2) begin
+    if(when_Axi4LiteCrossbar_l131_2) begin
       _zz_wrGranted_1 = 1'b0;
     end
-    if(when_Axi4LiteCrossbar_l117_3) begin
+    if(when_Axi4LiteCrossbar_l131_3) begin
       _zz_wrGranted_1 = 1'b1;
     end
   end
 
-  assign when_Axi4LiteCrossbar_l117_2 = _zz_when_Axi4LiteCrossbar_l117_9[0];
-  assign when_Axi4LiteCrossbar_l117_3 = _zz_when_Axi4LiteCrossbar_l117_9[1];
-  assign when_Axi4LiteCrossbar_l172_1 = (|_zz_when_Axi4LiteCrossbar_l172_3);
-  assign when_Axi4LiteCrossbar_l176_2 = (_zz_wrGranted_1 == 1'b0);
-  assign when_Axi4LiteCrossbar_l176_3 = (_zz_wrGranted_1 == 1'b1);
+  assign when_Axi4LiteCrossbar_l131_2 = _zz_when_Axi4LiteCrossbar_l131_19[0];
+  assign when_Axi4LiteCrossbar_l131_3 = _zz_when_Axi4LiteCrossbar_l131_19[1];
+  assign when_Axi4LiteCrossbar_l206_1 = (|_zz_when_Axi4LiteCrossbar_l206_3);
+  assign when_Axi4LiteCrossbar_l210_2 = (_zz_wrGranted_1 == 1'b0);
+  assign when_Axi4LiteCrossbar_l210_3 = (_zz_wrGranted_1 == 1'b1);
   assign io_slaves_1_aw_fire = (m1_axi_awvalid && m1_axi_awready);
-  assign when_Axi4LiteCrossbar_l195_2 = (wrGranted_1 == 1'b0);
-  assign when_Axi4LiteCrossbar_l195_3 = (wrGranted_1 == 1'b1);
-  assign io_slaves_1_b_fire = (m1_axi_bvalid && m1_axi_bready);
-  assign when_Axi4LiteCrossbar_l216 = (! rdActive_0);
+  assign when_Axi4LiteCrossbar_l230_2 = ((_zz_wrGranted_1 == 1'b0) && (wrCredits_1_0 != 2'b00));
+  assign when_Axi4LiteCrossbar_l230_3 = ((_zz_wrGranted_1 == 1'b1) && (wrCredits_1_1 != 2'b00));
   always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l227_1[0] = ((32'h00000000 <= s0_axi_araddr) && (s0_axi_araddr < 32'h00010000));
-    _zz_when_Axi4LiteCrossbar_l227_1[1] = ((32'h00010000 <= s0_axi_araddr) && (s0_axi_araddr < 32'h00020000));
-  end
-
-  always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l227[0] = (s0_axi_arvalid && _zz_when_Axi4LiteCrossbar_l227_1[0]);
-    _zz_when_Axi4LiteCrossbar_l227[1] = (s1_axi_arvalid && _zz_when_Axi4LiteCrossbar_l227_2[0]);
-  end
-
-  always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l227_2[0] = ((32'h00000000 <= s1_axi_araddr) && (s1_axi_araddr < 32'h00010000));
-    _zz_when_Axi4LiteCrossbar_l227_2[1] = ((32'h00010000 <= s1_axi_araddr) && (s1_axi_araddr < 32'h00020000));
-  end
-
-  always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l117_10 = 2'b00;
-    if(when_Axi4LiteCrossbar_l87_2) begin
-      _zz_when_Axi4LiteCrossbar_l117_10 = 2'b01;
+    when_Axi4LiteCrossbar_l248_1 = 1'b1;
+    if(when_Axi4LiteCrossbar_l238_2) begin
+      if(when_Axi4LiteCrossbar_l245_2) begin
+        when_Axi4LiteCrossbar_l248_1 = 1'b0;
+      end
+    end
+    if(when_Axi4LiteCrossbar_l238_3) begin
+      if(when_Axi4LiteCrossbar_l245_3) begin
+        when_Axi4LiteCrossbar_l248_1 = 1'b0;
+      end
     end
   end
 
-  assign when_Axi4LiteCrossbar_l87_2 = (1'b1 <= rdRrPtr_0);
-  assign _zz_when_Axi4LiteCrossbar_l117_11 = (_zz_when_Axi4LiteCrossbar_l227 & (~ _zz_when_Axi4LiteCrossbar_l117_10));
-  assign _zz_when_Axi4LiteCrossbar_l117_12 = _zz_when_Axi4LiteCrossbar_l117_11;
-  assign _zz_when_Axi4LiteCrossbar_l117_13 = _zz_when_Axi4LiteCrossbar_l227;
-  assign _zz_when_Axi4LiteCrossbar_l117_14 = ((|_zz_when_Axi4LiteCrossbar_l117_11) ? (_zz_when_Axi4LiteCrossbar_l117_12 & (~ _zz__zz_when_Axi4LiteCrossbar_l117_14)) : (_zz_when_Axi4LiteCrossbar_l117_13 & (~ _zz__zz_when_Axi4LiteCrossbar_l117_14_1)));
+  assign when_Axi4LiteCrossbar_l238_2 = _zz_when_Axi4LiteCrossbar_l206_3[0];
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l245_2 = wrCredits_1_0;
+    if(when_Axi4LiteCrossbar_l242_2) begin
+      _zz_when_Axi4LiteCrossbar_l245_2 = (wrCredits_1_0 - 2'b01);
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l242_2 = ((_zz_wrGranted_1 == 1'b0) && (wrCredits_1_0 != 2'b00));
+  assign when_Axi4LiteCrossbar_l245_2 = (_zz_when_Axi4LiteCrossbar_l245_2 != 2'b00);
+  assign when_Axi4LiteCrossbar_l238_3 = _zz_when_Axi4LiteCrossbar_l206_3[1];
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l245_3 = wrCredits_1_1;
+    if(when_Axi4LiteCrossbar_l242_3) begin
+      _zz_when_Axi4LiteCrossbar_l245_3 = (wrCredits_1_1 - 2'b01);
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l242_3 = ((_zz_wrGranted_1 == 1'b1) && (wrCredits_1_1 != 2'b00));
+  assign when_Axi4LiteCrossbar_l245_3 = (_zz_when_Axi4LiteCrossbar_l245_3 != 2'b00);
+  assign when_Axi4LiteCrossbar_l262_2 = (wrGranted_1 == 1'b0);
+  assign when_Axi4LiteCrossbar_l262_3 = (wrGranted_1 == 1'b1);
+  assign io_slaves_1_b_fire = (m1_axi_bvalid && m1_axi_bready);
+  assign when_Axi4LiteCrossbar_l283 = (! rdActive_0);
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l294_1[0] = ((32'h00000000 <= s0_axi_araddr) && (s0_axi_araddr < 32'h00010000));
+    _zz_when_Axi4LiteCrossbar_l294_1[1] = ((32'h00010000 <= s0_axi_araddr) && (s0_axi_araddr < 32'h00020000));
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l294[0] = (s0_axi_arvalid && _zz_when_Axi4LiteCrossbar_l294_1[0]);
+    _zz_when_Axi4LiteCrossbar_l294[1] = (s1_axi_arvalid && _zz_when_Axi4LiteCrossbar_l294_2[0]);
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l294_2[0] = ((32'h00000000 <= s1_axi_araddr) && (s1_axi_araddr < 32'h00010000));
+    _zz_when_Axi4LiteCrossbar_l294_2[1] = ((32'h00010000 <= s1_axi_araddr) && (s1_axi_araddr < 32'h00020000));
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l131_20[0] = (_zz_when_Axi4LiteCrossbar_l294[0] && (rdCredits_0_0 != 2'b00));
+    _zz_when_Axi4LiteCrossbar_l131_20[1] = (_zz_when_Axi4LiteCrossbar_l294[1] && (rdCredits_0_1 != 2'b00));
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l131_21 = 2'b00;
+    if(when_Axi4LiteCrossbar_l89_4) begin
+      _zz_when_Axi4LiteCrossbar_l131_21 = 2'b01;
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l89_4 = (1'b1 <= rdRrPtr_0);
+  assign _zz_when_Axi4LiteCrossbar_l131_22 = (_zz_when_Axi4LiteCrossbar_l131_20 & (~ _zz_when_Axi4LiteCrossbar_l131_21));
+  assign _zz_when_Axi4LiteCrossbar_l131_23 = _zz_when_Axi4LiteCrossbar_l131_22;
+  assign _zz_when_Axi4LiteCrossbar_l131_24 = _zz_when_Axi4LiteCrossbar_l131_20;
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l131_25 = 2'b00;
+    if(when_Axi4LiteCrossbar_l89_5) begin
+      _zz_when_Axi4LiteCrossbar_l131_25 = 2'b01;
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l89_5 = (1'b1 <= rdRrPtr_0);
+  assign _zz_when_Axi4LiteCrossbar_l131_26 = (_zz_when_Axi4LiteCrossbar_l294 & (~ _zz_when_Axi4LiteCrossbar_l131_25));
+  assign _zz_when_Axi4LiteCrossbar_l131_27 = _zz_when_Axi4LiteCrossbar_l131_26;
+  assign _zz_when_Axi4LiteCrossbar_l131_28 = _zz_when_Axi4LiteCrossbar_l294;
+  assign _zz_when_Axi4LiteCrossbar_l131_29 = ((|_zz_when_Axi4LiteCrossbar_l131_20) ? ((|_zz_when_Axi4LiteCrossbar_l131_22) ? (_zz_when_Axi4LiteCrossbar_l131_23 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_29)) : (_zz_when_Axi4LiteCrossbar_l131_24 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_29_1))) : ((|_zz_when_Axi4LiteCrossbar_l131_26) ? (_zz_when_Axi4LiteCrossbar_l131_27 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_29_2)) : (_zz_when_Axi4LiteCrossbar_l131_28 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_29_3))));
   always @(*) begin
     _zz_rdGranted_0 = 1'b0;
-    if(when_Axi4LiteCrossbar_l117_4) begin
+    if(when_Axi4LiteCrossbar_l131_4) begin
       _zz_rdGranted_0 = 1'b0;
     end
-    if(when_Axi4LiteCrossbar_l117_5) begin
+    if(when_Axi4LiteCrossbar_l131_5) begin
       _zz_rdGranted_0 = 1'b1;
     end
   end
 
-  assign when_Axi4LiteCrossbar_l117_4 = _zz_when_Axi4LiteCrossbar_l117_14[0];
-  assign when_Axi4LiteCrossbar_l117_5 = _zz_when_Axi4LiteCrossbar_l117_14[1];
-  assign when_Axi4LiteCrossbar_l227 = (|_zz_when_Axi4LiteCrossbar_l227);
-  assign when_Axi4LiteCrossbar_l230 = (_zz_rdGranted_0 == 1'b0);
-  assign when_Axi4LiteCrossbar_l230_1 = (_zz_rdGranted_0 == 1'b1);
+  assign when_Axi4LiteCrossbar_l131_4 = _zz_when_Axi4LiteCrossbar_l131_29[0];
+  assign when_Axi4LiteCrossbar_l131_5 = _zz_when_Axi4LiteCrossbar_l131_29[1];
+  assign when_Axi4LiteCrossbar_l294 = (|_zz_when_Axi4LiteCrossbar_l294);
+  assign when_Axi4LiteCrossbar_l297 = (_zz_rdGranted_0 == 1'b0);
+  assign when_Axi4LiteCrossbar_l297_1 = (_zz_rdGranted_0 == 1'b1);
   assign io_slaves_0_ar_fire = (m0_axi_arvalid && m0_axi_arready);
-  assign when_Axi4LiteCrossbar_l247 = (rdGranted_0 == 1'b0);
-  assign when_Axi4LiteCrossbar_l247_1 = (rdGranted_0 == 1'b1);
-  assign io_slaves_0_r_fire = (m0_axi_rvalid && m0_axi_rready);
-  assign when_Axi4LiteCrossbar_l216_1 = (! rdActive_1);
+  assign when_Axi4LiteCrossbar_l311 = ((_zz_rdGranted_0 == 1'b0) && (rdCredits_0_0 != 2'b00));
+  assign when_Axi4LiteCrossbar_l311_1 = ((_zz_rdGranted_0 == 1'b1) && (rdCredits_0_1 != 2'b00));
   always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l227_4[0] = ((32'h00000000 <= s0_axi_araddr) && (s0_axi_araddr < 32'h00010000));
-    _zz_when_Axi4LiteCrossbar_l227_4[1] = ((32'h00010000 <= s0_axi_araddr) && (s0_axi_araddr < 32'h00020000));
-  end
-
-  always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l227_3[0] = (s0_axi_arvalid && _zz_when_Axi4LiteCrossbar_l227_4[1]);
-    _zz_when_Axi4LiteCrossbar_l227_3[1] = (s1_axi_arvalid && _zz_when_Axi4LiteCrossbar_l227_5[1]);
-  end
-
-  always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l227_5[0] = ((32'h00000000 <= s1_axi_araddr) && (s1_axi_araddr < 32'h00010000));
-    _zz_when_Axi4LiteCrossbar_l227_5[1] = ((32'h00010000 <= s1_axi_araddr) && (s1_axi_araddr < 32'h00020000));
-  end
-
-  always @(*) begin
-    _zz_when_Axi4LiteCrossbar_l117_15 = 2'b00;
-    if(when_Axi4LiteCrossbar_l87_3) begin
-      _zz_when_Axi4LiteCrossbar_l117_15 = 2'b01;
+    when_Axi4LiteCrossbar_l327 = 1'b1;
+    if(when_Axi4LiteCrossbar_l318) begin
+      if(when_Axi4LiteCrossbar_l324) begin
+        when_Axi4LiteCrossbar_l327 = 1'b0;
+      end
+    end
+    if(when_Axi4LiteCrossbar_l318_1) begin
+      if(when_Axi4LiteCrossbar_l324_1) begin
+        when_Axi4LiteCrossbar_l327 = 1'b0;
+      end
     end
   end
 
-  assign when_Axi4LiteCrossbar_l87_3 = (1'b1 <= rdRrPtr_1);
-  assign _zz_when_Axi4LiteCrossbar_l117_16 = (_zz_when_Axi4LiteCrossbar_l227_3 & (~ _zz_when_Axi4LiteCrossbar_l117_15));
-  assign _zz_when_Axi4LiteCrossbar_l117_17 = _zz_when_Axi4LiteCrossbar_l117_16;
-  assign _zz_when_Axi4LiteCrossbar_l117_18 = _zz_when_Axi4LiteCrossbar_l227_3;
-  assign _zz_when_Axi4LiteCrossbar_l117_19 = ((|_zz_when_Axi4LiteCrossbar_l117_16) ? (_zz_when_Axi4LiteCrossbar_l117_17 & (~ _zz__zz_when_Axi4LiteCrossbar_l117_19)) : (_zz_when_Axi4LiteCrossbar_l117_18 & (~ _zz__zz_when_Axi4LiteCrossbar_l117_19_1)));
+  assign when_Axi4LiteCrossbar_l318 = _zz_when_Axi4LiteCrossbar_l294[0];
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l324 = rdCredits_0_0;
+    if(when_Axi4LiteCrossbar_l321) begin
+      _zz_when_Axi4LiteCrossbar_l324 = (rdCredits_0_0 - 2'b01);
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l321 = ((_zz_rdGranted_0 == 1'b0) && (rdCredits_0_0 != 2'b00));
+  assign when_Axi4LiteCrossbar_l324 = (_zz_when_Axi4LiteCrossbar_l324 != 2'b00);
+  assign when_Axi4LiteCrossbar_l318_1 = _zz_when_Axi4LiteCrossbar_l294[1];
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l324_1 = rdCredits_0_1;
+    if(when_Axi4LiteCrossbar_l321_1) begin
+      _zz_when_Axi4LiteCrossbar_l324_1 = (rdCredits_0_1 - 2'b01);
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l321_1 = ((_zz_rdGranted_0 == 1'b1) && (rdCredits_0_1 != 2'b00));
+  assign when_Axi4LiteCrossbar_l324_1 = (_zz_when_Axi4LiteCrossbar_l324_1 != 2'b00);
+  assign when_Axi4LiteCrossbar_l340 = (rdGranted_0 == 1'b0);
+  assign when_Axi4LiteCrossbar_l340_1 = (rdGranted_0 == 1'b1);
+  assign io_slaves_0_r_fire = (m0_axi_rvalid && m0_axi_rready);
+  assign when_Axi4LiteCrossbar_l283_1 = (! rdActive_1);
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l294_4[0] = ((32'h00000000 <= s0_axi_araddr) && (s0_axi_araddr < 32'h00010000));
+    _zz_when_Axi4LiteCrossbar_l294_4[1] = ((32'h00010000 <= s0_axi_araddr) && (s0_axi_araddr < 32'h00020000));
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l294_3[0] = (s0_axi_arvalid && _zz_when_Axi4LiteCrossbar_l294_4[1]);
+    _zz_when_Axi4LiteCrossbar_l294_3[1] = (s1_axi_arvalid && _zz_when_Axi4LiteCrossbar_l294_5[1]);
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l294_5[0] = ((32'h00000000 <= s1_axi_araddr) && (s1_axi_araddr < 32'h00010000));
+    _zz_when_Axi4LiteCrossbar_l294_5[1] = ((32'h00010000 <= s1_axi_araddr) && (s1_axi_araddr < 32'h00020000));
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l131_30[0] = (_zz_when_Axi4LiteCrossbar_l294_3[0] && (rdCredits_1_0 != 2'b00));
+    _zz_when_Axi4LiteCrossbar_l131_30[1] = (_zz_when_Axi4LiteCrossbar_l294_3[1] && (rdCredits_1_1 != 2'b00));
+  end
+
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l131_31 = 2'b00;
+    if(when_Axi4LiteCrossbar_l89_6) begin
+      _zz_when_Axi4LiteCrossbar_l131_31 = 2'b01;
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l89_6 = (1'b1 <= rdRrPtr_1);
+  assign _zz_when_Axi4LiteCrossbar_l131_32 = (_zz_when_Axi4LiteCrossbar_l131_30 & (~ _zz_when_Axi4LiteCrossbar_l131_31));
+  assign _zz_when_Axi4LiteCrossbar_l131_33 = _zz_when_Axi4LiteCrossbar_l131_32;
+  assign _zz_when_Axi4LiteCrossbar_l131_34 = _zz_when_Axi4LiteCrossbar_l131_30;
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l131_35 = 2'b00;
+    if(when_Axi4LiteCrossbar_l89_7) begin
+      _zz_when_Axi4LiteCrossbar_l131_35 = 2'b01;
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l89_7 = (1'b1 <= rdRrPtr_1);
+  assign _zz_when_Axi4LiteCrossbar_l131_36 = (_zz_when_Axi4LiteCrossbar_l294_3 & (~ _zz_when_Axi4LiteCrossbar_l131_35));
+  assign _zz_when_Axi4LiteCrossbar_l131_37 = _zz_when_Axi4LiteCrossbar_l131_36;
+  assign _zz_when_Axi4LiteCrossbar_l131_38 = _zz_when_Axi4LiteCrossbar_l294_3;
+  assign _zz_when_Axi4LiteCrossbar_l131_39 = ((|_zz_when_Axi4LiteCrossbar_l131_30) ? ((|_zz_when_Axi4LiteCrossbar_l131_32) ? (_zz_when_Axi4LiteCrossbar_l131_33 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_39)) : (_zz_when_Axi4LiteCrossbar_l131_34 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_39_1))) : ((|_zz_when_Axi4LiteCrossbar_l131_36) ? (_zz_when_Axi4LiteCrossbar_l131_37 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_39_2)) : (_zz_when_Axi4LiteCrossbar_l131_38 & (~ _zz__zz_when_Axi4LiteCrossbar_l131_39_3))));
   always @(*) begin
     _zz_rdGranted_1 = 1'b0;
-    if(when_Axi4LiteCrossbar_l117_6) begin
+    if(when_Axi4LiteCrossbar_l131_6) begin
       _zz_rdGranted_1 = 1'b0;
     end
-    if(when_Axi4LiteCrossbar_l117_7) begin
+    if(when_Axi4LiteCrossbar_l131_7) begin
       _zz_rdGranted_1 = 1'b1;
     end
   end
 
-  assign when_Axi4LiteCrossbar_l117_6 = _zz_when_Axi4LiteCrossbar_l117_19[0];
-  assign when_Axi4LiteCrossbar_l117_7 = _zz_when_Axi4LiteCrossbar_l117_19[1];
-  assign when_Axi4LiteCrossbar_l227_1 = (|_zz_when_Axi4LiteCrossbar_l227_3);
-  assign when_Axi4LiteCrossbar_l230_2 = (_zz_rdGranted_1 == 1'b0);
-  assign when_Axi4LiteCrossbar_l230_3 = (_zz_rdGranted_1 == 1'b1);
+  assign when_Axi4LiteCrossbar_l131_6 = _zz_when_Axi4LiteCrossbar_l131_39[0];
+  assign when_Axi4LiteCrossbar_l131_7 = _zz_when_Axi4LiteCrossbar_l131_39[1];
+  assign when_Axi4LiteCrossbar_l294_1 = (|_zz_when_Axi4LiteCrossbar_l294_3);
+  assign when_Axi4LiteCrossbar_l297_2 = (_zz_rdGranted_1 == 1'b0);
+  assign when_Axi4LiteCrossbar_l297_3 = (_zz_rdGranted_1 == 1'b1);
   assign io_slaves_1_ar_fire = (m1_axi_arvalid && m1_axi_arready);
-  assign when_Axi4LiteCrossbar_l247_2 = (rdGranted_1 == 1'b0);
-  assign when_Axi4LiteCrossbar_l247_3 = (rdGranted_1 == 1'b1);
+  assign when_Axi4LiteCrossbar_l311_2 = ((_zz_rdGranted_1 == 1'b0) && (rdCredits_1_0 != 2'b00));
+  assign when_Axi4LiteCrossbar_l311_3 = ((_zz_rdGranted_1 == 1'b1) && (rdCredits_1_1 != 2'b00));
+  always @(*) begin
+    when_Axi4LiteCrossbar_l327_1 = 1'b1;
+    if(when_Axi4LiteCrossbar_l318_2) begin
+      if(when_Axi4LiteCrossbar_l324_2) begin
+        when_Axi4LiteCrossbar_l327_1 = 1'b0;
+      end
+    end
+    if(when_Axi4LiteCrossbar_l318_3) begin
+      if(when_Axi4LiteCrossbar_l324_3) begin
+        when_Axi4LiteCrossbar_l327_1 = 1'b0;
+      end
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l318_2 = _zz_when_Axi4LiteCrossbar_l294_3[0];
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l324_2 = rdCredits_1_0;
+    if(when_Axi4LiteCrossbar_l321_2) begin
+      _zz_when_Axi4LiteCrossbar_l324_2 = (rdCredits_1_0 - 2'b01);
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l321_2 = ((_zz_rdGranted_1 == 1'b0) && (rdCredits_1_0 != 2'b00));
+  assign when_Axi4LiteCrossbar_l324_2 = (_zz_when_Axi4LiteCrossbar_l324_2 != 2'b00);
+  assign when_Axi4LiteCrossbar_l318_3 = _zz_when_Axi4LiteCrossbar_l294_3[1];
+  always @(*) begin
+    _zz_when_Axi4LiteCrossbar_l324_3 = rdCredits_1_1;
+    if(when_Axi4LiteCrossbar_l321_3) begin
+      _zz_when_Axi4LiteCrossbar_l324_3 = (rdCredits_1_1 - 2'b01);
+    end
+  end
+
+  assign when_Axi4LiteCrossbar_l321_3 = ((_zz_rdGranted_1 == 1'b1) && (rdCredits_1_1 != 2'b00));
+  assign when_Axi4LiteCrossbar_l324_3 = (_zz_when_Axi4LiteCrossbar_l324_3 != 2'b00);
+  assign when_Axi4LiteCrossbar_l340_2 = (rdGranted_1 == 1'b0);
+  assign when_Axi4LiteCrossbar_l340_3 = (rdGranted_1 == 1'b1);
   assign io_slaves_1_r_fire = (m1_axi_rvalid && m1_axi_rready);
   always @(posedge aclk) begin
     if(!aresetn) begin
@@ -1496,13 +1873,31 @@ module Axi4LiteCrossbar (
       rdGranted_1 <= 1'b0;
       rdRrPtr_0 <= 1'b0;
       rdRrPtr_1 <= 1'b0;
+      wrCredits_0_0 <= 2'b11;
+      wrCredits_0_1 <= 2'b01;
+      wrCredits_1_0 <= 2'b11;
+      wrCredits_1_1 <= 2'b01;
+      rdCredits_0_0 <= 2'b11;
+      rdCredits_0_1 <= 2'b01;
+      rdCredits_1_0 <= 2'b11;
+      rdCredits_1_1 <= 2'b01;
     end else begin
-      if(when_Axi4LiteCrossbar_l160) begin
-        if(when_Axi4LiteCrossbar_l172) begin
+      if(when_Axi4LiteCrossbar_l194) begin
+        if(when_Axi4LiteCrossbar_l206) begin
           if(io_slaves_0_aw_fire) begin
             wrActive_0 <= 1'b1;
             wrGranted_0 <= _zz_wrGranted_0;
             wrRrPtr_0 <= (_zz_wrGranted_0 + 1'b1);
+            if(when_Axi4LiteCrossbar_l230) begin
+              wrCredits_0_0 <= (wrCredits_0_0 - 2'b01);
+            end
+            if(when_Axi4LiteCrossbar_l230_1) begin
+              wrCredits_0_1 <= (wrCredits_0_1 - 2'b01);
+            end
+            if(when_Axi4LiteCrossbar_l248) begin
+              wrCredits_0_0 <= 2'b11;
+              wrCredits_0_1 <= 2'b01;
+            end
           end
         end
       end else begin
@@ -1510,12 +1905,22 @@ module Axi4LiteCrossbar (
           wrActive_0 <= 1'b0;
         end
       end
-      if(when_Axi4LiteCrossbar_l160_1) begin
-        if(when_Axi4LiteCrossbar_l172_1) begin
+      if(when_Axi4LiteCrossbar_l194_1) begin
+        if(when_Axi4LiteCrossbar_l206_1) begin
           if(io_slaves_1_aw_fire) begin
             wrActive_1 <= 1'b1;
             wrGranted_1 <= _zz_wrGranted_1;
             wrRrPtr_1 <= (_zz_wrGranted_1 + 1'b1);
+            if(when_Axi4LiteCrossbar_l230_2) begin
+              wrCredits_1_0 <= (wrCredits_1_0 - 2'b01);
+            end
+            if(when_Axi4LiteCrossbar_l230_3) begin
+              wrCredits_1_1 <= (wrCredits_1_1 - 2'b01);
+            end
+            if(when_Axi4LiteCrossbar_l248_1) begin
+              wrCredits_1_0 <= 2'b11;
+              wrCredits_1_1 <= 2'b01;
+            end
           end
         end
       end else begin
@@ -1523,12 +1928,22 @@ module Axi4LiteCrossbar (
           wrActive_1 <= 1'b0;
         end
       end
-      if(when_Axi4LiteCrossbar_l216) begin
-        if(when_Axi4LiteCrossbar_l227) begin
+      if(when_Axi4LiteCrossbar_l283) begin
+        if(when_Axi4LiteCrossbar_l294) begin
           if(io_slaves_0_ar_fire) begin
             rdActive_0 <= 1'b1;
             rdGranted_0 <= _zz_rdGranted_0;
             rdRrPtr_0 <= (_zz_rdGranted_0 + 1'b1);
+            if(when_Axi4LiteCrossbar_l311) begin
+              rdCredits_0_0 <= (rdCredits_0_0 - 2'b01);
+            end
+            if(when_Axi4LiteCrossbar_l311_1) begin
+              rdCredits_0_1 <= (rdCredits_0_1 - 2'b01);
+            end
+            if(when_Axi4LiteCrossbar_l327) begin
+              rdCredits_0_0 <= 2'b11;
+              rdCredits_0_1 <= 2'b01;
+            end
           end
         end
       end else begin
@@ -1536,12 +1951,22 @@ module Axi4LiteCrossbar (
           rdActive_0 <= 1'b0;
         end
       end
-      if(when_Axi4LiteCrossbar_l216_1) begin
-        if(when_Axi4LiteCrossbar_l227_1) begin
+      if(when_Axi4LiteCrossbar_l283_1) begin
+        if(when_Axi4LiteCrossbar_l294_1) begin
           if(io_slaves_1_ar_fire) begin
             rdActive_1 <= 1'b1;
             rdGranted_1 <= _zz_rdGranted_1;
             rdRrPtr_1 <= (_zz_rdGranted_1 + 1'b1);
+            if(when_Axi4LiteCrossbar_l311_2) begin
+              rdCredits_1_0 <= (rdCredits_1_0 - 2'b01);
+            end
+            if(when_Axi4LiteCrossbar_l311_3) begin
+              rdCredits_1_1 <= (rdCredits_1_1 - 2'b01);
+            end
+            if(when_Axi4LiteCrossbar_l327_1) begin
+              rdCredits_1_0 <= 2'b11;
+              rdCredits_1_1 <= 2'b01;
+            end
           end
         end
       end else begin

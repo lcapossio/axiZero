@@ -84,10 +84,12 @@ def _find_sbt() -> Path | None:
         if found:
             return Path(found)
 
-    # 2. Coursier-installed sbt (Linux/macOS)
+    # 2. Common Linux/macOS locations
     for candidate in [
+        Path("/usr/local/bin/sbt"),
         Path.home() / ".local" / "share" / "coursier" / "bin" / "sbt",
         Path.home() / ".coursier" / "bin" / "sbt",
+        Path.home() / ".sdkman" / "candidates" / "sbt" / "current" / "bin" / "sbt",
     ]:
         if candidate.exists():
             return candidate

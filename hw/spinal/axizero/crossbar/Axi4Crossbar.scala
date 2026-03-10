@@ -83,17 +83,22 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
     Mux(maskedReqs.orR, OHMasking.first(maskedReqs), OHMasking.first(requests))
   }
 
-  def arbitrate(requests: Bits, rrPtr: UInt): Bits = cfg.arbitration match {
+  def arbitrate(requests: Bits, rrPtr: UInt, credits: Vec[UInt] = null): Bits = cfg.arbitration match {
     case RoundRobin            => rrGrant(requests, rrPtr)
     case FixedPriority         => OHMasking.first(requests)
     case QosBased =>
       SpinalWarning("[axiZero] QosBased arbitration is not yet implemented " +
         "— falling back to round-robin.  AXQOS signals are ignored.")
       rrGrant(requests, rrPtr)
-    case WeightedRoundRobin(_) =>
-      SpinalWarning("[axiZero] WeightedRoundRobin arbitration is not yet implemented " +
-        "— falling back to round-robin.")
-      rrGrant(requests, rrPtr)
+    case WeightedRoundRobin(_) => wrrGrant(requests, rrPtr, credits)
+  }
+
+  def wrrGrant(requests: Bits, rrPtr: UInt, credits: Vec[UInt]): Bits = {
+    val eligible = Bits(M bits)
+    for (mi <- 0 until M) eligible(mi) := requests(mi) && (credits(mi) =/= 0)
+    Mux(eligible.orR,
+      rrGrant(eligible, rrPtr),
+      rrGrant(requests, rrPtr))
   }
 
   // =========================================================================
@@ -159,6 +164,53 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
   val wrRrPtr = Vec(Seq.fill(S)(RegInit(U(0, ptrW bits))))
   val rdRrPtr = Vec(Seq.fill(S)(RegInit(U(0, ptrW bits))))
 
+  // ── WRR credit counters (only allocated when WeightedRoundRobin) ────────
+  val wrrWeights = cfg.arbitration match {
+    case WeightedRoundRobin(w) => w
+    case _ => Seq.fill(M)(1)
+  }
+  val creditW = log2Up(wrrWeights.max + 1)
+
+  val wrCredits = cfg.arbitration match {
+    case WeightedRoundRobin(_) =>
+      Vec(Seq.tabulate(S)(_ =>
+        Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits))))))
+    case _ => null
+  }
+  val rdCredits = cfg.arbitration match {
+    case WeightedRoundRobin(_) =>
+      Vec(Seq.tabulate(S)(_ =>
+        Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits))))))
+    case _ => null
+  }
+
+  /** Decrement credit for the granted master, reset all when exhausted. */
+  def wrrOnGrant(credits: Vec[Vec[UInt]], si: Int, grantIdx: UInt, requests: Bits): Unit = {
+    if (credits == null) return
+    for (mi <- 0 until M) {
+      when(grantIdx === mi && credits(si)(mi) =/= 0) {
+        credits(si)(mi) := credits(si)(mi) - 1
+      }
+    }
+    val allExhausted = Bool()
+    allExhausted := True
+    for (mi <- 0 until M) {
+      when(requests(mi)) {
+        val afterDec = UInt(creditW bits)
+        afterDec := credits(si)(mi)
+        when(grantIdx === mi && credits(si)(mi) =/= 0) {
+          afterDec := credits(si)(mi) - 1
+        }
+        when(afterDec =/= 0) { allExhausted := False }
+      }
+    }
+    when(allExhausted) {
+      for (mi <- 0 until M) {
+        credits(si)(mi) := U(wrrWeights(mi), creditW bits)
+      }
+    }
+  }
+
   // =========================================================================
   // Defaults — every signal driven before any when() overrides
   // =========================================================================
@@ -204,7 +256,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
           requests(mi) := io.masters(mi).aw.valid && addrDecodeOH(io.masters(mi).aw.addr)(si)
         }
 
-        val grant    = arbitrate(requests, wrRrPtr(si))
+        val grant    = arbitrate(requests, wrRrPtr(si), if (wrCredits != null) wrCredits(si) else null)
         val grantIdx = ohToIdx(grant)
         val anyReq   = requests.orR
 
@@ -226,6 +278,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
             wrActive(si)  := True
             wrGranted(si) := grantIdx
             wrRrPtr(si)   := (grantIdx + 1).resized
+            wrrOnGrant(wrCredits, si, grantIdx, requests)
           }
         }
 
@@ -257,7 +310,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
           requests(mi) := io.masters(mi).ar.valid && addrDecodeOH(io.masters(mi).ar.addr)(si)
         }
 
-        val grant    = arbitrate(requests, rdRrPtr(si))
+        val grant    = arbitrate(requests, rdRrPtr(si), if (rdCredits != null) rdCredits(si) else null)
         val grantIdx = ohToIdx(grant)
         val anyReq   = requests.orR
 
@@ -270,6 +323,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
             rdActive(si)  := True
             rdGranted(si) := grantIdx
             rdRrPtr(si)   := (grantIdx + 1).resized
+            wrrOnGrant(rdCredits, si, grantIdx, requests)
           }
         }
 
@@ -323,7 +377,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
         requests(mi) := io.masters(mi).aw.valid && addrDecodeOH(io.masters(mi).aw.addr)(si)
       }
 
-      val grant    = arbitrate(requests, wrRrPtr(si))
+      val grant    = arbitrate(requests, wrRrPtr(si), if (wrCredits != null) wrCredits(si) else null)
       val grantIdx = ohToIdx(grant)
       val anyReq   = requests.orR
 
@@ -357,6 +411,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
         wFifoWrPtr(si) := ((wFifoWrPtr(si) === U(depth - 1)) ?
           U(0) | (wFifoWrPtr(si) + 1)).resized
         wrRrPtr(si) := (grantIdx + 1).resized
+        wrrOnGrant(wrCredits, si, grantIdx, requests)
       }
 
       // -- W: forward beats from the master at the FIFO head --
@@ -436,7 +491,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
         requests(mi) := io.masters(mi).ar.valid && addrDecodeOH(io.masters(mi).ar.addr)(si)
       }
 
-      val grant    = arbitrate(requests, rdRrPtr(si))
+      val grant    = arbitrate(requests, rdRrPtr(si), if (rdCredits != null) rdCredits(si) else null)
       val grantIdx = ohToIdx(grant)
       val anyReq   = requests.orR
 
@@ -449,6 +504,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
 
       when(slv.ar.fire) {
         rdRrPtr(si) := (grantIdx + 1).resized
+        wrrOnGrant(rdCredits, si, grantIdx, requests)
       }
 
       // Outstanding read counter: inc on AR fire, dec on R last beat
