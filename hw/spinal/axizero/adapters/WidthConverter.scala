@@ -31,12 +31,23 @@ import spinal.lib.bus.amba4.axi._
 //
 // Full AXI4 width conversion
 // ──────────────────────────
-// Burst-level width conversion requires splitting or merging beats.
-// This is substantially more complex (AxSize tracking, beat counters,
-// sub-word address alignment).  The full-AXI4 converter is a stub that
-// delegates to SpinalHDL's built-in Axi4Upsizer / Axi4Downsizer from
-// spinal.lib.bus.amba4.axi.Axi4Upsizer when available, and will be
-// completed in a future iteration.
+// Burst-level width conversion delegates to SpinalHDL's built-in
+// Axi4Upsizer / Axi4Downsizer (spinal.lib.bus.amba4.axi).
+//
+// The Axi4WidthConverter component exposes:
+//   io.input  — slave-facing (receives AW/AR/W, drives B/R back)
+//   io.output — master-facing (drives AW/AR/W, receives B/R)
+//
+// When inputCfg.dataWidth < outputCfg.dataWidth (upsizing):
+//   Merges N narrow W beats into one wide beat; splits one wide R beat
+//   into N narrow beats.  Used at narrow master ports.
+//
+// When inputCfg.dataWidth > outputCfg.dataWidth (downsizing):
+//   Splits one wide W beat into N narrow beats; merges N narrow R beats
+//   into one wide beat.  Used at narrow slave ports.
+//
+// inputCfg and outputCfg must agree on all fields except dataWidth.
+// The dataWidth ratio must be a whole number.
 //
 // Usage
 // ─────
@@ -99,23 +110,53 @@ class Axi4LiteWidthConverter(narrowCfg: Axi4Config, wideCfg: Axi4Config)
   }
 }
 
-// ── Full AXI4 width converter stub ──────────────────────────────────────────
+// ── Full AXI4 width converter ────────────────────────────────────────────────
 
-/** Stub for full AXI4 width conversion.  Currently implements a wire-through
- *  for equal widths and will require burst-splitting / beat-merging logic for
- *  mismatched widths.  Raises a compile-time error if widths differ until the
- *  full implementation is in place. */
-class Axi4WidthConverter(narrowCfg: Axi4Config, wideCfg: Axi4Config)
-    extends Component {
+/** Full AXI4 burst-level data-width converter.
+ *
+ *  io.input  — slave-facing port: receives AW/AR/W from upstream, drives B/R back.
+ *  io.output — master-facing port: drives AW/AR/W downstream, receives B/R.
+ *
+ *  inputCfg.dataWidth < outputCfg.dataWidth  →  upsizing  (Axi4Upsizer)
+ *  inputCfg.dataWidth > outputCfg.dataWidth  →  downsizing (Axi4Downsizer)
+ *  inputCfg.dataWidth == outputCfg.dataWidth →  wire-through
+ *
+ *  Both configs must agree on all fields except dataWidth.
+ *  The dataWidth ratio must be a whole number.
+ *  readPendingQueueSize controls the depth of the in-flight read-transaction
+ *  queue inside Axi4Upsizer (only used when upsizing). */
+class Axi4WidthConverter(
+    inputCfg:            Axi4Config,
+    outputCfg:           Axi4Config,
+    readPendingQueueSize: Int = 4
+) extends Component {
 
-  require(narrowCfg.dataWidth == wideCfg.dataWidth,
-    s"Full AXI4 width conversion (${narrowCfg.dataWidth}→${wideCfg.dataWidth} bits) " +
-    "is not yet implemented.  Use equal data widths or contribute the burst-splitting logic.")
+  private val inW  = inputCfg.dataWidth
+  private val outW = outputCfg.dataWidth
+
+  require(
+    if (inW <= outW) outW % inW == 0 else inW % outW == 0,
+    s"Axi4WidthConverter: dataWidth ratio must be a whole number ($inW ↔ $outW)"
+  )
 
   val io = new Bundle {
-    val narrow = slave(Axi4(narrowCfg))
-    val wide   = master(Axi4(wideCfg))
+    val input  = slave(Axi4(inputCfg))
+    val output = master(Axi4(outputCfg))
   }
 
-  io.wide <> io.narrow
+  if (inW == outW) {
+    io.output <> io.input
+
+  } else if (inW < outW) {
+    // ── Upsizing: merge N narrow beats → 1 wide beat; split 1 wide R beat ──
+    val ups = Axi4Upsizer(inputCfg, outputCfg, readPendingQueueSize)
+    ups.io.input  <> io.input
+    io.output     <> ups.io.output
+
+  } else {
+    // ── Downsizing: split 1 wide beat → N narrow beats; merge N narrow R ───
+    val downs = Axi4Downsizer(inputCfg, outputCfg)
+    downs.io.input  <> io.input
+    io.output       <> downs.io.output
+  }
 }

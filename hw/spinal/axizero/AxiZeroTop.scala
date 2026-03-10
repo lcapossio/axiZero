@@ -147,7 +147,16 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
       adpt.io.full
     } else afterRS
 
-    xbar.io.masters(mi) <> afterAdapt
+    // Data-width upsizing for narrow Full AXI4 master ports
+    val afterWidthConv: Axi4 = if (mp.mode == FullAxi4 &&
+                                   mp.config.dataWidth != cfg.fabricDataWidth) {
+      val conv = new Axi4WidthConverter(mp.config, xbarCfg.masters(mi).config,
+                                        cfg.maxOutstanding)
+      conv.io.input  <> afterAdapt
+      conv.io.output
+    } else afterAdapt
+
+    xbar.io.masters(mi) <> afterWidthConv
   }
 
   // ── Slave-side wiring ─────────────────────────────────────────────────────
@@ -163,17 +172,26 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
       adpt.io.lite
     } else xbarPort
 
-    // Optional register slice between adapter and external port
+    // Data-width downsizing for narrow Full AXI4 slave ports
+    val afterWidthConv: Axi4 = if (sp.mode == FullAxi4 &&
+                                   sp.config.dataWidth != cfg.fabricDataWidth) {
+      val conv = new Axi4WidthConverter(xbarCfg.slaves(si).config, sp.config,
+                                        cfg.maxOutstanding)
+      conv.io.input  <> afterAdapt
+      conv.io.output
+    } else afterAdapt
+
+    // Optional register slice between adapter/converter and external port
     if (sp.regSlice && sp.mode == LiteAxi4) {
       val rs = new Axi4LiteRegSlice(sp.config)
-      rs.io.upstream <> afterAdapt
+      rs.io.upstream <> afterWidthConv
       extPort        <> rs.io.downstream
     } else if (sp.regSlice) {
       val rs = new Axi4RegSlice(sp.config)
-      rs.io.upstream <> afterAdapt
+      rs.io.upstream <> afterWidthConv
       extPort        <> rs.io.downstream
     } else {
-      extPort <> afterAdapt
+      extPort <> afterWidthConv
     }
   }
 }
