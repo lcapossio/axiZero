@@ -398,7 +398,9 @@ object SimHelpers {
 
         for (i <- 0 to len) {
           for (_ <- 0 until stallR) cd.waitSampling()
-          s.r.data  #= mem.getOrElse(baseAddr + i * bytesPerBeat, 0xDEADBEEFL)
+          // Use unsigned BigInt so 64-bit values with bit 63 set don't fail #=
+          val rRaw = mem.getOrElse(baseAddr + i * bytesPerBeat, 0xDEADBEEFL)
+          s.r.data  #= BigInt(java.lang.Long.toUnsignedString(rRaw))
           s.r.valid #= true
           if (s.config.useId)   s.r.id   #= id
           if (s.config.useResp) s.r.resp #= 0

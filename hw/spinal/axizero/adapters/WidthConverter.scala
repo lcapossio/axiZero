@@ -155,8 +155,81 @@ class Axi4WidthConverter(
 
   } else {
     // ── Downsizing: split 1 wide beat → N narrow beats; merge N narrow R ───
-    val downs = Axi4Downsizer(inputCfg, outputCfg)
-    downs.io.input  <> io.input
-    io.output       <> downs.io.output
+    //
+    // Axi4Downsizer (SpinalHDL v1.10.x) requires both useBurst=false (INCR
+    // only, no variable burst type) and useId=false (no interleaved IDs).
+    // We strip both fields, wire all channels manually, propagate AW/AR IDs
+    // through registers, and harden BURST=INCR and ID=0 on the output side.
+    val inCfgD  = inputCfg.copy(useBurst  = false, useId = false)
+    val outCfgD = outputCfg.copy(useBurst = false, useId = false)
+    val downs   = Axi4Downsizer(inCfgD, outCfgD)
+
+    // ID registers — capture AW/AR IDs on handshake; inject into B/R
+    val awIdReg = if (inputCfg.useId) Reg(UInt(inputCfg.idWidth bits)) init(0) else null
+    val arIdReg = if (inputCfg.useId) Reg(UInt(inputCfg.idWidth bits)) init(0) else null
+
+    // ── upstream AW ────────────────────────────────────────────────────────
+    downs.io.input.aw.valid           := io.input.aw.valid
+    downs.io.input.aw.payload.assignSomeByName(io.input.aw.payload)  // addr,len,size; strips id,burst
+    io.input.aw.ready                 := downs.io.input.aw.ready
+    if (inputCfg.useId)
+      when(io.input.aw.valid && io.input.aw.ready) { awIdReg := io.input.aw.payload.id }
+
+    // ── upstream W ─────────────────────────────────────────────────────────
+    downs.io.input.w.valid            := io.input.w.valid
+    downs.io.input.w.data             := io.input.w.data
+    if (inCfgD.useStrb) downs.io.input.w.strb := io.input.w.strb
+    if (inCfgD.useLast) downs.io.input.w.last := io.input.w.last
+    io.input.w.ready                  := downs.io.input.w.ready
+
+    // ── upstream B ─────────────────────────────────────────────────────────
+    io.input.b.valid                  := downs.io.input.b.valid
+    io.input.b.payload.assignSomeByName(downs.io.input.b.payload)  // resp; id left undriven below
+    if (inputCfg.useId) io.input.b.payload.id := awIdReg  // inject captured write ID
+    downs.io.input.b.ready            := io.input.b.ready
+
+    // ── upstream AR ────────────────────────────────────────────────────────
+    downs.io.input.ar.valid           := io.input.ar.valid
+    downs.io.input.ar.payload.assignSomeByName(io.input.ar.payload)  // addr,len,size; strips id,burst
+    io.input.ar.ready                 := downs.io.input.ar.ready
+    if (inputCfg.useId)
+      when(io.input.ar.valid && io.input.ar.ready) { arIdReg := io.input.ar.payload.id }
+
+    // ── upstream R ─────────────────────────────────────────────────────────
+    io.input.r.valid                  := downs.io.input.r.valid
+    io.input.r.payload.assignSomeByName(downs.io.input.r.payload)  // data,resp,last; id left undriven
+    if (inputCfg.useId) io.input.r.payload.id := arIdReg  // inject captured read ID
+    downs.io.input.r.ready            := io.input.r.ready
+
+    // ── downstream AW ──────────────────────────────────────────────────────
+    io.output.aw.valid                := downs.io.output.aw.valid
+    io.output.aw.payload.assignSomeByName(downs.io.output.aw.payload)  // addr,len,size
+    if (outputCfg.useBurst) io.output.aw.payload.burst := 1   // INCR = 0b01
+    if (outputCfg.useId)    io.output.aw.payload.id    := 0   // no interleaving needed
+    downs.io.output.aw.ready          := io.output.aw.ready
+
+    // ── downstream W ───────────────────────────────────────────────────────
+    io.output.w.valid                 := downs.io.output.w.valid
+    io.output.w.data                  := downs.io.output.w.data
+    if (outCfgD.useStrb) io.output.w.strb := downs.io.output.w.strb
+    if (outCfgD.useLast) io.output.w.last := downs.io.output.w.last
+    downs.io.output.w.ready           := io.output.w.ready
+
+    // ── downstream B (slave drives) ────────────────────────────────────────
+    downs.io.output.b.valid           := io.output.b.valid
+    downs.io.output.b.payload.assignSomeByName(io.output.b.payload)  // resp; no id in outCfgD
+    io.output.b.ready                 := downs.io.output.b.ready
+
+    // ── downstream AR ──────────────────────────────────────────────────────
+    io.output.ar.valid                := downs.io.output.ar.valid
+    io.output.ar.payload.assignSomeByName(downs.io.output.ar.payload)  // addr,len,size
+    if (outputCfg.useBurst) io.output.ar.payload.burst := 1   // INCR = 0b01
+    if (outputCfg.useId)    io.output.ar.payload.id    := 0   // no interleaving needed
+    downs.io.output.ar.ready          := io.output.ar.ready
+
+    // ── downstream R (slave drives) ────────────────────────────────────────
+    downs.io.output.r.valid           := io.output.r.valid
+    downs.io.output.r.payload.assignSomeByName(io.output.r.payload)  // data,resp,last; no id
+    io.output.r.ready                 := downs.io.output.r.ready
   }
 }
