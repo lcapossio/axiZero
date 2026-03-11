@@ -48,5 +48,6 @@ object CocotbDutGen extends App {
     )
   ).generateVerilog(new AxiZeroMixedTop(cfg))
 
+  GenHelper.prependCopyright(java.nio.file.Paths.get("sim/cocotb/rtl/AxiZeroCocotbDUT.v"))
   println("[CocotbDutGen] Done → sim/cocotb/rtl/AxiZeroCocotbDUT.v")
 }

@@ -99,5 +99,6 @@ object ArtyWrrDutGen extends App {
     )
   ).generateVerilog(new AxiZeroMixedTop(cfg))
 
+  GenHelper.prependCopyright(java.nio.file.Paths.get("hw/vivado/arty_a7/ip/rtl/AxiZeroArtyWrrDUT.v"))
   println("[ArtyWrrDutGen] Done → hw/vivado/arty_a7/ip/rtl/AxiZeroArtyWrrDUT.v")
 }

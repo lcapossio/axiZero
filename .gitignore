@@ -74,6 +74,13 @@ hw/spinal/null
 # Test logs and temp dirs
 logs/
 tmp/
+all_tests.log
+width_test.log
+
+# Local helper scripts
+check_downsizer*.sh
+find_downsizer*.sh
+run_*_wsl.sh
 
 # Not for public release
 no_commit/

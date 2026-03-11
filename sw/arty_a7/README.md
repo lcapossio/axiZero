@@ -28,7 +28,7 @@ Pass: all 4 LEDs on.  Fail: LD7 blinks.
 0xC003_0000  AXI UART Lite  4 KB (S3, AXI Lite)
 ```
 
-## Building in Vitis (2023.x)
+## Building in Vitis (2025.2)
 
 1. **Generate hardware**
    ```
@@ -53,12 +53,16 @@ Pass: all 4 LEDs on.  Fail: LD7 blinks.
 ## Building with mb-gcc (standalone)
 
 ```bash
-mb-gcc -O2 -mlittle-endian -mxl-soft-mul \
+mb-gcc -O2 -mlittle-endian -mxl-soft-mul -nostdlib \
     -I src \
-    src/main.c \
+    src/crt0.S src/main.c \
+    -T src/arty.ld \
+    -lgcc \
     -o axizero_test.elf
 
 mb-objcopy -O binary axizero_test.elf axizero_test.bin
 ```
+
+`-lgcc` must come **after** the source files to resolve `__divsi3`/`__modsi3`.
 
 Load with `xsdb` or Vitis debugger.

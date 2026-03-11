@@ -74,6 +74,10 @@ object AxiZeroGen extends App {
 // ---------------------------------------------------------------------------
 object GenHelper {
 
+  private val COPYRIGHT =
+    "// Copyright (c) 2026 Leonardo Capossio — bard0 design  hello@bard0.com\n" +
+    "// SPDX-License-Identifier: MIT\n"
+
   private def spinalCfg(name: String) =
     SpinalConfig(
       targetDirectory  = "generated",
@@ -85,9 +89,16 @@ object GenHelper {
       )
     )
 
+  def prependCopyright(path: java.nio.file.Path): Unit = {
+    val existing = java.nio.file.Files.readString(path)
+    if (!existing.startsWith("// Copyright"))
+      java.nio.file.Files.writeString(path, COPYRIGHT + existing)
+  }
+
   def liteCrossbar(cfg: AxiZeroConfig, name: String): Unit = {
     println(s"\n[axiZero] Generating $name ...")
-    spinalCfg(name).generateVerilog(new AxiZeroLiteTop(cfg))
+    val report = spinalCfg(name).generateVerilog(new AxiZeroLiteTop(cfg))
+    prependCopyright(java.nio.file.Paths.get("generated", s"$name.v"))
     println(s"[axiZero] Done → generated/$name.v")
   }
 
@@ -98,6 +109,7 @@ object GenHelper {
   def mixedCrossbar(cfg: AxiZeroConfig, name: String): Unit = {
     println(s"\n[axiZero] Generating $name ...")
     spinalCfg(name).generateVerilog(new AxiZeroMixedTop(cfg))
+    prependCopyright(java.nio.file.Paths.get("generated", s"$name.v"))
     println(s"[axiZero] Done → generated/$name.v")
   }
 }

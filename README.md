@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 28 SpinalSim + 18 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 34 SpinalSim + 18 cocotb tests pass.
 
 ---
 
@@ -24,6 +24,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - AXI4-Lite (no IDs, single-beat)
 - Per-port mixed AXI4 / AXI4-Lite with automatic adapter insertion
 - AXI4-Lite data-width conversion (zero-extend / truncate at port boundaries)
+- Full AXI4 data-width conversion — burst-splitting upsizer and downsizer at port boundaries; all three burst types (FIXED, INCR, WRAP) supported
 - Register slices, per master and per slave port
 - Round-robin, fixed-priority, and weighted round-robin arbitration
 - Pipelined mode (`max_outstanding > 1`) with per-slave W-route FIFOs and ID-based response routing
@@ -36,10 +37,8 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 
 **Not yet implemented:**
 
-- Full AXI4 data-width conversion (burst-splitting / beat-merging): equal data widths required across Full AXI4 ports. Mismatched widths are rejected at elaboration time.
 - Clock domain crossing: all ports share a single clock (`aclk`) and reset (`aresetn`).
 - AXI4-Lite crossbar pipelined mode: the Lite-only path is always single-outstanding per slave.
-- WRAP and FIXED burst types: only INCR bursts are routed. The crossbar does not inspect or transform `AxBURST`.
 
 ---
 
@@ -52,7 +51,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 | AXI4-Lite | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Per-port mixed AXI4/Lite | ✓ | — | — | — | — |
 | AXI4-Lite data-width conversion | ✓ | ✓ | ✓ | ✓ | — |
-| Full AXI4 data-width conversion | planned | ✓ | ✓ | ✓ | — |
+| Full AXI4 data-width conversion | ✓ | ✓ | ✓ | ✓ | — |
 | Register slices | ✓ | ✓ | ✓ | ✓ | — |
 | Round-robin / fixed-priority | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Weighted round-robin | ✓ | ✓ | — | — | ✓ |
@@ -186,9 +185,9 @@ designs:
     max_outstanding: 4
 
     # Optional: override the internal fabric data width. Defaults to the
-    # maximum data_width across all ports. AXI4-Lite width converters are
-    # inserted at ports that are narrower than the fabric. Full AXI4 ports
-    # must match the fabric width (data-width conversion not yet implemented).
+    # maximum data_width across all ports.
+    # AXI4-Lite ports: zero-extend / truncate converter inserted automatically.
+    # Full AXI4 ports: burst-level upsizer or downsizer inserted automatically.
     fabric_data_width: 64
 
     masters:
@@ -235,7 +234,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-28 tests pass across 5 suites:
+34 tests pass across 6 suites:
 
 | Suite | Tests | Description |
 |---|---|---|
@@ -244,6 +243,7 @@ sbt test
 | `MixedCrossbarSpec` | 4 | Full↔Lite adapters, mixed address maps |
 | `ArtySpec` | 5 | Sequence matching the Arty A7 hardware tests (T4, T5, T6, T9, combined) |
 | `IpifWriteSpec` | 5 | IPIF-style slaves (Xilinx GPIO/UART-Lite require AW+W simultaneous), blocking and pipelined modes |
+| `WidthConverterSpec` | 6 | Full AXI4 width conversion: 32→64 upsize, 64→32 downsize, 32→64→32 passthrough; single-beat, burst, routing |
 
 ### cocotb (integration tests against pre-built Verilog, run with Python)
 
@@ -355,7 +355,8 @@ hw/spinal/axizero/
     Axi4FullToLiteAdapter.scala
     Axi4LiteToFullAdapter.scala
     RegisterSlice.scala
-    WidthConverter.scala       # Lite: implemented; Full: equal-width passthrough only
+    WidthConverter.scala       # Lite and Full AXI4 data-width conversion
+    Axi4DownsizerExt.scala     # fork of SpinalHDL Axi4Downsizer with FIXED/INCR/WRAP support
   gen/
     AxiZeroGen.scala           # built-in generation entry point
     ArtyDutGen.scala           # Arty A7 DUT
