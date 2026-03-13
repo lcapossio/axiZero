@@ -116,12 +116,12 @@ object SimHelpers {
 
   /** Single-beat write. Returns echoed B.id. */
   def fullWrite(m: Axi4, cd: ClockDomain, addr: Long, data: Long,
-                id: Int = 0, strb: Int = 0xF): Int =
-    fullBurstWrite(m, cd, addr, Seq(data), id, strb)
+                id: Int = 0, strb: Int = 0xF, qos: Int = 0): Int =
+    fullBurstWrite(m, cd, addr, Seq(data), id, strb, qos)
 
   /** Single-beat read. Returns (data, echoed R.id). */
-  def fullRead(m: Axi4, cd: ClockDomain, addr: Long, id: Int = 0): (Long, Int) = {
-    val (data, rid) = fullBurstRead(m, cd, addr, 1, id)
+  def fullRead(m: Axi4, cd: ClockDomain, addr: Long, id: Int = 0, qos: Int = 0): (Long, Int) = {
+    val (data, rid) = fullBurstRead(m, cd, addr, 1, id, stallCycles = 0, qos = qos)
     (data.head, rid)
   }
 
@@ -131,7 +131,7 @@ object SimHelpers {
    * Returns the echoed B.id.
    */
   def fullBurstWrite(m: Axi4, cd: ClockDomain, addr: Long, data: Seq[Long],
-                     id: Int = 0, strb: Int = 0xF): Int = {
+                     id: Int = 0, strb: Int = 0xF, qos: Int = 0): Int = {
     val numBeats = data.length
     m.aw.valid #= true
     m.aw.addr  #= addr
@@ -139,6 +139,7 @@ object SimHelpers {
     if (m.config.useLen)   m.aw.len   #= numBeats - 1
     if (m.config.useSize)  m.aw.size  #= sizeOf(m)
     if (m.config.useBurst) m.aw.burst #= 1  // INCR
+    if (m.config.useQos)   m.aw.qos   #= qos
     while ({ cd.waitSampling(); !m.aw.ready.toBoolean }) {}
     m.aw.valid #= false
 
@@ -168,13 +169,14 @@ object SimHelpers {
    * Returns (Seq of beat data, echoed R.id from last beat).
    */
   def fullBurstRead(m: Axi4, cd: ClockDomain, addr: Long, beats: Int,
-                    id: Int = 0, stallCycles: Int = 0): (Seq[Long], Int) = {
+                    id: Int = 0, stallCycles: Int = 0, qos: Int = 0): (Seq[Long], Int) = {
     m.ar.valid #= true
     m.ar.addr  #= addr
     if (m.config.useId)    m.ar.id    #= id
     if (m.config.useLen)   m.ar.len   #= beats - 1
     if (m.config.useSize)  m.ar.size  #= sizeOf(m)
     if (m.config.useBurst) m.ar.burst #= 1
+    if (m.config.useQos)   m.ar.qos   #= qos
     while ({ cd.waitSampling(); !m.ar.ready.toBoolean }) {}
     m.ar.valid #= false
 

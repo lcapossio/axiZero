@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 34 SpinalSim + 18 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 39 SpinalSim + 24 cocotb tests pass.
 
 ---
 
@@ -27,13 +27,10 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - Full AXI4 data-width conversion — burst-splitting upsizer and downsizer at port boundaries; all three burst types (FIXED, INCR, WRAP) supported
 - Register slices, per master and per slave port
 - Round-robin, fixed-priority, and weighted round-robin arbitration
+- QoS arbitration (highest AXQOS wins) with aging-based anti-starvation
 - Pipelined mode (`max_outstanding > 1`) with per-slave W-route FIFOs and ID-based response routing
 - IPIF compatibility — AW and W are presented simultaneously to slaves that require it
 - YAML → Verilog generator with port-name post-processing for Vivado AXI naming conventions
-
-**Accepted in config but not yet implemented (falls back with elaboration warning):**
-
-- `qos` — falls back to round-robin (AXQOS field is ignored)
 
 **Not yet implemented:**
 
@@ -55,10 +52,9 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 | Register slices | ✓ | ✓ | ✓ | ✓ | — |
 | Round-robin / fixed-priority | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Weighted round-robin | ✓ | ✓ | — | — | ✓ |
-| QoS arbitration | planned² | ✓ | — | — | ✓ |
+| QoS arbitration | ✓ | ✓ | — | — | ✓ |
 
 ¹ CERN-OHL-S is copyleft (share-alike); requires releasing your full digital design on request.
-² `qos` is accepted as a config value but currently falls back to round-robin with an elaboration warning.
 
 ---
 
@@ -172,8 +168,8 @@ designs:
     #                        grants per arbitration round. Requires the `weights`
     #                        key with one integer entry per master.
     #
-    # qos                 — accepted but falls back to round_robin with a warning
-    #                       (AXQOS decoding not yet implemented)
+    # qos                 — highest AXQOS wins; equal AXQOS falls back to round_robin.
+    #                       Waiting requests gain age-based boost to prevent starvation.
     #
     arbitration: round_robin     # round_robin | fixed_priority | weighted_round_robin | qos
     weights: [3, 1]              # weighted_round_robin only; one integer per master
@@ -234,7 +230,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-34 tests pass across 6 suites:
+39 tests pass across 7 suites:
 
 | Suite | Tests | Description |
 |---|---|---|
@@ -244,6 +240,7 @@ sbt test
 | `ArtySpec` | 5 | Sequence matching the Arty A7 hardware tests (T4, T5, T6, T9, combined) |
 | `IpifWriteSpec` | 5 | IPIF-style slaves (Xilinx GPIO/UART-Lite require AW+W simultaneous), blocking and pipelined modes |
 | `WidthConverterSpec` | 6 | Full AXI4 width conversion: 32→64 upsize, 64→32 downsize, 32→64→32 passthrough; single-beat, burst, routing |
+| `QosCrossbarSpec` | 5 | QoS arbitration: higher AWQOS/ARQOS wins (blocking + pipelined), equal-QoS round-robin tie-break, aging anti-starvation |
 
 ### cocotb (integration tests against pre-built Verilog, run with Python)
 
@@ -255,15 +252,17 @@ python3 sim/cocotb_gen/run_all.py          # all suites
 python3 sim/cocotb_gen/run_all.py lite     # MyLite_1M4S.v only
 python3 sim/cocotb_gen/run_all.py full     # MyFull_2M2S.v only
 python3 sim/cocotb_gen/run_all.py wrr      # MyLite_2M2S_WRR.v only
+python3 sim/cocotb_gen/run_all.py qos      # MyFull_2M2S_QoS.v only
 ```
 
-18 tests pass across 3 suites:
+24 tests pass across 4 suites:
 
 | Suite | DUT | Tests | Description |
 |---|---|---|---|
 | `lite` | `MyLite_1M4S.v` | 6 | AxiLiteMaster → 4-slave crossbar: single R/W, address routing, sequential writes, multi-slave pattern, overwrite isolation, 60× random |
 | `full` | `MyFull_2M2S.v` | 6 | AxiMaster → 2-slave crossbar: single R/W, address routing + isolation, 16-beat burst, 64-beat burst (AWLEN=63), alternating slaves, 40× random |
 | `wrr` | `MyLite_2M2S_WRR.v` | 6 | 2-master WRR crossbar: dual-master R/W, address routing, concurrent bandwidth, no starvation, concurrent different slaves, 80× random |
+| `qos` | `MyFull_2M2S_QoS.v` | 6 | 2-master QoS crossbar: dual-master R/W, address routing, higher QoS wins contention, equal-QoS round-robin, aging anti-starvation, QoS read priority |
 
 ---
 
@@ -283,6 +282,14 @@ All 10 tests pass (g\_fail=0, g\_pass=10).
 | T10 | Cross-slave boundary: last word of BRAM #0, first word of BRAM #1 |
 
 Vivado TCL scripts and MicroBlaze firmware: [`hw/vivado/arty_a7/`](hw/vivado/arty_a7/) and [`sw/arty_a7/`](sw/arty_a7/).
+
+**QoS hardware stress** (2 masters: MicroBlaze QoS=15 + traffic generator QoS=0): all 4 tests pass (g\_fail=0, g\_pass=4).
+
+```bash
+sbt "runMain axizero.gen.ArtyQosDutGen"
+python hw/vivado/arty_a7/rename_qos_ports.py
+python hw/vivado/arty_a7/run_qos_test.py
+```
 
 ---
 
@@ -359,7 +366,8 @@ hw/spinal/axizero/
     Axi4DownsizerExt.scala     # fork of SpinalHDL Axi4Downsizer with FIXED/INCR/WRAP support
   gen/
     AxiZeroGen.scala           # built-in generation entry point
-    ArtyDutGen.scala           # Arty A7 DUT
+    ArtyDutGen.scala           # Arty A7 DUT (1M×4S)
+    ArtyQosDutGen.scala        # Arty A7 QoS DUT (2M×4S, QoS arbitration)
 hw/sim/axizero/sim/            # SpinalSim testbenches (sbt test)
 sim/cocotb_gen/
   run_all.py                   # Python runner (lite + full suites)

@@ -19,9 +19,9 @@ sealed trait ArbitrationPolicy
 case object RoundRobin extends ArbitrationPolicy
 /** Fixed priority: master 0 has highest priority, master N-1 lowest. */
 case object FixedPriority extends ArbitrationPolicy
-/** QoS-based: uses the AXQOS signal to rank requests. Falls back to
- *  round-robin among equal-priority requests. Requires useQos=true on
- *  all master ports in the config. */
+/** QoS-based: uses AXQOS to rank requests and falls back to round-robin
+ *  among equal-priority requests. Masters without QoS signal are treated
+ *  as AXQOS=0. Waiting requesters receive age boost to prevent starvation. */
 case object QosBased extends ArbitrationPolicy
 /** Weighted round-robin: master i gets weights(i) grants per round.
  *  weights.size must equal the number of masters. */

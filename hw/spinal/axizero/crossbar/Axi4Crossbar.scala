@@ -83,13 +83,50 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
     Mux(maskedReqs.orR, OHMasking.first(maskedReqs), OHMasking.first(requests))
   }
 
-  def arbitrate(requests: Bits, rrPtr: UInt, credits: Vec[UInt] = null): Bits = cfg.arbitration match {
+  val qosAgeMax = 15
+  val qosAgeW   = log2Up(qosAgeMax + 1)
+
+  def ageQos(rawQos: Vec[UInt], age: Vec[UInt]): Vec[UInt] = {
+    val eff = Vec(UInt(4 bits), M)
+    for (mi <- 0 until M) {
+      val sum = UInt((4 + qosAgeW) bits)
+      sum := rawQos(mi).resize(4 + qosAgeW) + age(mi).resize(4 + qosAgeW)
+      eff(mi) := Mux(sum > U(15, 4 + qosAgeW bits), U(15, 4 bits), sum.resize(4))
+    }
+    eff
+  }
+
+  def updateQosAge(age: Vec[UInt], requests: Bits, grantFire: Bool, grantIdx: UInt): Unit = {
+    for (mi <- 0 until M) {
+      when(!requests(mi)) {
+        age(mi) := 0
+      } elsewhen(grantFire && (grantIdx === mi)) {
+        age(mi) := 0
+      } otherwise {
+        when(age(mi) =/= U(qosAgeMax, qosAgeW bits)) {
+          age(mi) := age(mi) + 1
+        }
+      }
+    }
+  }
+
+  def qosGrant(requests: Bits, rrPtr: UInt, qos: Vec[UInt]): Bits = {
+    // Compute max QoS among active requesters using a reduction tree (no feedback)
+    val maskedQos = (0 until M).map(mi => Mux(requests(mi), qos(mi), U(0, 4 bits)))
+    val maxQ = maskedQos.reduce((a, b) => Mux(a > b, a, b))
+
+    val bestReqs = Bits(M bits)
+    for (mi <- 0 until M) {
+      bestReqs(mi) := requests(mi) && (qos(mi) === maxQ)
+    }
+
+    rrGrant(bestReqs, rrPtr)
+  }
+
+  def arbitrate(requests: Bits, rrPtr: UInt, qos: Vec[UInt] = null, credits: Vec[UInt] = null): Bits = cfg.arbitration match {
     case RoundRobin            => rrGrant(requests, rrPtr)
     case FixedPriority         => OHMasking.first(requests)
-    case QosBased =>
-      SpinalWarning("[axiZero] QosBased arbitration is not yet implemented " +
-        "— falling back to round-robin.  AXQOS signals are ignored.")
-      rrGrant(requests, rrPtr)
+    case QosBased              => qosGrant(requests, rrPtr, qos)
     case WeightedRoundRobin(_) => wrrGrant(requests, rrPtr, credits)
   }
 
@@ -184,6 +221,19 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
     case _ => null
   }
 
+  val wrQosAge = cfg.arbitration match {
+    case QosBased =>
+      Vec(Seq.tabulate(S)(_ =>
+        Vec(Seq.fill(M)(RegInit(U(0, qosAgeW bits))))))
+    case _ => null
+  }
+  val rdQosAge = cfg.arbitration match {
+    case QosBased =>
+      Vec(Seq.tabulate(S)(_ =>
+        Vec(Seq.fill(M)(RegInit(U(0, qosAgeW bits))))))
+    case _ => null
+  }
+
   /** Decrement credit for the granted master, reset all when exhausted. */
   def wrrOnGrant(credits: Vec[Vec[UInt]], si: Int, grantIdx: UInt, requests: Bits): Unit = {
     if (credits == null) return
@@ -252,11 +302,14 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
 
       when(!wrActive(si)) {
         val requests = Bits(M bits)
+        val qos      = Vec(UInt(4 bits), M)
         for (mi <- 0 until M) {
           requests(mi) := io.masters(mi).aw.valid && addrDecodeOH(io.masters(mi).aw.addr)(si)
+          qos(mi)      := (if (cfg.masters(mi).config.useQos) io.masters(mi).aw.qos.asUInt else U(0, 4 bits))
         }
+        val qosEff = if (wrQosAge != null) ageQos(qos, wrQosAge(si)) else qos
 
-        val grant    = arbitrate(requests, wrRrPtr(si), if (wrCredits != null) wrCredits(si) else null)
+        val grant    = arbitrate(requests, wrRrPtr(si), qosEff, if (wrCredits != null) wrCredits(si) else null)
         val grantIdx = ohToIdx(grant)
         val anyReq   = requests.orR
 
@@ -281,6 +334,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
             wrrOnGrant(wrCredits, si, grantIdx, requests)
           }
         }
+        if (wrQosAge != null) updateQosAge(wrQosAge(si), requests, slv.aw.fire, grantIdx)
 
       } otherwise {
         val gmi = wrGranted(si)
@@ -306,11 +360,14 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
 
       when(!rdActive(si)) {
         val requests = Bits(M bits)
+        val qos      = Vec(UInt(4 bits), M)
         for (mi <- 0 until M) {
           requests(mi) := io.masters(mi).ar.valid && addrDecodeOH(io.masters(mi).ar.addr)(si)
+          qos(mi)      := (if (cfg.masters(mi).config.useQos) io.masters(mi).ar.qos.asUInt else U(0, 4 bits))
         }
+        val qosEff = if (rdQosAge != null) ageQos(qos, rdQosAge(si)) else qos
 
-        val grant    = arbitrate(requests, rdRrPtr(si), if (rdCredits != null) rdCredits(si) else null)
+        val grant    = arbitrate(requests, rdRrPtr(si), qosEff, if (rdCredits != null) rdCredits(si) else null)
         val grantIdx = ohToIdx(grant)
         val anyReq   = requests.orR
 
@@ -326,6 +383,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
             wrrOnGrant(rdCredits, si, grantIdx, requests)
           }
         }
+        if (rdQosAge != null) updateQosAge(rdQosAge(si), requests, slv.ar.fire, grantIdx)
 
       } otherwise {
         val gmi = rdGranted(si)
@@ -373,11 +431,14 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
       // -- AW: accept new write addresses while below depth --
       val awCanAccept = wrOutstanding(si) < depth
       val requests    = Bits(M bits)
+      val qos         = Vec(UInt(4 bits), M)
       for (mi <- 0 until M) {
         requests(mi) := io.masters(mi).aw.valid && addrDecodeOH(io.masters(mi).aw.addr)(si)
+        qos(mi)      := (if (cfg.masters(mi).config.useQos) io.masters(mi).aw.qos.asUInt else U(0, 4 bits))
       }
+      val qosEff = if (wrQosAge != null) ageQos(qos, wrQosAge(si)) else qos
 
-      val grant    = arbitrate(requests, wrRrPtr(si), if (wrCredits != null) wrCredits(si) else null)
+      val grant    = arbitrate(requests, wrRrPtr(si), qosEff, if (wrCredits != null) wrCredits(si) else null)
       val grantIdx = ohToIdx(grant)
       val anyReq   = requests.orR
 
@@ -413,6 +474,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
         wrRrPtr(si) := (grantIdx + 1).resized
         wrrOnGrant(wrCredits, si, grantIdx, requests)
       }
+      if (wrQosAge != null) updateQosAge(wrQosAge(si), requests, awPush, grantIdx)
 
       // -- W: forward beats from the master at the FIFO head --
       when(!wFifoEmpty) {
@@ -487,11 +549,14 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
 
       val arCanAccept = rdOutstanding(si) < depth
       val requests    = Bits(M bits)
+      val qos         = Vec(UInt(4 bits), M)
       for (mi <- 0 until M) {
         requests(mi) := io.masters(mi).ar.valid && addrDecodeOH(io.masters(mi).ar.addr)(si)
+        qos(mi)      := (if (cfg.masters(mi).config.useQos) io.masters(mi).ar.qos.asUInt else U(0, 4 bits))
       }
+      val qosEff = if (rdQosAge != null) ageQos(qos, rdQosAge(si)) else qos
 
-      val grant    = arbitrate(requests, rdRrPtr(si), if (rdCredits != null) rdCredits(si) else null)
+      val grant    = arbitrate(requests, rdRrPtr(si), qosEff, if (rdCredits != null) rdCredits(si) else null)
       val grantIdx = ohToIdx(grant)
       val anyReq   = requests.orR
 
@@ -506,6 +571,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
         rdRrPtr(si) := (grantIdx + 1).resized
         wrrOnGrant(rdCredits, si, grantIdx, requests)
       }
+      if (rdQosAge != null) updateQosAge(rdQosAge(si), requests, slv.ar.fire, grantIdx)
 
       // Outstanding read counter: inc on AR fire, dec on R last beat
       val rDec = Bool()

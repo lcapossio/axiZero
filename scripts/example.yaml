@@ -99,7 +99,35 @@ designs:
         size: 0x20000000    # 512 MB
         data_width: 64
 
-  # ── Example 5: mixed AXI4 + AXI4-Lite ports ──────────────────────────────
+  # ── Example 5: QoS-based arbitration (full AXI4) ────────────────────────
+  #
+  # Two masters contend for two slaves.  Arbitration uses AXQOS[3:0]:
+  # the master with the higher QoS value wins when both request the same
+  # slave simultaneously.  Equal QoS falls back to round-robin.
+  # Aging counters prevent starvation of low-QoS masters.
+  #
+  - name: MyFull_2M2S_QoS
+    type: full
+    arbitration: qos
+    max_outstanding: 4
+
+    masters:
+      - addr_width: 32
+        data_width: 32
+        id_width: 4
+      - addr_width: 32
+        data_width: 32
+        id_width: 4
+
+    slaves:
+      - base: 0x00000000
+        size: 0x10000
+        data_width: 32
+      - base: 0x00010000
+        size: 0x10000
+        data_width: 32
+
+  # ── Example 6: mixed AXI4 + AXI4-Lite ports ──────────────────────────────
   #
   # A DMA engine (full AXI4, id_width=4) and a CPU config port (AXI4-Lite)
   # share three slaves: DDR (full AXI4) plus UART and GPIO (AXI4-Lite).

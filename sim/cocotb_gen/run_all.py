@@ -44,6 +44,12 @@ SUITES = {
         "module":   "test_wrr",
         "test_dir": HERE / "wrr",
     },
+    "qos": {
+        "rtl":      REPO_ROOT / "generated" / "MyFull_2M2S_QoS.v",
+        "toplevel": "AxiZeroMixedTop",
+        "module":   "test_qos",
+        "test_dir": HERE / "qos",
+    },
 }
 
 

@@ -1,0 +1,216 @@
+﻿#!/usr/bin/env python3
+# Copyright (c) 2026 Leonardo Capossio â€” bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT
+"""
+run_qos_test.py â€” Build, program, and run the QoS hardware test on Arty A7-100T.
+
+Steps:
+  1. Vivado: create project + synth + impl + bitstream  (create_project_qos.tcl)
+  2. mb-gcc: compile main_qos.c â†’ main_qos_le.elf
+  3. xsdb:   program bitstream + ELF, wait, read g_fail / g_pass
+"""
+
+import os
+import pathlib
+import subprocess
+import struct
+import sys
+import time
+
+# â”€â”€ Paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+REPO_ROOT  = SCRIPT_DIR / ".." / ".." / ".."
+SW_DIR     = REPO_ROOT / "sw" / "arty_a7"
+SRC_DIR    = SW_DIR / "src"
+
+VIVADO_BIN = pathlib.Path(r"C:\AMDDesignTools\2025.2\Vivado\bin\vivado.bat")
+XSDB_BIN   = pathlib.Path(r"C:\AMDDesignTools\2025.2\Vitis\bin\xsdb.bat")
+MBGCC_BIN  = pathlib.Path(r"C:\AMDDesignTools\2025.2\Vitis\gnu\microblaze\nt\bin\mb-gcc.exe")
+
+PROJ_DIR = SCRIPT_DIR / "axizero_arty_qos"
+BIT_FILE = PROJ_DIR / "axizero_arty_qos.runs" / "impl_1" / "system_wrapper.bit"
+ELF_FILE = SW_DIR / "build" / "main_qos_le.elf"
+
+CREATE_TCL = SCRIPT_DIR / "create_project_qos.tcl"
+
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def run(cmd, cwd=None, timeout=None, desc=""):
+    """Run a command, streaming output. Returns CompletedProcess."""
+    print(f"\n{'='*60}")
+    print(f"  {desc}")
+    print(f"  cmd: {' '.join(str(c) for c in cmd)}")
+    print(f"{'='*60}\n")
+    result = subprocess.run(
+        [str(c) for c in cmd],
+        cwd=str(cwd) if cwd else None,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        print(f"\n*** FAILED (rc={result.returncode}): {desc}")
+        sys.exit(result.returncode)
+    return result
+
+
+# â”€â”€ Step 1: Vivado build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def step_vivado():
+    """Run create_project_qos.tcl through Vivado batch mode."""
+    if BIT_FILE.exists():
+        print(f"[skip] Bitstream already exists: {BIT_FILE}")
+        return
+    run(
+        [VIVADO_BIN, "-mode", "batch", "-source", str(CREATE_TCL)],
+        cwd=REPO_ROOT,
+        timeout=3600,
+        desc="Vivado: create project + synth + impl + bitstream",
+    )
+    if not BIT_FILE.exists():
+        print(f"*** ERROR: bitstream not found at {BIT_FILE}")
+        sys.exit(1)
+    print(f"[ok] Bitstream: {BIT_FILE}")
+
+
+# â”€â”€ Step 2: Compile firmware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def step_compile():
+    """Compile main_qos.c with mb-gcc."""
+    ELF_FILE.parent.mkdir(parents=True, exist_ok=True)
+    run(
+        [
+            MBGCC_BIN,
+            "-O2", "-mlittle-endian", "-mxl-soft-mul",
+            "-nostdlib",
+            "-I", str(SRC_DIR),
+            str(SRC_DIR / "crt0.S"),
+            str(SRC_DIR / "main_qos.c"),
+            "-T", str(SRC_DIR / "arty.ld"),
+            "-lgcc",
+            "-o", str(ELF_FILE),
+        ],
+        cwd=SW_DIR,
+        timeout=60,
+        desc="mb-gcc: compile main_qos_le.elf",
+    )
+    print(f"[ok] ELF: {ELF_FILE}  ({ELF_FILE.stat().st_size} bytes)")
+
+
+# â”€â”€ Step 3: Find g_fail / g_pass symbol addresses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def find_symbols():
+    """Extract g_fail and g_pass addresses from the ELF using mb-nm."""
+    nm_bin = MBGCC_BIN.parent / "mb-nm.exe"
+    result = subprocess.run(
+        [str(nm_bin), str(ELF_FILE)],
+        capture_output=True, text=True, timeout=10,
+    )
+    addrs = {}
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 3:
+            name = parts[2]
+            if name in ("g_fail", "g_pass"):
+                addrs[name] = int(parts[0], 16)
+    if "g_fail" not in addrs or "g_pass" not in addrs:
+        print(f"*** Could not find g_fail/g_pass in ELF symbols")
+        print(f"    nm output (last 20 lines):\n")
+        for line in result.stdout.splitlines()[-20:]:
+            print(f"    {line}")
+        sys.exit(1)
+    print(f"[ok] g_fail @ 0x{addrs['g_fail']:08X},  g_pass @ 0x{addrs['g_pass']:08X}")
+    return addrs
+
+
+# â”€â”€ Step 4: Program + run + read results via xsdb â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def step_run(addrs):
+    """Program the Arty A7 and read test results."""
+    g_fail_addr = addrs["g_fail"]
+    g_pass_addr = addrs["g_pass"]
+
+    # Write an xsdb TCL script inline
+    xsdb_tcl = SCRIPT_DIR / "_qos_xsdb_temp.tcl"
+    xsdb_tcl.write_text(f"""\
+# Auto-generated by run_qos_test.py
+connect
+after 500
+fpga {str(BIT_FILE).replace(chr(92), '/')}
+after 1000
+
+# Target MicroBlaze #0 (not the Debug Module)
+targets -set -filter {{name =~ "MicroBlaze #0"}}
+after 200
+
+# Reset and download ELF
+rst -processor
+after 200
+dow {str(ELF_FILE).replace(chr(92), '/')}
+after 200
+con
+
+# Wait for tests: MB boots with 3s delay + QoS stress execution
+# Total ~55 seconds
+puts "\\nWaiting 55s for test completion..."
+after 55000
+
+# Stop processor and read results
+rst -processor
+after 500
+
+set fail_val [mrd -value 0x{g_fail_addr:08X}]
+set pass_val [mrd -value 0x{g_pass_addr:08X}]
+
+puts "\\n=========================================="
+puts "  QoS HW Test Results"
+puts "=========================================="
+puts "  g_fail = $fail_val   (@ 0x{g_fail_addr:08X})"
+puts "  g_pass = $pass_val   (@ 0x{g_pass_addr:08X})"
+puts "=========================================="
+
+if {{$fail_val == 0}} {{
+    puts "  *** ALL QoS TESTS PASSED ***"
+}} else {{
+    puts "  *** QoS FAILURES DETECTED ***"
+}}
+puts ""
+
+disconnect
+exit
+""", encoding="utf-8")
+
+    run(
+        [XSDB_BIN, str(xsdb_tcl)],
+        cwd=SCRIPT_DIR,
+        timeout=180,
+        desc="xsdb: program + run + read results",
+    )
+
+    # Clean up temp file
+    xsdb_tcl.unlink(missing_ok=True)
+
+
+# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def main():
+    print("axiZero QoS hardware test â€” Arty A7-100T")
+    print(f"  Vivado:  {VIVADO_BIN}")
+    print(f"  mb-gcc:  {MBGCC_BIN}")
+    print(f"  xsdb:    {XSDB_BIN}")
+    print()
+
+    # Check tools exist
+    for tool, path in [("Vivado", VIVADO_BIN), ("mb-gcc", MBGCC_BIN), ("xsdb", XSDB_BIN)]:
+        if not path.exists():
+            print(f"*** {tool} not found at {path}")
+            sys.exit(1)
+
+    step_vivado()
+    step_compile()
+    addrs = find_symbols()
+    step_run(addrs)
+
+
+if __name__ == "__main__":
+    main()
+
