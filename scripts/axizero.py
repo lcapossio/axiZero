@@ -183,6 +183,20 @@ def _validate_design(d: dict, idx: int):
         if pt is not None and pt not in ("lite", "full"):
             _err(f"{tag} slave[{si}]: 'type' must be 'lite' or 'full'")
 
+    # Validate slave id_width: if explicitly set on a full slave, it must be
+    # at least as wide as the crossbar's expanded ID (master id + index bits).
+    if not _is_all_lite(d):
+        required_idw = _compute_slave_idw(d)
+        for si, s in enumerate(slaves):
+            if _port_type(s, d) == "full" and "id_width" in s:
+                user_idw = s["id_width"]
+                if user_idw < required_idw:
+                    _err(f"{tag} slave[{si}]: id_width={user_idw} is too narrow; "
+                         f"the crossbar expands IDs to {required_idw} bits "
+                         f"(master id_width + {required_idw - max(m.get('id_width', 4) for m in masters if _port_type(m, d) == 'full')} "
+                         f"index bits for {len(masters)} masters). "
+                         f"Set id_width to at least {required_idw} or omit it for auto-computation.")
+
 
 def _parse_int(v) -> int:
     """Accept int or hex string like '0x1000'."""

@@ -230,7 +230,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-39 tests pass across 7 suites:
+40 tests pass across 8 suites:
 
 | Suite | Tests | Description |
 |---|---|---|
@@ -241,6 +241,7 @@ sbt test
 | `IpifWriteSpec` | 5 | IPIF-style slaves (Xilinx GPIO/UART-Lite require AW+W simultaneous), blocking and pipelined modes |
 | `WidthConverterSpec` | 6 | Full AXI4 width conversion: 32→64 upsize, 64→32 downsize, 32→64→32 passthrough; single-beat, burst, routing |
 | `QosCrossbarSpec` | 5 | QoS arbitration: higher AWQOS/ARQOS wins (blocking + pipelined), equal-QoS round-robin tie-break, aging anti-starvation |
+| `QosStressShortSpec` | 1 | Short 4-master QoS stress: distinct patterns (sequential, reverse, sparse, random short bursts), concurrent traffic, end-state validation |
 
 ### cocotb (integration tests against pre-built Verilog, run with Python)
 
@@ -283,12 +284,18 @@ All 10 tests pass (g\_fail=0, g\_pass=10).
 
 Vivado TCL scripts and MicroBlaze firmware: [`hw/vivado/arty_a7/`](hw/vivado/arty_a7/) and [`sw/arty_a7/`](sw/arty_a7/).
 
-**QoS hardware stress** (2 masters: MicroBlaze QoS=15 + traffic generator QoS=0): all 4 tests pass (g\_fail=0, g\_pass=4).
+**QoS hardware stress (multi-master, heavy traffic):**
+MicroBlaze QoS=15 plus 3 hardware generators (QoS=8/4/0), each issuing 512 words x 8 passes.
+Generator patterns are intentionally different: sequential BRAM0, reverse-order BRAM1, and random-address short bursts.
+`run_qos_stress_test.py` now runs the board continuously for 10 minutes and fails if:
+- `g_fail` becomes non-zero,
+- heartbeat (`g_heartbeat`) stops advancing for 30 seconds,
+- no stress iteration (`g_iteration`) completes.
 
 ```bash
-sbt "runMain axizero.gen.ArtyQosDutGen"
-python hw/vivado/arty_a7/rename_qos_ports.py
-python hw/vivado/arty_a7/run_qos_test.py
+sbt "runMain axizero.gen.ArtyQosStressDutGen"
+python hw/vivado/arty_a7/rename_qos_stress_ports.py
+python hw/vivado/arty_a7/run_qos_stress_test.py
 ```
 
 ---
