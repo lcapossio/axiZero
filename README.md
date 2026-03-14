@@ -14,6 +14,10 @@ Hardware-validated on Xilinx Arty A7-100T. 40 SpinalSim + 24 cocotb tests pass.
 
 ---
 
+**Contents:** [What it does](#what-it-does) · [Comparison](#comparison) · [Quick start](#quick-start) · [YAML reference](#yaml-configuration-reference) · [Simulation](#simulation) · [Hardware validation](#hardware-validation--arty-a7-100t) · [Port naming](#port-naming) · [Tool integration](#tool-integration) · [Project structure](#project-structure) · [License](#license)
+
+---
+
 ## What it does
 
 axiZero generates a non-blocking AXI interconnect that routes M masters to N slaves based on a static address map. Each port can be independently configured as AXI4 or AXI4-Lite; the required adapters are inserted automatically.
