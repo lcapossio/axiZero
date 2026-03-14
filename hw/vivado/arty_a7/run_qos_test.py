@@ -17,16 +17,16 @@ import struct
 import sys
 import time
 
+from find_xilinx_tools import require_tools
+
 # â”€â”€ Paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT  = SCRIPT_DIR / ".." / ".." / ".."
-SW_DIR     = REPO_ROOT / "sw" / "arty_a7"
-SRC_DIR    = SW_DIR / "src"
+REPO_ROOT  = SCRIPT_DIR / “..” / “..” / “..”
+SW_DIR     = REPO_ROOT / “sw” / “arty_a7”
+SRC_DIR    = SW_DIR / “src”
 
-VIVADO_BIN = pathlib.Path(r"C:\AMDDesignTools\2025.2\Vivado\bin\vivado.bat")
-XSDB_BIN   = pathlib.Path(r"C:\AMDDesignTools\2025.2\Vitis\bin\xsdb.bat")
-MBGCC_BIN  = pathlib.Path(r"C:\AMDDesignTools\2025.2\Vitis\gnu\microblaze\nt\bin\mb-gcc.exe")
+VIVADO_BIN, XSDB_BIN, MBGCC_BIN = require_tools()
 
 PROJ_DIR = SCRIPT_DIR / "axizero_arty_qos"
 BIT_FILE = PROJ_DIR / "axizero_arty_qos.runs" / "impl_1" / "system_wrapper.bit"
@@ -100,7 +100,7 @@ def step_compile():
 
 def find_symbols():
     """Extract g_fail and g_pass addresses from the ELF using mb-nm."""
-    nm_bin = MBGCC_BIN.parent / "mb-nm.exe"
+    nm_bin = MBGCC_BIN.parent / ("mb-nm.exe" if sys.platform == "win32" else "mb-nm")
     result = subprocess.run(
         [str(nm_bin), str(ELF_FILE)],
         capture_output=True, text=True, timeout=10,
@@ -198,12 +198,6 @@ def main():
     print(f"  mb-gcc:  {MBGCC_BIN}")
     print(f"  xsdb:    {XSDB_BIN}")
     print()
-
-    # Check tools exist
-    for tool, path in [("Vivado", VIVADO_BIN), ("mb-gcc", MBGCC_BIN), ("xsdb", XSDB_BIN)]:
-        if not path.exists():
-            print(f"*** {tool} not found at {path}")
-            sys.exit(1)
 
     step_vivado()
     step_compile()

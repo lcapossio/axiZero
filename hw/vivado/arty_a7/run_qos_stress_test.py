@@ -14,15 +14,15 @@ import pathlib
 import subprocess
 import sys
 
+from find_xilinx_tools import require_tools
+
 # Paths
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR / ".." / ".." / ".."
 SW_DIR = REPO_ROOT / "sw" / "arty_a7"
 SRC_DIR = SW_DIR / "src"
 
-VIVADO_BIN = pathlib.Path(r"C:\AMDDesignTools\2025.2\Vivado\bin\vivado.bat")
-XSDB_BIN = pathlib.Path(r"C:\AMDDesignTools\2025.2\Vitis\bin\xsdb.bat")
-MBGCC_BIN = pathlib.Path(r"C:\AMDDesignTools\2025.2\Vitis\gnu\microblaze\nt\bin\mb-gcc.exe")
+VIVADO_BIN, XSDB_BIN, MBGCC_BIN = require_tools()
 
 PROJ_DIR = SCRIPT_DIR / "axizero_arty_qos_stress"
 BIT_FILE = PROJ_DIR / "axizero_arty_qos_stress.runs" / "impl_1" / "system_wrapper.bit"
@@ -92,7 +92,7 @@ def step_compile():
 
 def find_symbols():
     """Extract monitor symbol addresses from the ELF using mb-nm."""
-    nm_bin = MBGCC_BIN.parent / "mb-nm.exe"
+    nm_bin = MBGCC_BIN.parent / ("mb-nm.exe" if sys.platform == "win32" else "mb-nm")
     result = subprocess.run(
         [str(nm_bin), str(ELF_FILE)],
         capture_output=True, text=True, timeout=10,
@@ -300,11 +300,6 @@ def main():
     print(f"  xsdb:    {XSDB_BIN}")
     print(f"  monitor: {RUN_SECONDS}s total, poll {POLL_SECONDS}s, stuck {STUCK_SECONDS}s")
     print()
-
-    for tool, path in [("Vivado", VIVADO_BIN), ("mb-gcc", MBGCC_BIN), ("xsdb", XSDB_BIN)]:
-        if not path.exists():
-            print(f"*** {tool} not found at {path}")
-            sys.exit(1)
 
     step_vivado()
     step_compile()

@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 39 SpinalSim + 24 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 40 SpinalSim + 24 cocotb tests pass.
 
 ---
 
@@ -131,18 +131,23 @@ python scripts/axizero.py generate my_design.yaml --output rtl/
 
 ### Option B — use a pre-built Verilog file
 
-Seven configurations are pre-generated in [`generated/`](generated/). Copy the appropriate file into your project and instantiate it.
+Eleven configurations are pre-generated in [`generated/`](generated/). Copy the appropriate file into your project and instantiate it.
 
-```
-generated/
-  MyLite_1M4S.v             1 master, 4 AXI4-Lite slaves, round-robin
-  AxiZeroLite_1M4S.v        1 master, 4 AXI4-Lite slaves, round-robin (wider addr variant)
-  AxiZeroLite_2M4S_RS.v     2 masters, 4 AXI4-Lite slaves, register slices on all ports
-  AxiZeroLite_4M4S_FP.v     4 masters, 4 AXI4-Lite slaves, fixed priority
-  MyFull_2M2S.v             2 masters, 2 AXI4 Full slaves, 64-bit, round-robin
-  MyLite_2M2S_WRR.v         2 masters, 2 AXI4-Lite slaves, weighted round-robin (3:1)
-  MyMixed_2M3S.v            2 masters (Full + Lite), 3 mixed slaves
-```
+Resource usage is post-synthesis (Vivado 2025.2, xc7a100t, OOC mode). No BRAM or DSP used by any configuration.
+
+| File | Description | LUTs | FFs |
+|---|---|---:|---:|
+| `MyLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin | 237 | 8 |
+| `AxiZeroLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin (wider addr) | 245 | 8 |
+| `MyLite_2M2S_WRR.v` | 2M×2S AXI4-Lite, weighted round-robin (3:1) | 352 | 286 |
+| `MyLite_2M4S_FP.v` | 2M×4S AXI4-Lite, fixed priority | 527 | 16 |
+| `AxiZeroLite_2M4S_RS.v` | 2M×4S AXI4-Lite, register slices on all ports | 563 | 784 |
+| `AxiZeroLite_4M4S_FP.v` | 4M×4S AXI4-Lite, fixed priority | 1047 | 24 |
+| `MyFull_2M2S.v` | 2M×2S AXI4 Full, 64-bit, round-robin | 379 | 4 |
+| `MyFull_2M2S_QoS.v` | 2M×2S AXI4 Full, 64-bit, QoS arbitration | 626 | 62 |
+| `MyMixed_2M3S.v` | 2M×3S mixed (Full + Lite), auto adapters | 421 | 34 |
+| `ArtyDC_1M3S.v` | 1M×3S mixed, Arty A7 don't-care default config | 258 | 8 |
+| `ArtyDC_2M4S.v` | 2M×4S mixed, Arty A7 don't-care default config | 591 | 28 |
 
 If none of these match your topology, generate a custom one with Option A.
 
@@ -269,7 +274,11 @@ python3 sim/cocotb_gen/run_all.py qos      # MyFull_2M2S_QoS.v only
 
 ## Hardware validation — Arty A7-100T
 
-Topology: MicroBlaze LE (M\_AXI\_DP) → axiZero 1M×4S → 2× AXI4 BRAM ctrl + AXI-Lite GPIO + AXI-Lite UART-Lite, 100 MHz, `max_outstanding=4`.
+Three test suites run on a Xilinx Arty A7-100T (xc7a100t) at 100 MHz. All three pass.
+
+### Base test (1M×4S)
+
+Topology: MicroBlaze LE → axiZero 1M×4S → 2× AXI4 BRAM ctrl (64 KB each) + AXI-Lite GPIO + AXI-Lite UART-Lite, `max_outstanding=4`.
 
 All 10 tests pass (g\_fail=0, g\_pass=10).
 
@@ -282,21 +291,63 @@ All 10 tests pass (g\_fail=0, g\_pass=10).
 | T9 | Full 64 KB BRAM checkerboard — 16 384 word write + verify |
 | T10 | Cross-slave boundary: last word of BRAM #0, first word of BRAM #1 |
 
-Vivado TCL scripts and MicroBlaze firmware: [`hw/vivado/arty_a7/`](hw/vivado/arty_a7/) and [`sw/arty_a7/`](sw/arty_a7/).
+### WRR test (2M×4S, weighted round-robin)
 
-**QoS hardware stress (multi-master, heavy traffic):**
-MicroBlaze QoS=15 plus 3 hardware generators (QoS=8/4/0), each issuing 512 words x 8 passes.
-Generator patterns are intentionally different: sequential BRAM0, reverse-order BRAM1, and random-address short bursts.
-`run_qos_stress_test.py` now runs the board continuously for 10 minutes and fails if:
+Topology: MicroBlaze + hardware traffic generator → axiZero 2M×4S WRR (weights 3:1) → same slaves as base test.
+
+All 3 tests pass (g\_fail=0, g\_pass=3).
+
+| Test | Description |
+|---|---|
+| T1 | Sanity: single-word write/read to both BRAMs |
+| T2 | Contention: MB and traffic gen write concurrently, both regions verified |
+| T3 | Starvation: lower-weight master still makes progress under sustained load |
+
+### QoS hardware stress (4M×4S, heavy traffic)
+
+Topology: MicroBlaze QoS=15 plus 3 hardware traffic generators (QoS=8/4/0) → axiZero 4M×4S QoS → same slaves as base test.
+Each generator issues 512 words × 8 passes per iteration with intentionally different patterns:
+
+- **G0** (QoS=8): sequential writes to BRAM0
+- **G1** (QoS=4): reverse-order writes to BRAM1
+- **G2** (QoS=0): LFSR-based random short bursts (len 1–4) to BRAM1
+
+`run_qos_stress_test.py` monitors the board continuously for 10 minutes and fails if:
 - `g_fail` becomes non-zero,
 - heartbeat (`g_heartbeat`) stops advancing for 30 seconds,
 - no stress iteration (`g_iteration`) completes.
 
+Result: 14 000+ iterations, 70 000+ passes, 0 failures over 10 minutes.
+
+### Running HW tests
+
+All three test runners auto-detect Vivado, xsdb, and mb-gcc by searching `PATH` and common AMD/Xilinx install locations (Windows and Linux). Override with environment variables if needed:
+
 ```bash
-sbt "runMain axizero.gen.ArtyQosStressDutGen"
-python hw/vivado/arty_a7/rename_qos_stress_ports.py
+# Auto-detect (works on Windows and Linux)
+python hw/vivado/arty_a7/run_wrr_test.py
+python hw/vivado/arty_a7/run_qos_test.py
 python hw/vivado/arty_a7/run_qos_stress_test.py
+
+# Override tool paths via env vars
+VIVADO_BIN=/opt/Xilinx/2025.2/Vivado/bin/vivado \
+XSDB_BIN=/opt/Xilinx/2025.2/Vitis/bin/xsdb \
+MBGCC_BIN=/opt/Xilinx/2025.2/Vitis/gnu/microblaze/lin64/bin/mb-gcc \
+  python hw/vivado/arty_a7/run_qos_stress_test.py
 ```
+
+Each runner: (1) creates the Vivado project + bitstream if not already built, (2) compiles MicroBlaze firmware with mb-gcc, (3) programs the FPGA and runs tests via xsdb.
+
+**Crossbar-only resource usage** (OOC synthesis, xc7a100t):
+
+| Configuration | LUTs | FFs |
+|---|---:|---:|
+| Base 1M×4S (pipelined, max\_outstanding=4) | 382 | 40 |
+| WRR 2M×4S (weighted round-robin, pipelined) | 818 | 92 |
+| QoS 2M×4S (QoS arbitration, pipelined) | 1011 | 132 |
+| QoS stress 4M×4S (QoS arbitration, pipelined) | 2587 | 208 |
+
+Vivado TCL scripts and MicroBlaze firmware: [`hw/vivado/arty_a7/`](hw/vivado/arty_a7/) and [`sw/arty_a7/`](sw/arty_a7/).
 
 ---
 
@@ -386,6 +437,10 @@ scripts/
 generated/                     # pre-built Verilog
 sw/arty_a7/                    # MicroBlaze firmware (source + linker script)
 hw/vivado/arty_a7/             # Vivado TCL build and test scripts
+  find_xilinx_tools.py         # cross-platform Vivado/xsdb/mb-gcc auto-detection
+  run_wrr_test.py              # WRR HW test runner (build + program + verify)
+  run_qos_test.py              # QoS HW test runner
+  run_qos_stress_test.py       # QoS 10-minute stress test runner
 ```
 
 ---

@@ -1,0 +1,13 @@
+File                           Top                    LUTs    FFs LUTRAM  BRAM  DSP
+----------------------------------------------------------------------------------------------------
+ArtyDC_1M3S.v                  AxiZeroMixedTop         258      8      0     0    0
+ArtyDC_2M4S.v                  AxiZeroMixedTop         591     28      0     0    0
+AxiZeroLite_1M4S.v             AxiZeroLiteTop          245      8      0     0    0
+AxiZeroLite_2M4S_RS.v          AxiZeroLiteTop          563    784      0     0    0
+AxiZeroLite_4M4S_FP.v          AxiZeroLiteTop         1047     24      0     0    0
+MyFull_2M2S.v                  AxiZeroMixedTop         379      4      0     0    0
+MyFull_2M2S_QoS.v              AxiZeroMixedTop         626     62      4     0    0
+MyLite_1M4S.v                  AxiZeroLiteTop          237      8      0     0    0
+MyLite_2M2S_WRR.v              AxiZeroLiteTop          352    286      0     0    0
+MyLite_2M4S_FP.v               AxiZeroLiteTop          527     16      0     0    0
+MyMixed_2M3S.v                 AxiZeroMixedTop         421     34      0     0    0
