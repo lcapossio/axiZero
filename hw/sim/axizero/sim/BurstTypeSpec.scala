@@ -137,6 +137,33 @@ class BurstTypeSpec extends AnyFunSuite {
     }
   }
 
+  test("downsize 64→32: FIXED 2-beat burst overwrites same byte lanes") {
+    // FIXED burst with len=1 (2 beats): both wide beats target the same address.
+    // Downsizer flattens to 4 single-beat sub-AW: lo0, hi0, lo1, hi1.
+    // The second wide beat's data overwrites the first's at the same addresses.
+    simCfg.compile(new AxiZeroMixedTop(makeCfg)).doSim { dut =>
+      val cd  = dut.clockDomain
+      val mem = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
+      SimHelpers.initMaster(dut.io.masters(0))
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      val base = 0x0300L
+      // Beat 0: 0xDEADBEEFCAFEBABE → lo=0xCAFEBABE, hi=0xDEADBEEF
+      // Beat 1: 0x1234567890ABCDEF → lo=0x90ABCDEF, hi=0x12345678
+      // FIXED: beat 1 overwrites beat 0 at the same addresses
+      sendBurst(dut.io.masters(0), cd, base,
+        Seq(0xDEADBEEFCAFEBABEL, 0x1234567890ABCDEFL), burstType = 0)
+      cd.waitSampling(8)
+
+      // Final memory should contain beat 1's data (it overwrote beat 0)
+      assert(mem.getOrElse(base,     0L) == 0x90ABCDEFL,
+        f"FIXED 2-beat lo: expected 0x90ABCDEF, got 0x${mem.getOrElse(base, 0L)}%08X")
+      assert(mem.getOrElse(base + 4, 0L) == 0x12345678L,
+        f"FIXED 2-beat hi: expected 0x12345678, got 0x${mem.getOrElse(base + 4, 0L)}%08X")
+    }
+  }
+
   // =========================================================================
   // WRAP burst (burst=2)
   // =========================================================================
@@ -196,6 +223,42 @@ class BurstTypeSpec extends AnyFunSuite {
       assert(mem.getOrElse(0x0514L, 0L) == 0x55555555L, "WRAP beat2 hi @ 0x514")
       assert(mem.getOrElse(0x0518L, 0L) == 0x88888888L, "WRAP beat3 lo @ 0x518")
       assert(mem.getOrElse(0x051CL, 0L) == 0x77777777L, "WRAP beat3 hi @ 0x51C")
+    }
+  }
+
+  test("downsize 64→32: WRAP 4-beat burst with actual wrap-around") {
+    // WRAP with len=3 (4 beats), size=3 (8 bytes): wrap boundary = 4*8 = 32 = 0x20.
+    // Start at 0x0508 (within [0x0500, 0x0520) window):
+    //   beat0→0x0508, beat1→0x0510, beat2→0x0518, beat3→0x0500 (wraps!)
+    // This exercises actual address wrap-around in the downsizer.
+    simCfg.compile(new AxiZeroMixedTop(makeCfg)).doSim { dut =>
+      val cd  = dut.clockDomain
+      val mem = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
+      SimHelpers.initMaster(dut.io.masters(0))
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      val base = 0x0508L  // NOT aligned to 32-byte wrap boundary
+      sendBurst(dut.io.masters(0), cd, base, Seq(
+        0xAAAA0000BBBB0000L,  // beat0 → 0x0508
+        0xCCCC0000DDDD0000L,  // beat1 → 0x0510
+        0xEEEE0000FFFF0000L,  // beat2 → 0x0518
+        0x1111000022220000L   // beat3 → 0x0500 (wrap!)
+      ), burstType = 2)
+      cd.waitSampling(12)
+
+      // beat0 at 0x0508 (lo) and 0x050C (hi)
+      assert(mem.getOrElse(0x0508L, 0L) == 0xBBBB0000L, "WRAP-around beat0 lo @ 0x0508")
+      assert(mem.getOrElse(0x050CL, 0L) == 0xAAAA0000L, "WRAP-around beat0 hi @ 0x050C")
+      // beat1 at 0x0510 (lo) and 0x0514 (hi)
+      assert(mem.getOrElse(0x0510L, 0L) == 0xDDDD0000L, "WRAP-around beat1 lo @ 0x0510")
+      assert(mem.getOrElse(0x0514L, 0L) == 0xCCCC0000L, "WRAP-around beat1 hi @ 0x0514")
+      // beat2 at 0x0518 (lo) and 0x051C (hi)
+      assert(mem.getOrElse(0x0518L, 0L) == 0xFFFF0000L, "WRAP-around beat2 lo @ 0x0518")
+      assert(mem.getOrElse(0x051CL, 0L) == 0xEEEE0000L, "WRAP-around beat2 hi @ 0x051C")
+      // beat3 at 0x0500 (lo) and 0x0504 (hi) — WRAPPED addresses!
+      assert(mem.getOrElse(0x0500L, 0L) == 0x22220000L, "WRAP-around beat3 lo @ 0x0500")
+      assert(mem.getOrElse(0x0504L, 0L) == 0x11110000L, "WRAP-around beat3 hi @ 0x0504")
     }
   }
 }

@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 40 SpinalSim + 24 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 76 SpinalSim + 24 cocotb tests pass.
 
 ---
 
@@ -239,7 +239,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-40 tests pass across 8 suites:
+76 tests pass across 13 suites:
 
 | Suite | Tests | Description |
 |---|---|---|
@@ -249,6 +249,11 @@ sbt test
 | `ArtySpec` | 5 | Sequence matching the Arty A7 hardware tests (T4, T5, T6, T9, combined) |
 | `IpifWriteSpec` | 5 | IPIF-style slaves (Xilinx GPIO/UART-Lite require AW+W simultaneous), blocking and pipelined modes |
 | `WidthConverterSpec` | 6 | Full AXI4 width conversion: 32→64 upsize, 64→32 downsize, 32→64→32 passthrough; single-beat, burst, routing |
+| `BurstTypeSpec` | 6 | Downsizer burst types: INCR baseline, FIXED 1-beat and 2-beat overwrite, WRAP aligned, WRAP 4-beat, WRAP with actual wrap-around |
+| `ArbitrationSpec` | 7 | FixedPriority and WeightedRoundRobin: contention ordering, throughput proportionality, data integrity |
+| `RegSliceAndLiteWidthSpec` | 8 | Register slices (Full + Lite, master/slave/both), AXI4-Lite width conversion (16→32 upsizing) |
+| `PipelinedArbitrationSpec` | 9 | Pipelined FixedPriority, WRR, and QoS: contention, concurrent bursts, data integrity |
+| `NarrowPortSpec` | 6 | Narrow ports: 32→16 downsizing, 16→32 upsizing, mixed Full+Lite concurrent traffic |
 | `QosCrossbarSpec` | 5 | QoS arbitration: higher AWQOS/ARQOS wins (blocking + pipelined), equal-QoS round-robin tie-break, aging anti-starvation |
 | `QosStressShortSpec` | 1 | Short 4-master QoS stress: distinct patterns (sequential, reverse, sparse, random short bursts), concurrent traffic, end-state validation |
 
@@ -425,7 +430,7 @@ hw/spinal/axizero/
     Axi4LiteToFullAdapter.scala
     RegisterSlice.scala
     WidthConverter.scala       # Lite and Full AXI4 data-width conversion
-    Axi4DownsizerExt.scala     # fork of SpinalHDL Axi4Downsizer with FIXED/INCR/WRAP support
+    Axi4DownsizerExt.scala     # fork of SpinalHDL Axi4Downsizer; FIXED/WRAP flattened, INCR multi-beat
   gen/
     AxiZeroGen.scala           # built-in generation entry point
     ArtyDutGen.scala           # Arty A7 DUT (1M×4S)

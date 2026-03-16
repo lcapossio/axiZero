@@ -11,9 +11,11 @@
 //   - Renamed classes with Ext suffix to avoid collision with SpinalHDL.
 //
 // All three AXI4 burst types are supported:
-//   FIXED (0b00) — sub-transaction addresses step by 2^sizeOut (byte lane only)
-//   INCR  (0b01) — sub-transaction addresses step by (len+1)<<sizeOut
-//   WRAP  (0b10) — same stride as INCR, wrapped at the input burst boundary
+//   INCR  (0b01) — multi-beat sub-AW, stride = (len+1)<<sizeOut
+//   FIXED (0b00) — flattened to single-beat sub-AW (len=0, burst=INCR),
+//                  address cycles through byte lanes within the wide word
+//   WRAP  (0b10) — flattened to single-beat sub-AW (len=0, burst=INCR),
+//                  address strides by 2^sizeOut with wrap at input boundary
 // Reserved burst type 0b11 triggers a simulation assertion.
 package axizero.adapters
 
@@ -24,13 +26,17 @@ import spinal.lib.bus.amba4.axi._
 // ---------------------------------------------------------------------------
 // Sub-transaction generator — splits one wide AX command into N narrow ones.
 //
-// Burst type handling:
-//   The address update between sub-transactions depends on the input burst:
-//   FIXED: stride = 2^sizeOut  (next byte lane within the wide word)
-//   INCR:  stride = (len+1) << sizeOut  (next contiguous narrow region)
-//   WRAP:  stride = same as INCR, but address wraps at the input burst's
-//          wrap boundary = (len+1) << sizeIn
-//   When useBurst=false, INCR is assumed (no extra logic generated).
+// INCR bursts keep multi-beat sub-AW (len preserved, stride = (len+1)<<sizeOut).
+//
+// FIXED and WRAP bursts are *flattened*: each output sub-AW is single-beat
+// (len=0, burst=INCR).  The generator expands by (len+1)*(ratio+1) and
+// computes all addresses internally:
+//   FIXED: cycles through byte lanes within the wide word
+//   WRAP:  strides by 2^sizeOut, wrapping at the input burst boundary
+// This avoids mismatches between the downsizer's intended addresses and
+// the downstream slave's own burst address generation.
+//
+// When useBurst=false, INCR is assumed (no extra logic generated).
 // ---------------------------------------------------------------------------
 object Axi4DownsizerExtSubTransactionGenerator {
   def apply[T <: Axi4Ax](
@@ -74,28 +80,61 @@ class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
   val sizeIn       = if (inputConfig.useSize) io.input.size else U(sizeMaxIn, sizeWidth bits)
   val sizeDiff     = sizeIn - sizeMaxOut
   val sizePerTrans = UInt(sizeWidth bits)
-  val ratio        = cloneOf(io.ratio)
+
+  // Width-only ratio: how many narrow beats per wide beat (used by data path)
+  val widthRatio = cloneOf(io.ratio)
+
+  private val hasBurst = inputConfig.useBurst
+
+  // Command expansion ratio: for INCR = widthRatio; for FIXED/WRAP flattened
+  // to (len+1) * (widthRatio+1) - 1 so every sub-AW is a single beat.
+  // Wider than ratioWidth to accommodate len multiplication.
+  val cmdRatioWidth = ratioWidth + (if (hasBurst && inputConfig.useLen) 8 else 0)
+  val cmdRatio      = UInt(cmdRatioWidth bits)
 
   when(sizeIn > sizeMaxOut) {
     startAddress := (io.input.addr |>> sizeIn) |<< sizeIn
-    ratio        := (U(1, ratioWidth bits) |<< sizeDiff) - 1
+    widthRatio   := (U(1, ratioWidth bits) |<< sizeDiff) - 1
     sizePerTrans := sizeMaxOut
+    if (hasBurst && inputConfig.useLen) {
+      // FIXED/WRAP: flatten to single-beat sub-AW
+      val lenP1 = (io.input.len +^ U(1)).resize(9)
+      when(io.input.burst === B"00" || io.input.burst === B"10") {
+        cmdRatio := ((lenP1 << sizeDiff) - 1).resized
+      } otherwise {
+        cmdRatio := widthRatio.resized
+      }
+    } else {
+      cmdRatio := widthRatio.resized
+    }
   } otherwise {
     startAddress := io.input.addr
-    ratio        := 0
+    widthRatio   := 0
     sizePerTrans := sizeIn
+    cmdRatio     := 0
   }
 
   val cmdStreamWithSize = cloneOf(io.input)
   cmdStreamWithSize.translateFrom(io.input) { (to, from) =>
     to.addr := startAddress
     if (inputConfig.useSize) to.size := sizePerTrans
+    // For FIXED/WRAP with actual downsizing: force single-beat INCR
+    if (hasBurst) {
+      to.burst := from.burst
+      if (inputConfig.useLen) to.len := from.len
+      when(sizeIn > sizeMaxOut) {
+        when(from.burst === B"00" || from.burst === B"10") {
+          to.burst := B"01"
+          if (inputConfig.useLen) to.len := U(0).resized
+        }
+      }
+    }
     to.assignUnassignedByName(from)
   }
   val size = RegNextWhen(sizePerTrans, io.input.fire) init sizeMaxOut
 
   val cmdExtendedStream = cloneOf(io.input)
-  val cmdExtender       = StreamTransactionExtender(cmdStreamWithSize, cmdExtendedStream, ratio) {
+  val cmdExtender       = StreamTransactionExtender(cmdStreamWithSize, cmdExtendedStream, cmdRatio) {
     (id, p, _) => p
   }
 
@@ -103,10 +142,10 @@ class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
   // When useBurst=true, capture the burst type and compute WRAP mask on
   // io.input.fire so they're stable during sub-transaction generation.
   // When useBurst=false, the else branches compile to pure INCR (no muxes).
-  private val hasBurst = inputConfig.useBurst
 
   val burstTypeReg = if (hasBurst) RegNextWhen(io.input.burst, io.input.fire) init B"01" else null
   val startAddrReg = if (hasBurst) RegNextWhen(startAddress, io.input.fire) init U(0) else null
+  val sizeInReg    = if (hasBurst) RegNextWhen(sizeIn, io.input.fire) init sizeMaxIn else null
   val wrapMaskReg  = if (hasBurst) {
     val reg = Reg(UInt(inputConfig.addressWidth bits)) init 0
     when(io.input.fire) {
@@ -123,15 +162,17 @@ class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
     address := cmdStreamWithSize.addr
   } elsewhen (cmdExtendedStream.fire) {
     if (hasBurst) {
-      val incrStride  = ((cmdExtendedStream.len +^ 1) << size).resized
       val fixedStride = (U(1) << size).resized
-      when(burstTypeReg === B"00") {         // FIXED — byte lane offset only
-        address := address + fixedStride
-      } elsewhen (burstTypeReg === B"10") {  // WRAP — INCR with wrap-around
-        val nextAddr = (address + incrStride).resize(inputConfig.addressWidth)
+      when(burstTypeReg === B"00") {         // FIXED — cycle through byte lanes
+        val nextAddr     = address + fixedStride
+        val wideWordMask = ((U(1) << sizeInReg) - 1).resize(inputConfig.addressWidth)
+        address := (startAddrReg & ~wideWordMask) | (nextAddr & wideWordMask)
+      } elsewhen (burstTypeReg === B"10") {  // WRAP — stride by sizeOut, wrap at input boundary
+        val nextAddr = (address + fixedStride).resize(inputConfig.addressWidth)
         val wrapBase = startAddrReg & ~wrapMaskReg
         address := wrapBase | (nextAddr & wrapMaskReg)
       } otherwise {                          // INCR (01) or RESERVED (11)
+        val incrStride = ((cmdExtendedStream.len +^ 1) << size).resized
         address := address + incrStride
       }
     } else {
@@ -145,12 +186,12 @@ class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
     to.assignUnassignedByName(from)
   }
 
-  val dataRatio = RegNextWhen(ratio, io.input.fire) init 0
+  val dataRatioReg = RegNextWhen(widthRatio, io.input.fire) init 0
   when(io.input.fire) {
-    io.ratio := ratio
+    io.ratio := widthRatio
     io.size  := sizePerTrans
   } otherwise {
-    io.ratio := dataRatio
+    io.ratio := dataRatioReg
     io.size  := size
   }
 
