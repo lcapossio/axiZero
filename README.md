@@ -1,6 +1,6 @@
 # axiZero
 
-[![CI](https://github.com/bard0-design/axiZero/actions/workflows/ci.yml/badge.svg)](https://github.com/bard0-design/axiZero/actions/workflows/ci.yml)
+[![CI](https://github.com/lcapossio/axiZero/actions/workflows/ci.yml/badge.svg)](https://github.com/lcapossio/axiZero/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Board](https://img.shields.io/badge/HW--validated-Arty%20A7--100T-green)](hw/vivado/arty_a7/)
 

@@ -476,7 +476,7 @@ def run_sbt(java: Path, sbt: Path, output_dir: Path | None, design_names: list[s
             renamed = _rename_to_axi(text)
             if renamed != text:
                 v_file.write_text(renamed, encoding="utf-8")
-                print(f"[axizero] Renamed ports → AXI standard: {v_file.name}")
+                print(f"[axizero] Renamed ports -> AXI standard: {v_file.name}")
 
     # Copy .v files to output_dir if requested
     if output_dir:
