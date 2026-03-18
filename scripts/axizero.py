@@ -485,8 +485,16 @@ def run_sbt(java: Path, sbt: Path, output_dir: Path | None, design_names: list[s
             src = SBT_OUTDIR / f"{name}.v"
             if src.exists():
                 dst = output_dir / f"{name}.v"
-                shutil.copy2(src, dst)
-                print(f"[axizero] Copied {dst}")
+                if src.resolve() != dst.resolve():
+                    if dst.exists():
+                        ans = input(f"[axizero] {dst} already exists. Overwrite? [y/N] ")
+                        if ans.strip().lower() not in ("y", "yes"):
+                            print(f"[axizero] Skipped {dst}")
+                            continue
+                    shutil.copy2(src, dst)
+                    print(f"[axizero] Copied {dst}")
+                else:
+                    print(f"[axizero] Output already in place: {dst}")
             else:
                 print(f"[axizero] WARNING: expected output not found: {src}")
 

@@ -1,30 +1,28 @@
-﻿#!/usr/bin/env python3
-# Copyright (c) 2026 Leonardo Capossio â€” bard0 design  hello@bard0.com
+#!/usr/bin/env python3
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
 # SPDX-License-Identifier: MIT
 """
-run_qos_test.py â€” Build, program, and run the QoS hardware test on Arty A7-100T.
+run_qos_test.py -- Build, program, and run the QoS hardware test on Arty A7-100T.
 
 Steps:
   1. Vivado: create project + synth + impl + bitstream  (create_project_qos.tcl)
-  2. mb-gcc: compile main_qos.c â†’ main_qos_le.elf
+  2. mb-gcc: compile main_qos.c -> main_qos_le.elf
   3. xsdb:   program bitstream + ELF, wait, read g_fail / g_pass
 """
 
 import os
 import pathlib
 import subprocess
-import struct
 import sys
 import time
 
 from find_xilinx_tools import require_tools
 
-# â”€â”€ Paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
+# -- Paths --
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT  = SCRIPT_DIR / “..” / “..” / “..”
-SW_DIR     = REPO_ROOT / “sw” / “arty_a7”
-SRC_DIR    = SW_DIR / “src”
+REPO_ROOT  = SCRIPT_DIR / ".." / ".." / ".."
+SW_DIR     = REPO_ROOT / "sw" / "arty_a7"
+SRC_DIR    = SW_DIR / "src"
 
 VIVADO_BIN, XSDB_BIN, MBGCC_BIN = require_tools()
 
@@ -34,10 +32,8 @@ ELF_FILE = SW_DIR / "build" / "main_qos_le.elf"
 
 CREATE_TCL = SCRIPT_DIR / "create_project_qos.tcl"
 
-# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def run(cmd, cwd=None, timeout=None, desc=""):
-    """Run a command, streaming output. Returns CompletedProcess."""
+def run(cmd, cwd=None, timeout=None, desc="", env=None):
     print(f"\n{'='*60}")
     print(f"  {desc}")
     print(f"  cmd: {' '.join(str(c) for c in cmd)}")
@@ -46,6 +42,7 @@ def run(cmd, cwd=None, timeout=None, desc=""):
         [str(c) for c in cmd],
         cwd=str(cwd) if cwd else None,
         timeout=timeout,
+        env=env,
     )
     if result.returncode != 0:
         print(f"\n*** FAILED (rc={result.returncode}): {desc}")
@@ -53,18 +50,19 @@ def run(cmd, cwd=None, timeout=None, desc=""):
     return result
 
 
-# â”€â”€ Step 1: Vivado build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 def step_vivado():
-    """Run create_project_qos.tcl through Vivado batch mode."""
     if BIT_FILE.exists():
         print(f"[skip] Bitstream already exists: {BIT_FILE}")
         return
+    env = dict(os.environ)
+    if "HOME" in env and env["HOME"].startswith("/"):
+        env["HOME"] = str(pathlib.Path.home())
     run(
         [VIVADO_BIN, "-mode", "batch", "-source", str(CREATE_TCL)],
         cwd=REPO_ROOT,
         timeout=3600,
         desc="Vivado: create project + synth + impl + bitstream",
+        env=env,
     )
     if not BIT_FILE.exists():
         print(f"*** ERROR: bitstream not found at {BIT_FILE}")
@@ -72,10 +70,7 @@ def step_vivado():
     print(f"[ok] Bitstream: {BIT_FILE}")
 
 
-# â”€â”€ Step 2: Compile firmware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 def step_compile():
-    """Compile main_qos.c with mb-gcc."""
     ELF_FILE.parent.mkdir(parents=True, exist_ok=True)
     run(
         [
@@ -96,10 +91,7 @@ def step_compile():
     print(f"[ok] ELF: {ELF_FILE}  ({ELF_FILE.stat().st_size} bytes)")
 
 
-# â”€â”€ Step 3: Find g_fail / g_pass symbol addresses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 def find_symbols():
-    """Extract g_fail and g_pass addresses from the ELF using mb-nm."""
     nm_bin = MBGCC_BIN.parent / ("mb-nm.exe" if sys.platform == "win32" else "mb-nm")
     result = subprocess.run(
         [str(nm_bin), str(ELF_FILE)],
@@ -114,7 +106,6 @@ def find_symbols():
                 addrs[name] = int(parts[0], 16)
     if "g_fail" not in addrs or "g_pass" not in addrs:
         print(f"*** Could not find g_fail/g_pass in ELF symbols")
-        print(f"    nm output (last 20 lines):\n")
         for line in result.stdout.splitlines()[-20:]:
             print(f"    {line}")
         sys.exit(1)
@@ -122,14 +113,10 @@ def find_symbols():
     return addrs
 
 
-# â”€â”€ Step 4: Program + run + read results via xsdb â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 def step_run(addrs):
-    """Program the Arty A7 and read test results."""
     g_fail_addr = addrs["g_fail"]
     g_pass_addr = addrs["g_pass"]
 
-    # Write an xsdb TCL script inline
     xsdb_tcl = SCRIPT_DIR / "_qos_xsdb_temp.tcl"
     xsdb_tcl.write_text(f"""\
 # Auto-generated by run_qos_test.py
@@ -138,23 +125,19 @@ after 500
 fpga {str(BIT_FILE).replace(chr(92), '/')}
 after 1000
 
-# Target MicroBlaze #0 (not the Debug Module)
 targets -set -filter {{name =~ "MicroBlaze #0"}}
 after 200
 
-# Reset and download ELF
 rst -processor
 after 200
 dow {str(ELF_FILE).replace(chr(92), '/')}
 after 200
 con
 
-# Wait for tests: MB boots with 3s delay + QoS stress execution
-# Total ~55 seconds
+# Wait for tests: MB boots with 3s delay + QoS test execution
 puts "\\nWaiting 55s for test completion..."
 after 55000
 
-# Stop processor and read results
 rst -processor
 after 500
 
@@ -186,14 +169,11 @@ exit
         desc="xsdb: program + run + read results",
     )
 
-    # Clean up temp file
     xsdb_tcl.unlink(missing_ok=True)
 
 
-# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 def main():
-    print("axiZero QoS hardware test â€” Arty A7-100T")
+    print("axiZero QoS hardware test -- Arty A7-100T")
     print(f"  Vivado:  {VIVADO_BIN}")
     print(f"  mb-gcc:  {MBGCC_BIN}")
     print(f"  xsdb:    {XSDB_BIN}")
@@ -207,4 +187,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

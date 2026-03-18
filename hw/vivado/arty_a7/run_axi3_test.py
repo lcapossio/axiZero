@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 Leonardo Capossio
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
 # SPDX-License-Identifier: MIT
 """
 run_axi3_test.py -- Build, program, and run the AXI3 adapter HW test on Arty A7-100T.
