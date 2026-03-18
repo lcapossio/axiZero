@@ -75,7 +75,7 @@ object AxiZeroGen extends App {
 object GenHelper {
 
   private val COPYRIGHT =
-    "// Copyright (c) 2026 Leonardo Capossio — bard0 design  hello@bard0.com\n" +
+    "// Copyright (c) 2026 Leonardo Capossio\n" +
     "// SPDX-License-Identifier: MIT\n"
 
   private def spinalCfg(name: String) =
