@@ -10,11 +10,32 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 76 SpinalSim + 24 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 81 SpinalSim + 24 cocotb tests pass.
 
 ---
 
-**Contents:** [What it does](#what-it-does) · [Comparison](#comparison) · [Quick start](#quick-start) · [YAML reference](#yaml-configuration-reference) · [Simulation](#simulation) · [Hardware validation](#hardware-validation--arty-a7-100t) · [Port naming](#port-naming) · [Tool integration](#tool-integration) · [Project structure](#project-structure) · [License](#license)
+## Table of contents
+
+- [What it does](#what-it-does)
+- [Comparison](#comparison)
+- [Quick start](#quick-start)
+  - [Option A — generate from YAML](#option-a--generate-from-yaml)
+  - [Option B — use a pre-built Verilog file](#option-b--use-a-pre-built-verilog-file)
+- [YAML configuration reference](#yaml-configuration-reference)
+  - [Top-level keys](#top-level-keys)
+  - [Master port keys](#master-port-keys)
+  - [Slave port keys](#slave-port-keys)
+  - [Arbitration modes](#arbitration-modes)
+  - [Data-width conversion](#data-width-conversion)
+  - [Pipelined vs blocking mode](#pipelined-vs-blocking-mode)
+- [Simulation](#simulation)
+  - [SpinalSim (unit tests)](#spinalsim-unit-tests-run-with-sbt)
+  - [cocotb (integration tests)](#cocotb-integration-tests-against-pre-built-verilog-run-with-python)
+- [Hardware validation — Arty A7-100T](#hardware-validation--arty-a7-100t)
+- [Port naming](#port-naming)
+- [Tool integration](#tool-integration)
+- [Project structure](#project-structure)
+- [License](#license)
 
 ---
 
@@ -35,6 +56,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - Pipelined mode (`max_outstanding > 1`) with per-slave W-route FIFOs and ID-based response routing
 - IPIF compatibility — AW and W are presented simultaneously to slaves that require it
 - YAML → Verilog generator with port-name post-processing for Vivado AXI naming conventions
+- AXI3-to-AXI4 bridge adapter with WID reorder buffer (write interleaving → strict AW-order), locked access conversion, LEN/LOCK field adaptation
 
 **Not yet implemented:**
 
@@ -159,52 +181,21 @@ If none of these match your topology, generate a custom one with Option A.
 
 ## YAML configuration reference
 
+The configuration file contains a `designs` list. Each entry generates one Verilog file.
+
 ```yaml
 designs:
-  - name: MySoC                  # output filename: MySoC.v
-
-    # Arbitration mode when multiple masters contend for the same slave.
-    #
-    # round_robin         — equal turns; no starvation (default)
-    #
-    # fixed_priority      — master 0 has highest priority, master N−1 lowest.
-    #                       Priority is determined solely by master order in the
-    #                       YAML (first listed = highest priority). No extra keys
-    #                       are needed. Lower-index masters always win contention,
-    #                       so higher-index masters may starve under sustained load.
-    #
-    # weighted_round_robin — like round_robin but master i receives weights[i]
-    #                        grants per arbitration round. Requires the `weights`
-    #                        key with one integer entry per master.
-    #
-    # qos                 — highest AXQOS wins; equal AXQOS falls back to round_robin.
-    #                       Waiting requests gain age-based boost to prevent starvation.
-    #
-    arbitration: round_robin     # round_robin | fixed_priority | weighted_round_robin | qos
-    weights: [3, 1]              # weighted_round_robin only; one integer per master
-
-    # Maximum outstanding transactions per slave per direction (AW and AR).
-    # 1 = blocking: one transaction per slave at a time, no FIFOs.
-    # >1 = pipelined: per-slave W-route FIFOs, ID-based response routing.
-    # Only affects Full AXI4. The Lite crossbar is always blocking.
+  - name: MySoC
+    arbitration: round_robin
     max_outstanding: 4
-
-    # Optional: override the internal fabric data width. Defaults to the
-    # maximum data_width across all ports.
-    # AXI4-Lite ports: zero-extend / truncate converter inserted automatically.
-    # Full AXI4 ports: burst-level upsizer or downsizer inserted automatically.
     fabric_data_width: 64
+    weights: [3, 1]
 
     masters:
-      - type: full               # full | lite
+      - type: full
         addr_width: 32
         data_width: 64
-        id_width: 4              # full AXI4 only
-        reg_slice: false         # insert a register slice on this port
-
-      - type: lite
-        addr_width: 32
-        data_width: 32
+        id_width: 4
         reg_slice: false
 
     slaves:
@@ -213,17 +204,70 @@ designs:
         type: full
         data_width: 64
         reg_slice: false
-
-      - base: 0x8000_0000
-        size: 0x0001_0000
-        type: full
-        data_width: 64
-
-      - base: 0xC000_0000
-        size: 0x0000_1000
-        type: lite               # Full→Lite adapter inserted automatically
-        data_width: 32
 ```
+
+### Top-level keys
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | *required* | Output filename (without `.v`). Must be a valid Verilog module name. |
+| `type` | string | auto | Force `lite` (all-Lite crossbar) or `full` (Full AXI4 crossbar). If omitted, inferred from port types: all-Lite ports use the lightweight Lite crossbar; any Full port uses the Full crossbar with automatic adapters. |
+| `arbitration` | string | `round_robin` | Arbitration policy when multiple masters contend for the same slave. See [Arbitration modes](#arbitration-modes). |
+| `weights` | list[int] | — | One integer per master. Only used with `weighted_round_robin`. Master *i* receives `weights[i]` grants per round. |
+| `max_outstanding` | int | `1` | Maximum outstanding transactions per slave per direction. See [Pipelined vs blocking mode](#pipelined-vs-blocking-mode). |
+| `fabric_data_width` | int | max of all ports | Override the internal fabric data width. Width converters are inserted automatically at any port whose `data_width` differs. See [Data-width conversion](#data-width-conversion). |
+
+### Master port keys
+
+Each entry in the `masters` list defines one slave-facing AXI interface on the crossbar (where you connect your CPU, DMA, etc.).
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `type` | string | `full` | `full` (AXI4 with IDs and bursts) or `lite` (AXI4-Lite, single-beat, no IDs). A Lite master connecting to a Full crossbar gets an automatic Lite-to-Full adapter. |
+| `addr_width` | int | *required* | Address bus width in bits (typically 32). |
+| `data_width` | int | *required* | Data bus width in bits (32, 64, 128, …). If it differs from `fabric_data_width`, a width converter is inserted. |
+| `id_width` | int | `4` | Transaction ID width. Full AXI4 only; ignored for Lite. The crossbar appends `ceil(log2(nMasters))` master-index bits internally, so slave-side ID width = `id_width + masterIndexBits`. |
+| `reg_slice` | bool | `false` | Insert a register slice (pipeline stage) on this master port for timing closure. |
+
+### Slave port keys
+
+Each entry in the `slaves` list defines one master-facing AXI interface on the crossbar (where you connect your BRAM, peripheral, etc.).
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `base` | int | *required* | Base address. Hex (`0xC000_0000`) or decimal. Underscores are allowed for readability. |
+| `size` | int | *required* | Address region size in bytes. Must be a power of 2. The slave occupies `[base, base+size)`. |
+| `type` | string | `full` | `full` or `lite`. A Lite slave on a Full crossbar gets an automatic Full-to-Lite adapter. |
+| `data_width` | int | *required* | Data bus width in bits. If it differs from `fabric_data_width`, a width converter is inserted. |
+| `reg_slice` | bool | `false` | Insert a register slice on this slave port. |
+
+Address regions must not overlap. The crossbar uses a bitmask decoder: for each slave, bits above `log2(size)` must match `base`. Addresses that don't match any slave are undefined (no default slave / error response).
+
+### Arbitration modes
+
+| Mode | Key value | Extra keys | Behavior |
+|---|---|---|---|
+| Round-robin | `round_robin` | — | Equal turns among contending masters. No starvation. Default. |
+| Fixed priority | `fixed_priority` | — | Master 0 (first listed) has highest priority. Lower-priority masters may starve under sustained load. |
+| Weighted round-robin | `weighted_round_robin` | `weights` | Like round-robin, but master *i* gets `weights[i]` consecutive grants before yielding. Example: `weights: [3, 1]` gives master 0 three turns for every one turn of master 1. |
+| QoS-based | `qos` | — | Arbitrates on AXI `AXQOS[3:0]`: higher QoS wins. Equal QoS falls back to round-robin. An aging counter increments for each cycle a request waits; once the age exceeds a threshold, it boosts effective QoS to prevent starvation. |
+
+### Data-width conversion
+
+When a port's `data_width` differs from `fabric_data_width`, the generator inserts a converter automatically:
+
+- **AXI4-Lite**: zero-extends writes to the wider bus, truncates reads to the narrower bus. Single-cycle, no buffering.
+- **Full AXI4 upsize** (narrow port → wider fabric): SpinalHDL `Axi4Upsizer`. Assembles narrow beats into wide beats.
+- **Full AXI4 downsize** (wide port → narrower fabric): `Axi4DownsizerExt` (local fork). Splits wide beats into narrow sub-transactions. INCR bursts stay multi-beat for efficiency. FIXED and WRAP bursts are flattened to single-beat sub-transactions with addresses computed internally.
+
+### Pipelined vs blocking mode
+
+| `max_outstanding` | Mode | Behavior |
+|---|---|---|
+| `1` | Blocking | One transaction in flight per slave per direction. No FIFOs. Minimal area. |
+| `> 1` | Pipelined | Per-slave W-route FIFOs, ID-based B/R response routing. Multiple transactions can be in flight simultaneously to different slaves. Required for high-throughput designs. |
+
+Only affects the Full AXI4 crossbar. The Lite-only crossbar is always single-outstanding (blocking).
 
 Full example with all options: [`scripts/example.yaml`](scripts/example.yaml).
 
@@ -239,7 +283,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-76 tests pass across 13 suites:
+81 tests pass across 14 suites:
 
 | Suite | Tests | Description |
 |---|---|---|
@@ -256,6 +300,7 @@ sbt test
 | `NarrowPortSpec` | 6 | Narrow ports: 32→16 downsizing, 16→32 upsizing, mixed Full+Lite concurrent traffic |
 | `QosCrossbarSpec` | 5 | QoS arbitration: higher AWQOS/ARQOS wins (blocking + pipelined), equal-QoS round-robin tie-break, aging anti-starvation |
 | `QosStressShortSpec` | 1 | Short 4-master QoS stress: distinct patterns (sequential, reverse, sparse, random short bursts), concurrent traffic, end-state validation |
+| `Axi3ToAxi4Spec` | 5 | AXI3→AXI4 bridge: single-beat, INCR burst, write interleaving (WID reorder), locked→SLVERR, multiple outstanding |
 
 ### cocotb (integration tests against pre-built Verilog, run with Python)
 
@@ -283,7 +328,7 @@ python3 sim/cocotb_gen/run_all.py qos      # MyFull_2M2S_QoS.v only
 
 ## Hardware validation — Arty A7-100T
 
-Three test suites run on a Xilinx Arty A7-100T (xc7a100t) at 100 MHz. All three pass.
+Four test suites run on a Xilinx Arty A7-100T (xc7a100t) at 100 MHz. All four pass.
 
 ### Base test (1M×4S)
 
@@ -328,15 +373,32 @@ Each generator issues 512 words × 8 passes per iteration with intentionally dif
 
 Result: 14 000+ iterations, 70 000+ passes, 0 failures over 10 minutes.
 
+### AXI3 adapter test (1M×4S, AXI3 bridge in data path)
+
+Topology: MicroBlaze (AXI4) → AXI4-to-AXI3 shim → Axi3ToAxi4Adapter → axiZero 1M×4S crossbar → same slaves as base test.
+
+Every MicroBlaze transaction passes through the full AXI3→AXI4 round-trip, proving the adapter's FSM, WID reorder buffer, and field conversion work correctly in real hardware.
+
+All 5 tests pass (g\_fail=0, g\_pass=5).
+
+| Test | Description |
+|---|---|
+| T1 | Sanity: single-word write/read to BRAM0 and BRAM1 |
+| T2 | Walking-1 pattern across 256 words in BRAM0 |
+| T3 | Cross-slave: alternating writes to BRAM0+BRAM1, full verify |
+| T4 | GPIO LED sweep (AXI-Lite slave path through adapter) |
+| T5 | UART status read (second AXI-Lite slave path) |
+
 ### Running HW tests
 
-All three test runners auto-detect Vivado, xsdb, and mb-gcc by searching `PATH` and common AMD/Xilinx install locations (Windows and Linux). Override with environment variables if needed:
+All four test runners auto-detect Vivado, xsdb, and mb-gcc by searching `PATH` and common AMD/Xilinx install locations (Windows and Linux). Override with environment variables if needed:
 
 ```bash
 # Auto-detect (works on Windows and Linux)
 python hw/vivado/arty_a7/run_wrr_test.py
 python hw/vivado/arty_a7/run_qos_test.py
 python hw/vivado/arty_a7/run_qos_stress_test.py
+python hw/vivado/arty_a7/run_axi3_test.py
 
 # Override tool paths via env vars
 VIVADO_BIN=/opt/Xilinx/2025.2/Vivado/bin/vivado \
@@ -411,7 +473,19 @@ To use: **IP Settings → IP Repositories → +** the `hw/vivado/axizero_ip` dir
 
 ### Quartus / Intel Platform Designer
 
-The `sN_axi_*` / `mN_axi_*` naming is Xilinx-specific. Platform Designer does not auto-infer these interfaces. Add the Verilog as a plain component and map AXI signals manually in the Component Editor → Signals & Interfaces tab.
+[`hw/quartus/package_ip.tcl`](hw/quartus/package_ip.tcl) generates a `_hw.tcl` component description that maps all `sN_axi_*` / `mN_axi_*` ports to Platform Designer AXI4 or AXI4-Lite interfaces automatically. It parses the Verilog port list, detects Full vs Lite interfaces, and creates the correct clock/reset associations.
+
+```bash
+# Package the default 2M×2S Full AXI4 crossbar
+quartus_sh -t hw/quartus/package_ip.tcl
+
+# Package a different configuration
+quartus_sh -t hw/quartus/package_ip.tcl generated/MyLite_1M4S.v
+```
+
+Output: `hw/quartus/axizero_ip/` containing `<ModuleName>_hw.tcl` and the Verilog source.
+
+To use: **IP Components > Add Component Search Path** → add `hw/quartus/axizero_ip/`, then drag the component into your Platform Designer system. Clock, reset, and AXI interfaces are pre-mapped.
 
 ---
 
@@ -431,10 +505,12 @@ hw/spinal/axizero/
     RegisterSlice.scala
     WidthConverter.scala       # Lite and Full AXI4 data-width conversion
     Axi4DownsizerExt.scala     # fork of SpinalHDL Axi4Downsizer; FIXED/WRAP flattened, INCR multi-beat
+    Axi3ToAxi4Adapter.scala    # AXI3→AXI4 bridge: WID reorder buffer, locked access conversion
   gen/
     AxiZeroGen.scala           # built-in generation entry point
     ArtyDutGen.scala           # Arty A7 DUT (1M×4S)
     ArtyQosDutGen.scala        # Arty A7 QoS DUT (2M×4S, QoS arbitration)
+    ArtyAxi3DutGen.scala       # Arty A7 AXI3 adapter DUT (AXI4→AXI3→AXI4→crossbar)
 hw/sim/axizero/sim/            # SpinalSim testbenches (sbt test)
 sim/cocotb_gen/
   run_all.py                   # Python runner (lite + full suites)
@@ -445,11 +521,14 @@ scripts/
   example.yaml                 # all configuration options
 generated/                     # pre-built Verilog
 sw/arty_a7/                    # MicroBlaze firmware (source + linker script)
+hw/quartus/
+  package_ip.tcl               # Platform Designer _hw.tcl generator
 hw/vivado/arty_a7/             # Vivado TCL build and test scripts
   find_xilinx_tools.py         # cross-platform Vivado/xsdb/mb-gcc auto-detection
   run_wrr_test.py              # WRR HW test runner (build + program + verify)
   run_qos_test.py              # QoS HW test runner
   run_qos_stress_test.py       # QoS 10-minute stress test runner
+  run_axi3_test.py             # AXI3 adapter HW test runner
 ```
 
 ---
