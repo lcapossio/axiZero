@@ -37,6 +37,11 @@ jobs:
       - name: Run SpinalSim tests
         run: sbt test
 
+      - name: Generator smoke test (axizero.py)
+        run: |
+          pip install pyyaml
+          python3 scripts/axizero.py generate scripts/example.yaml
+
   # ── cocotb integration tests against pre-built generated Verilog ──────────
   cocotb:
     name: cocotb (generated Verilog)

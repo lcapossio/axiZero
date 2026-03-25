@@ -77,8 +77,9 @@ tmp/
 all_tests.log
 width_test.log
 
-# Local helper scripts
-*.sh
+# Local helper scripts (use Python for scripting, not shell/batch)
+run_sbt_test.sh
+run_generate.sh
 
 # Not for public release
 no_commit/

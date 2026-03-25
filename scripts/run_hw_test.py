@@ -8,9 +8,9 @@ run_hw_test.py  —  axiZero Arty A7-100T full-flow automation
 Steps executed in order:
   1. RTL generation      sbt "runMain axizero.gen.ArtyDutGen"
   2. Vivado project      vivado -mode batch -source create_project.tcl
-  3. Synth/impl/bitstream vivado -mode batch -source impl.tcl
-  4. FPGA programming    vivado -mode batch -source program.tcl  (--program)
-  5. UART monitor        watch for PASS/FAIL output on serial port
+     (create_project.tcl runs synth + impl + bitstream in one pass)
+  3. FPGA programming    xsdb: program bitstream + ELF  (--program)
+  4. UART monitor        watch for PASS/FAIL output on serial port
 
 Usage
 -----
@@ -20,14 +20,13 @@ Options
 -------
   --vivado PATH     Path to vivado(.bat) binary. Auto-detected if omitted.
   --skip-gen        Skip sbt RTL generation step.
-  --skip-project    Skip Vivado project creation (project must already exist).
-  --skip-build      Skip synthesis/implementation/bitstream.
+  --skip-project    Skip Vivado project creation + build (project must already exist).
   --program, -p     Program the FPGA after bitstream is generated.
   --port PORT       Serial port for UART monitor (e.g. COM3, /dev/ttyUSB1).
                     Auto-detected if omitted and pyserial is installed.
   --baud N          Baud rate for UART monitor (default: 115200).
   --uart-timeout N  Seconds to wait for PASS/FAIL over UART (default: 120).
-  --jobs N          Vivado parallel jobs (default: physical CPU count).
+  --jobs N          Vivado parallel jobs (default: CPU count).
   --log-dir DIR     Directory for per-step log files (default: logs/hw_test).
   --no-color        Disable ANSI colour output.
 
@@ -89,8 +88,6 @@ SCRIPT_DIR  = Path(__file__).resolve().parent
 REPO_ROOT   = SCRIPT_DIR.parent
 VIVADO_DIR  = REPO_ROOT / "hw" / "vivado" / "arty_a7"
 CREATE_TCL  = VIVADO_DIR / "create_project.tcl"
-IMPL_TCL    = VIVADO_DIR / "impl.tcl"
-PROGRAM_TCL = VIVADO_DIR / "program.tcl"
 BITSTREAM   = VIVADO_DIR / "axizero_arty" / "axizero_arty.runs" / "impl_1" / "system_wrapper.bit"
 
 # ── Vivado auto-detection ────────────────────────────────────────────────────
@@ -159,7 +156,6 @@ def find_sbt():
         Path(os.environ.get("LOCALAPPDATA", "")) / "Coursier" / "bin" / "sbt.bat",
         Path.home() / ".local" / "share" / "coursier" / "bin" / "sbt",
         Path.home() / ".coursier" / "bin" / "sbt",
-        Path("C:/AMDDesignTools") / "2025.2" / "tps" / "win64" / "jre11.0.16_1" / "bin" / "java.exe",  # sentinel only
     ]
     for c in sbt_candidates:
         if c.exists():
@@ -237,7 +233,7 @@ def run_cmd(cmd, cwd, log_path, env=None, interesting=None):
 
 # ── Step implementations ─────────────────────────────────────────────────────
 
-def step_gen_rtl(log_dir, jobs):
+def step_gen_rtl(log_dir):
     """sbt runMain axizero.gen.ArtyDutGen"""
     step(1, "RTL generation (sbt ArtyDutGen)")
     log = log_dir / "01_rtl_gen.log"
@@ -268,36 +264,25 @@ def step_gen_rtl(log_dir, jobs):
     return True
 
 
-def step_create_project(vivado, log_dir):
-    """vivado -mode batch -source create_project.tcl"""
-    step(2, "Vivado project creation")
-    log = log_dir / "02_create_project.log"
+def step_create_and_build(vivado, log_dir, jobs):
+    """vivado -mode batch -source create_project.tcl -tclargs <jobs>"""
+    step(2, "Vivado project creation + synthesis + implementation + bitstream")
+    log = log_dir / "02_build.log"
+
+    if BITSTREAM.exists():
+        ok(f"Bitstream already exists: {BITSTREAM}")
+        return True
+
+    # Fix HOME for Vivado child processes: Unix-style /c/Users/... breaks tclapp::load_apps
+    env = dict(os.environ)
+    if "HOME" in env and env["HOME"].startswith("/"):
+        env["HOME"] = str(Path.home())
 
     rc, text = run_cmd(
-        [vivado, "-mode", "batch", "-source", str(CREATE_TCL)],
+        [vivado, "-mode", "batch", "-source", str(CREATE_TCL), "-tclargs", str(jobs)],
         cwd=REPO_ROOT,
         log_path=log,
-        interesting=[r"error", r"warning.*critical", r"axiZero"],
-    )
-
-    if rc != 0:
-        err("Vivado project creation failed.")
-        _print_errors(text)
-        return False
-
-    ok("Vivado project created.")
-    return True
-
-
-def step_build(vivado, log_dir, jobs):
-    """vivado -mode batch -source impl.tcl  (synth + impl + bitstream)"""
-    step(3, "Synthesis / implementation / bitstream")
-    log = log_dir / "03_build.log"
-
-    rc, text = run_cmd(
-        [vivado, "-mode", "batch", "-source", str(IMPL_TCL)],
-        cwd=REPO_ROOT,
-        log_path=log,
+        env=env,
         interesting=[r"error", r"critical warning", r"axiZero", r"complete", r"bitstream"],
     )
 
@@ -311,27 +296,6 @@ def step_build(vivado, log_dir, jobs):
         return False
 
     ok(f"Bitstream ready: {BITSTREAM}")
-    return True
-
-
-def step_program(vivado, log_dir):
-    """vivado -mode batch -source program.tcl"""
-    step(4, "FPGA programming")
-    log = log_dir / "04_program.log"
-
-    rc, text = run_cmd(
-        [vivado, "-mode", "batch", "-source", str(PROGRAM_TCL)],
-        cwd=REPO_ROOT,
-        log_path=log,
-        interesting=[r"error", r"program", r"axiZero"],
-    )
-
-    if rc != 0:
-        err("FPGA programming failed.")
-        _print_errors(text)
-        return False
-
-    ok("FPGA programmed successfully.")
     return True
 
 
@@ -362,14 +326,14 @@ def auto_detect_port():
 
 def step_uart_monitor(port, baud, timeout_s, log_dir):
     """Open serial port and watch for PASS/FAIL output from MicroBlaze."""
-    step(5, f"UART monitor  ({port} @ {baud})")
+    step(4, f"UART monitor  ({port} @ {baud})")
 
     if not HAS_SERIAL:
         warn("pyserial not installed — skipping UART monitor.")
         warn("Install with:  pip install pyserial")
         return None   # indeterminate
 
-    log_path = log_dir / "05_uart.log"
+    log_path = log_dir / "04_uart.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     info(f"Opening {port} at {baud} baud, timeout {timeout_s}s...")
@@ -439,8 +403,7 @@ def parse_args():
     )
     p.add_argument("--vivado",         metavar="PATH",  help="Path to vivado(.bat)")
     p.add_argument("--skip-gen",       action="store_true", help="Skip sbt RTL generation")
-    p.add_argument("--skip-project",   action="store_true", help="Skip project creation")
-    p.add_argument("--skip-build",     action="store_true", help="Skip synth/impl/bitstream")
+    p.add_argument("--skip-build",     action="store_true", help="Skip Vivado project creation + build")
     p.add_argument("--program", "-p",  action="store_true", help="Program FPGA after bitstream")
     p.add_argument("--port",           metavar="PORT",  help="UART serial port (e.g. COM3)")
     p.add_argument("--baud",           type=int, default=115200, help="UART baud rate (default: 115200)")
@@ -482,11 +445,6 @@ def main():
         vivado = find_vivado()
     if not vivado:
         err("Vivado not found. Set --vivado or add it to PATH.")
-        err("Common locations:")
-        err("  Windows: C:\\Xilinx\\Vivado\\2023.1\\bin\\vivado.bat")
-        err("           C:\\AMDDesignTools\\2025.2\\Vivado\\bin\\vivado.bat")
-        err("  Linux:   /tools/Xilinx/Vivado/2023.1/bin/vivado")
-        err("           /opt/Xilinx/Vivado/2023.1/bin/vivado")
         sys.exit(2)
     ok(f"Vivado    : {vivado}")
 
@@ -499,41 +457,29 @@ def main():
 
     # ── Step 1: RTL generation ───────────────────────────────────────────────
     if not args.skip_gen:
-        if not step_gen_rtl(log_dir, jobs):
+        if not step_gen_rtl(log_dir):
             sys.exit(1)
     else:
         info("Skipping RTL generation (--skip-gen).")
 
-    # ── Step 2: Project creation ─────────────────────────────────────────────
-    if not args.skip_project:
-        if not step_create_project(vivado, log_dir):
-            sys.exit(1)
-    else:
-        info("Skipping project creation (--skip-project).")
-
-    # ── Step 3: Build ────────────────────────────────────────────────────────
+    # ── Step 2: Vivado build ─────────────────────────────────────────────────
     if not args.skip_build:
         start = time.time()
-        if not step_build(vivado, log_dir, jobs):
+        if not step_create_and_build(vivado, log_dir, jobs):
             sys.exit(1)
         elapsed = time.time() - start
         ok(f"Build completed in {elapsed/60:.1f} minutes.")
     else:
-        info("Skipping build (--skip-build).")
+        info("Skipping Vivado build (--skip-build).")
 
-    # ── Step 4: Program ──────────────────────────────────────────────────────
+    # ── Step 3: Program ──────────────────────────────────────────────────────
     if args.program:
-        if not step_program(vivado, log_dir):
-            sys.exit(1)
+        warn("FPGA programming via this script is not yet implemented.")
+        warn("Use the per-test scripts instead: run_base_test.py, run_wrr_test.py, etc.")
     else:
         info("Skipping FPGA programming (pass --program / -p to enable).")
-        if not args.skip_build:
-            print()
-            info("To program manually:")
-            info(f"  vivado -mode batch -source {PROGRAM_TCL}")
-            info("Or open Vivado GUI and use Hardware Manager.")
 
-    # ── Step 5: UART monitor ─────────────────────────────────────────────────
+    # ── Step 4: UART monitor ─────────────────────────────────────────────────
     if args.program or args.port:
         port = args.port
         if not port:

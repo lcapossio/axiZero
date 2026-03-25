@@ -1,8 +1,8 @@
-// Copyright (c) 2026 Leonardo Capossio — bard0 design  hello@bard0.com
+// Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
 // SPDX-License-Identifier: MIT
 // Generator : SpinalHDL v1.10.1    git head : 2527c7c6b0fb0f95e5e1a5722a0be732b364ce43
 // Component : AxiZeroLiteTop
-// Git hash  : 0a9a41afbaaacfe04903973a7d3809685e861cc5
+// Git hash  : 88447567bda6a05824e2373b89d05d1442b6ee72
 
 `timescale 1ns/1ps
 

@@ -88,9 +88,9 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 
 ### Option A — generate from YAML
 
-Requirements: Python 3.8+ with PyYAML, Java 11+ (tested with Java 21), [sbt](https://get-coursier.io/).
+Requirements: Python 3.8+ with PyYAML, Java 21+, [sbt](https://get-coursier.io/).
 
-On Linux or WSL, Verilator 5.x is also required (it is invoked internally during generation to validate the output).
+On Linux or WSL, Verilator 5.x is also required (SpinalHDL invokes it internally during `sbt` compilation and simulation).
 
 #### Installing the toolchain (automated)
 

@@ -110,10 +110,10 @@ def check_all():
     header("Checking dependencies")
 
     java_maj, java_str = java_version()
-    if java_maj >= 11:
+    if java_maj >= 21:
         ok(f"Java {java_maj}  ({java_str})")
     elif java_maj > 0:
-        err(f"Java {java_maj} found but ≥ 11 required  ({java_str})")
+        err(f"Java {java_maj} found but >= 21 required  ({java_str})")
     else:
         err("Java not found")
 
@@ -150,7 +150,7 @@ def install_linux_apt(check_only):
 
     # ── Java 21 ───────────────────────────────────────────────────────────────
     java_maj, java_str = java_version()
-    if java_maj >= 11:
+    if java_maj >= 21:
         skip(f"Java {java_maj} already installed ({java_str})")
     else:
         info("Installing OpenJDK 21...")
@@ -210,7 +210,7 @@ def install_macos(check_only):
         sys.exit(1)
 
     java_maj, java_str = java_version()
-    if java_maj >= 11:
+    if java_maj >= 21:
         skip(f"Java {java_maj} already installed ({java_str})")
     else:
         info("Installing Temurin 21 via Homebrew...")
@@ -242,7 +242,7 @@ def install_windows(check_only):
     has_winget = shutil.which("winget") is not None
 
     java_maj, java_str = java_version()
-    if java_maj >= 11:
+    if java_maj >= 21:
         skip(f"Java {java_maj} already installed ({java_str})")
     elif has_winget:
         info("Installing Eclipse Temurin 21 via winget...")

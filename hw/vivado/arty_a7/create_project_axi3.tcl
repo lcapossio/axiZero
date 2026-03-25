@@ -416,9 +416,17 @@ set_property top system_wrapper [current_fileset]
 add_files -fileset constrs_1 -norecurse "$script_dir/constraints/arty_a7_100t.xdc"
 
 ## --- 8. Build ---
-launch_runs synth_1 -jobs 4
+
+# Accept -jobs from tclargs (default: 4)
+if {[info exists argc] && $argc > 0} {
+    set jobs [lindex $argv 0]
+} else {
+    set jobs 4
+}
+
+launch_runs synth_1 -jobs $jobs
 wait_on_run synth_1
-launch_runs impl_1 -to_step write_bitstream -jobs 4
+launch_runs impl_1 -to_step write_bitstream -jobs $jobs
 wait_on_run impl_1
 
 puts "\n\[axiZero-AXI3\] Project: $proj_dir"

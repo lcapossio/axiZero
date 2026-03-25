@@ -568,13 +568,18 @@ set_property top system_wrapper [current_fileset]
 add_files -fileset constrs_1 -norecurse "$script_dir/constraints/arty_a7_100t.xdc"
 
 ## ─── 8. Synthesis and implementation ────────────────────────────────────────
-# Uncomment to run full implementation and bitstream generation automatically.
-# launch_runs synth_1 -jobs 4
-# wait_on_run synth_1
-# launch_runs impl_1 -to_step write_bitstream -jobs 4
-# wait_on_run impl_1
+# Accept -jobs from tclargs (default: 4)
+if {[info exists argc] && $argc > 0} {
+    set jobs [lindex $argv 0]
+} else {
+    set jobs 4
+}
+
+launch_runs synth_1 -jobs $jobs
+wait_on_run synth_1
+launch_runs impl_1 -to_step write_bitstream -jobs $jobs
+wait_on_run impl_1
 
 puts "\n\[axiZero\] Project created at: $proj_dir"
-puts "\[axiZero\] Open Vivado GUI and run 'Generate Bitstream', or"
-puts "\[axiZero\] uncomment the launch_runs lines above for batch flow."
+puts "\[axiZero\] Bitstream generated with $jobs parallel jobs."
 puts "\[axiZero\] Software project: sw/arty_a7/  (build with Vitis / xsct)\n"
