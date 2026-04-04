@@ -10,11 +10,11 @@ Thank you for your interest in contributing! Bug reports, feature requests, and 
    ```bash
    sbt test
    ```
-   All 81 SpinalSim tests must pass.  Also run the cocotb suite:
+   All 85 SpinalSim tests must pass.  Also run the cocotb suite:
    ```bash
    python3 sim/cocotb_gen/run_all.py
    ```
-   All 24 cocotb tests must pass.
+   All 27 cocotb tests must pass.
 
 ## Pull request guidelines
 

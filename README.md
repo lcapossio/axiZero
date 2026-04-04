@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 81 SpinalSim + 24 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 85 SpinalSim + 27 cocotb tests pass.
 
 ---
 
@@ -309,7 +309,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-81 tests pass across 14 suites:
+85 tests pass across 15 suites:
 
 | Suite | Tests | Description |
 |---|---|---|
@@ -327,6 +327,7 @@ sbt test
 | `QosCrossbarSpec` | 5 | QoS arbitration: higher AWQOS/ARQOS wins (blocking + pipelined), equal-QoS round-robin tie-break, aging anti-starvation |
 | `QosStressShortSpec` | 1 | Short 4-master QoS stress: distinct patterns (sequential, reverse, sparse, random short bursts), concurrent traffic, end-state validation |
 | `Axi3ToAxi4Spec` | 5 | AXI3→AXI4 bridge: single-beat, INCR burst, write interleaving (WID reorder), locked→SLVERR, multiple outstanding |
+| `Axi3MixedCrossbarSpec` | 4 | Axi3Mode auto-adapter: single-beat to full slave, single-beat to Lite slave, routing to both, 4-beat INCR burst |
 
 ### cocotb (integration tests against pre-built Verilog, run with Python)
 
@@ -339,9 +340,10 @@ python3 sim/cocotb_gen/run_all.py lite     # MyLite_1M4S.v only
 python3 sim/cocotb_gen/run_all.py full     # MyFull_2M2S.v only
 python3 sim/cocotb_gen/run_all.py wrr      # MyLite_2M2S_WRR.v only
 python3 sim/cocotb_gen/run_all.py qos      # MyFull_2M2S_QoS.v only
+python3 sim/cocotb_gen/run_all.py ipif     # MyLite_1M4S.v IPIF slave only
 ```
 
-24 tests pass across 4 suites:
+27 tests pass across 5 suites:
 
 | Suite | DUT | Tests | Description |
 |---|---|---|---|
@@ -349,6 +351,7 @@ python3 sim/cocotb_gen/run_all.py qos      # MyFull_2M2S_QoS.v only
 | `full` | `MyFull_2M2S.v` | 6 | AxiMaster → 2-slave crossbar: single R/W, address routing + isolation, 16-beat burst, 64-beat burst (AWLEN=63), alternating slaves, 40× random |
 | `wrr` | `MyLite_2M2S_WRR.v` | 6 | 2-master WRR crossbar: dual-master R/W, address routing, concurrent bandwidth, no starvation, concurrent different slaves, 80× random |
 | `qos` | `MyFull_2M2S_QoS.v` | 6 | 2-master QoS crossbar: dual-master R/W, address routing, higher QoS wins contention, equal-QoS round-robin, aging anti-starvation, QoS read priority |
+| `ipif` | `MyLite_1M4S.v` | 3 | IPIF slave compatibility: strict IpifRam model requires AWVALID+WVALID simultaneously, routing unaffected |
 
 ---
 
