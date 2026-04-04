@@ -134,12 +134,14 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
     val mp      = cfg.masters(mi)
     val extPort = io.masters(mi)
 
-    // Optional register slice on the external port side
+    // Optional register slice on the external port side.
+    // For Axi3Mode: Axi4RegSlice sits before the bridge (operates on the
+    // AXI4 bundle; the protocol adapter is downstream and unaffected).
     val afterRS: Axi4 = if (mp.regSlice && mp.mode == LiteAxi4) {
       val rs = new Axi4LiteRegSlice(mp.config)
       rs.io.upstream <> extPort
       rs.io.downstream
-    } else if (mp.regSlice && mp.mode != Axi3Mode) {
+    } else if (mp.regSlice) {
       val rs = new Axi4RegSlice(mp.config)
       rs.io.upstream <> extPort
       rs.io.downstream

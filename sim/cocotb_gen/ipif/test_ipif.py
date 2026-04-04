@@ -38,10 +38,14 @@ class IpifRam:
     AWREADY and WREADY are only asserted in the same cycle when both
     AWVALID and WVALID are already high.  A read path accepts AR
     independently (reads are not affected by IPIF constraints).
+
+    Signals are accessed directly on the DUT via '{prefix}_{signal}' to
+    avoid any API differences between cocotbext-axi versions.
     """
 
-    def __init__(self, bus, clock, reset_n, size=0x1_0000):
-        self.bus     = bus
+    def __init__(self, dut, prefix, clock, reset_n, size=0x1_0000):
+        self.dut     = dut
+        self.prefix  = prefix
         self.clock   = clock
         self.reset_n = reset_n
         self.memory  = {}
@@ -49,15 +53,19 @@ class IpifRam:
         cocotb.start_soon(self._write_handler())
         cocotb.start_soon(self._read_handler())
 
+    def _s(self, name):
+        """Return DUT signal handle for '{prefix}_{name}'."""
+        return getattr(self.dut, f"{self.prefix}_{name}")
+
     def _init_outputs(self):
-        self.bus.awready.value = 0
-        self.bus.wready.value  = 0
-        self.bus.bvalid.value  = 0
-        self.bus.bresp.value   = 0
-        self.bus.arready.value = 0
-        self.bus.rvalid.value  = 0
-        self.bus.rdata.value   = 0
-        self.bus.rresp.value   = 0
+        self._s("awready").value = 0
+        self._s("wready").value  = 0
+        self._s("bvalid").value  = 0
+        self._s("bresp").value   = 0
+        self._s("arready").value = 0
+        self._s("rvalid").value  = 0
+        self._s("rdata").value   = 0
+        self._s("rresp").value   = 0
 
     async def _write_handler(self):
         self._init_outputs()
@@ -68,44 +76,49 @@ class IpifRam:
                 continue
 
             # IPIF contract: only accept when both channels valid simultaneously.
-            if self.bus.awvalid.value and self.bus.wvalid.value:
-                self.bus.awready.value = 1
-                self.bus.wready.value  = 1
+            if self._s("awvalid").value and self._s("wvalid").value:
+                # Capture addr/data BEFORE asserting ready so we sample the
+                # values that are valid when both channels are presented.  In
+                # AXI4-Lite the master holds these stable until the handshake,
+                # but reading here avoids any race with the next simulation edge.
+                addr = int(self._s("awaddr").value) & (self.size - 1)
+                data = int(self._s("wdata").value)
+                strb = int(self._s("wstrb").value)
+                self._s("awready").value = 1
+                self._s("wready").value  = 1
+                # Handshake fires at this rising edge
                 await RisingEdge(self.clock)
-                addr = int(self.bus.awaddr.value) & (self.size - 1)
-                data = int(self.bus.wdata.value)
-                strb = int(self.bus.wstrb.value)
+                self._s("awready").value = 0
+                self._s("wready").value  = 0
                 cur  = self.memory.get(addr, 0)
                 for i in range(DATA_BYTES):
                     if strb & (1 << i):
                         shift = 8 * i
                         cur = (cur & ~(0xFF << shift)) | ((data >> shift & 0xFF) << shift)
                 self.memory[addr] = cur
-                self.bus.awready.value = 0
-                self.bus.wready.value  = 0
                 # Send write response
-                self.bus.bvalid.value = 1
-                self.bus.bresp.value  = 0
-                while not int(self.bus.bready.value):
+                self._s("bvalid").value = 1
+                self._s("bresp").value  = 0
+                while not int(self._s("bready").value):
                     await RisingEdge(self.clock)
-                self.bus.bvalid.value = 0
+                self._s("bvalid").value = 0
 
     async def _read_handler(self):
         while True:
             await RisingEdge(self.clock)
             if not self.reset_n.value:
                 continue
-            if self.bus.arvalid.value and not self.bus.rvalid.value:
-                self.bus.arready.value = 1
+            if self._s("arvalid").value and not self._s("rvalid").value:
+                self._s("arready").value = 1
                 await RisingEdge(self.clock)
-                addr = int(self.bus.araddr.value) & (self.size - 1)
-                self.bus.arready.value = 0
-                self.bus.rdata.value   = self.memory.get(addr, 0)
-                self.bus.rvalid.value  = 1
-                self.bus.rresp.value   = 0
-                while not int(self.bus.rready.value):
+                addr = int(self._s("araddr").value) & (self.size - 1)
+                self._s("arready").value = 0
+                self._s("rdata").value   = self.memory.get(addr, 0)
+                self._s("rvalid").value  = 1
+                self._s("rresp").value   = 0
+                while not int(self._s("rready").value):
                     await RisingEdge(self.clock)
-                self.bus.rvalid.value = 0
+                self._s("rvalid").value = 0
 
 
 # ---------------------------------------------------------------------------
@@ -124,8 +137,7 @@ def make_bfms(dut):
     master = AxiLiteMaster(
         AxiLiteBus.from_prefix(dut, "s0_axi"), dut.aclk, dut.aresetn,
         reset_active_level=0)
-    ipif = IpifRam(
-        AxiLiteBus.from_prefix(dut, "m0_axi"), dut.aclk, dut.aresetn)
+    ipif = IpifRam(dut, "m0_axi", dut.aclk, dut.aresetn)
     rams = [
         AxiLiteRam(
             AxiLiteBus.from_prefix(dut, f"m{i}_axi"), dut.aclk, dut.aresetn,

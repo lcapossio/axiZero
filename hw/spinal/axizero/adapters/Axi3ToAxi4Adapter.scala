@@ -355,9 +355,10 @@ class Axi3ToAxi4Adapter(
 // (AXI4 bit-0 → AXI3 bit-0; AXI3 bit-1 "locked" is set to 0 — no locked
 // semantics from the AXI4 side).  Assigns WID=0 on the W channel.
 //
-// NOTE: WID=0 is correct only for single-outstanding or single-ID masters.
-// For masters that issue concurrent writes with different IDs, a proper
-// WID-tracking FIFO is needed (not provided here).
+// NOTE: WID tracks the most-recently-accepted AW ID (registered on AW
+// handshake).  This is correct for single-outstanding use.  For masters
+// that issue concurrent writes with different IDs, a full WID-tracking
+// FIFO would be needed.
 // ---------------------------------------------------------------------------
 class Axi4ToAxi3Shim(axi4Cfg: Axi4Config, axi3Cfg: Axi3Config) extends Component {
   require(axi4Cfg.addressWidth == axi3Cfg.addressWidth)
@@ -389,10 +390,21 @@ class Axi4ToAxi3Shim(axi4Cfg: Axi4Config, axi3Cfg: Axi3Config) extends Component
   if (axi4Cfg.useProt)  io.axi3.aw.prot  := io.axi4.aw.prot
   else                  io.axi3.aw.prot  := B"000"
 
-  // W (add WID=0; AXI4 has no WID)
+  // W — assign WID from the most-recently-accepted AW ID.
+  // AXI4 has no WID; for single-outstanding use (Axi3MasterBridgeFromAxi4)
+  // there is always exactly one in-flight AW, so WID == that AW's ID.
+  // We register the AW ID on the cycle the AW handshake fires and hold it
+  // until the next AW.  This ensures W beats carry the correct WID even
+  // though AW and W are driven from separate simulation threads.
+  val awIdReg = RegInit(U(0, axi3Cfg.idWidth bits))
+  if (axi4Cfg.useId) {
+    when(io.axi4.aw.valid && io.axi3.aw.ready) {
+      awIdReg := io.axi4.aw.id
+    }
+  }
   io.axi3.w.valid := io.axi4.w.valid
   io.axi4.w.ready := io.axi3.w.ready
-  io.axi3.w.id    := 0
+  io.axi3.w.id    := awIdReg
   io.axi3.w.data  := io.axi4.w.data
   if (axi4Cfg.useStrb) io.axi3.w.strb := io.axi4.w.strb
   else                 io.axi3.w.strb := B(0, axi3Cfg.bytePerWord bits)
@@ -432,7 +444,7 @@ class Axi4ToAxi3Shim(axi4Cfg: Axi4Config, axi3Cfg: Axi3Config) extends Component
   if (axi4Cfg.useLast) io.axi4.r.last := io.axi3.r.last
 
   private def log2Up(x: Int): Int =
-    if (x <= 1) 0 else (math.log(x - 1) / math.log(2)).toInt + 1
+    if (x <= 1) 0 else (scala.math.log(x - 1) / scala.math.log(2)).toInt + 1
 }
 
 // ---------------------------------------------------------------------------

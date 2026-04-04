@@ -223,11 +223,37 @@ Each entry in the `masters` list defines one slave-facing AXI interface on the c
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `type` | string | `full` | `full` (AXI4 with IDs and bursts) or `lite` (AXI4-Lite, single-beat, no IDs). A Lite master connecting to a Full crossbar gets an automatic Lite-to-Full adapter. |
-| `addr_width` | int | *required* | Address bus width in bits (typically 32). |
+| `type` | string | `full` | `full` (AXI4 with IDs and bursts), `lite` (AXI4-Lite, single-beat, no IDs), or `axi3` (AXI3 master — see below). A Lite master gets an automatic Lite-to-Full adapter; an AXI3 master gets an automatic AXI3-to-AXI4 bridge. |
+| `addr_width` | int | *required* | Address bus width in bits (typically 32). AXI3 limit: ≤ 32. |
 | `data_width` | int | *required* | Data bus width in bits (32, 64, 128, …). If it differs from `fabric_data_width`, a width converter is inserted. |
-| `id_width` | int | `4` | Transaction ID width. Full AXI4 only; ignored for Lite. The crossbar appends `ceil(log2(nMasters))` master-index bits internally, so slave-side ID width = `id_width + masterIndexBits`. |
+| `id_width` | int | `4` | Transaction ID width. Full AXI4 and AXI3 only; ignored for Lite. AXI3 limit: ≤ 4. The crossbar appends `ceil(log2(nMasters))` master-index bits internally. |
 | `reg_slice` | bool | `false` | Insert a register slice (pipeline stage) on this master port for timing closure. |
+
+#### AXI3 master (`type: axi3`)
+
+When `type: axi3`, the generator inserts an `Axi3ToAxi4` bridge adapter between the AXI3 master port and the AXI4 crossbar fabric.  The bridge handles:
+
+- **LEN**: 4-bit AXI3 burst length (max 16 beats) zero-extended to 8-bit AXI4.
+- **LOCK**: 2-bit AXI3 lock truncated to 1-bit AXI4 exclusive; locked accesses (`2'b10`) return SLVERR.
+- **WID**: AXI3 write-data ID used to reorder interleaved W beats into AXI4's strict AW-order sequence.
+
+**AXI3 constraints** (validated by `axizero.py`):
+
+| Field | AXI3 limit |
+|-------|-----------|
+| `addr_width` | ≤ 32 bits |
+| `id_width` | ≤ 4 bits |
+| burst length (`len`) | ≤ 15 (1–16 beats) |
+| No `REGION` or `QOS` fields | — |
+
+**Example:**
+```yaml
+masters:
+  - type: axi3
+    addr_width: 32
+    data_width: 32
+    id_width: 4
+```
 
 ### Slave port keys
 

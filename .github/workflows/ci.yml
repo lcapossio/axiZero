@@ -34,12 +34,15 @@ jobs:
       - name: Compile (SpinalHDL)
         run: sbt compile
 
-      - name: Run SpinalSim tests
-        run: sbt test
+      - name: Check formatting (scalafmt)
+        run: sbt scalafmtCheck
+
+      - name: Run scalafix
+        run: sbt "scalafix --check"
 
       - name: Coverage report (SpinalSim)
-        # Runs instrumented compilation + tests + HTML report.
-        # Uses -Dcoverage=true so scalacOptions are evaluated at JVM startup.
+        # -Dcoverage=true must be set at JVM startup so scalacOptions are
+        # evaluated correctly; coverageTest = test + coverageReport.
         run: sbt -Dcoverage=true coverageTest
 
       - name: Upload coverage report
@@ -48,9 +51,6 @@ jobs:
         with:
           name: scoverage-report
           path: target/scala-2.13/scoverage-report/
-
-      - name: Run scalafix
-        run: sbt "scalafix --check"
 
       - name: Generator smoke test (axizero.py)
         run: |

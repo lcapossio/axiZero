@@ -1,13 +1,17 @@
 # SymbiYosys configuration — write response routing proof
 #
-# Property: a B response always returns to the master that issued the
-# corresponding AW (no cross-routing).
+# Verifies that B responses from AxiZeroMixedTop (MyFull_2M2S: 2M×2S, 64-bit)
+# always return to the master that issued the corresponding AW.
 #
-# Usage:
+# Usage (from formal/):
 #   sby -f write_response_routing.sby
 #
-# Prerequisites: SymbiYosys + Yosys + z3 (or boolector/bitwuzla)
+# Prerequisites: SymbiYosys + Yosys + z3
 #   sudo apt install symbiyosys yosys z3
+#
+# The wrapper module (write_response_props.sv) instantiates the DUT and
+# asserts the properties.  Free wires drive all DUT inputs so the solver
+# explores all legal stimulus up to the proof depth.
 
 [options]
 mode prove
@@ -18,8 +22,6 @@ smtbmc z3
 
 [script]
 read -formal write_response_props.sv
-# Replace with the generated Verilog file under test.
-# Adjust TOPLEVEL and file path to match the configuration being verified.
 read -formal ../generated/MyFull_2M2S.v
 prep -top write_response_props
 

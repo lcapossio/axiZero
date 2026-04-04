@@ -171,8 +171,18 @@ def _validate_design(d: dict, idx: int):
 
     for mi, m in enumerate(masters):
         pt = m.get("type")
-        if pt is not None and pt not in ("lite", "full"):
-            _err(f"{tag} master[{mi}]: 'type' must be 'lite' or 'full'")
+        if pt is not None and pt not in ("lite", "full", "axi3"):
+            _err(f"{tag} master[{mi}]: 'type' must be 'lite', 'full', or 'axi3'")
+        if pt == "axi3":
+            dw = m.get("data_width", 32)
+            aw = m.get("addr_width", 32)
+            iw = m.get("id_width", 4)
+            if dw not in (8, 16, 32, 64, 128):
+                _err(f"{tag} master[{mi}]: axi3 data_width must be 8/16/32/64/128 (got {dw})")
+            if aw < 1 or aw > 32:
+                _err(f"{tag} master[{mi}]: axi3 addr_width must be 1..32 (AXI3 limit, got {aw})")
+            if iw < 1 or iw > 4:
+                _err(f"{tag} master[{mi}]: axi3 id_width must be 1..4 (AXI3 limit, got {iw})")
 
     for si, s in enumerate(slaves):
         if "base" not in s:
@@ -233,6 +243,20 @@ Axi4Config(
             idWidth      = {id_width}
           )"""
 
+AXI3_CONFIG = """\
+Axi4Config(
+            addressWidth = {addr_width},
+            dataWidth    = {data_width},
+            idWidth      = {id_width}
+          )"""
+
+AXI3_CFG = """\
+Axi3Config(
+            addressWidth = {addr_width},
+            dataWidth    = {data_width},
+            idWidth      = {id_width}
+          )"""
+
 
 def _scala_bigint(value: int) -> str:
     return f'BigInt("{value:016x}", 16)'
@@ -264,12 +288,16 @@ def _default_data_width(d: dict) -> int:
 
 
 def _port_type(port: dict, design: dict) -> str:
-    """Resolve per-port type: port-level overrides design-level, default 'full'."""
+    """Resolve per-port type: port-level overrides design-level, default 'full'.
+    Valid values: 'lite', 'full', 'axi3' (master ports only).
+    """
     return port.get("type", design.get("type", "full"))
 
 
 def _is_all_lite(d: dict) -> bool:
-    """True if every master and slave in the design is AXI4-Lite."""
+    """True if every master and slave in the design is AXI4-Lite.
+    axi3 masters are not Lite, so this returns False if any master is axi3.
+    """
     return (
         all(_port_type(m, d) == "lite" for m in d.get("masters", [])) and
         all(_port_type(s, d) == "lite" for s in d.get("slaves",  []))
@@ -277,11 +305,13 @@ def _is_all_lite(d: dict) -> bool:
 
 
 def _compute_slave_idw(d: dict) -> int:
-    """Compute slave-side expanded ID width = max(full master id_widths) + masterIndexBits."""
+    """Compute slave-side expanded ID width = max(full/axi3 master id_widths) + masterIndexBits."""
     import math
     masters = d.get("masters", [])
-    full_ids = [m.get("id_width", 4) for m in masters if _port_type(m, d) == "full"]
-    effective = max(full_ids) if full_ids else 1
+    # Both 'full' and 'axi3' masters carry IDs; 'lite' masters drive id=0.
+    id_bearing = [m.get("id_width", 4) for m in masters
+                  if _port_type(m, d) in ("full", "axi3")]
+    effective = max(id_bearing) if id_bearing else 1
     n = len(masters)
     idx_bits = 0 if n <= 1 else math.ceil(math.log2(n))
     return effective + idx_bits
@@ -293,19 +323,37 @@ def _gen_master_port(m: dict, design: dict, global_addr_width: int) -> str:
     data_w  = m.get("data_width",  32)
     id_w    = m.get("id_width",    4)
     rs      = "true" if m.get("reg_slice", False) else "false"
-    mode    = "LiteAxi4" if port_type == "lite" else "FullAxi4"
 
     if port_type == "lite":
-        cfg = LITE_AXI4_CONFIG.format(addr_width=addr_w, data_width=data_w)
+        mode = "LiteAxi4"
+        cfg  = LITE_AXI4_CONFIG.format(addr_width=addr_w, data_width=data_w)
+        return textwrap.dedent(f"""\
+            MasterPort(
+              config   = {cfg},
+              mode     = {mode},
+              regSlice = {rs}
+            )""")
+    elif port_type == "axi3":
+        # Axi3Mode: the external AXI4 bundle is AXI3-constrained (max len=15,
+        # no QoS/region).  The generator emits an Axi4Config for the MasterPort
+        # (the bridge uses it internally) plus an Axi3Config for axi3Cfg.
+        axi4_cfg = AXI3_CONFIG.format(addr_width=addr_w, data_width=data_w, id_width=id_w)
+        a3_cfg   = AXI3_CFG.format(addr_width=addr_w, data_width=data_w, id_width=id_w)
+        return textwrap.dedent(f"""\
+            MasterPort(
+              config   = {axi4_cfg},
+              mode     = Axi3Mode,
+              regSlice = {rs},
+              axi3Cfg  = Some({a3_cfg})
+            )""")
     else:
-        cfg = FULL_AXI4_CONFIG.format(addr_width=addr_w, data_width=data_w, id_width=id_w)
-
-    return textwrap.dedent(f"""\
-        MasterPort(
-          config   = {cfg},
-          mode     = {mode},
-          regSlice = {rs}
-        )""")
+        cfg  = FULL_AXI4_CONFIG.format(addr_width=addr_w, data_width=data_w, id_width=id_w)
+        return textwrap.dedent(f"""\
+            MasterPort(
+              config   = {cfg},
+              mode     = FullAxi4,
+              regSlice = {rs}
+            )""")
 
 
 def _gen_slave_port(s: dict, design: dict, global_addr_width: int, slave_idw: int) -> str:
@@ -376,6 +424,12 @@ def _gen_design_block(d: dict) -> str:
 
 
 def generate_scala(designs: list[dict]) -> str:
+    has_axi3 = any(
+        _port_type(m, d) == "axi3"
+        for d in designs
+        for m in d.get("masters", [])
+    )
+    axi3_import = "\nimport axizero.adapters.Axi3Config" if has_axi3 else ""
     blocks = "\n".join(_gen_design_block(d) for d in designs)
     return textwrap.dedent(f"""\
         // AUTO-GENERATED by axizero.py — do not edit by hand.
@@ -383,7 +437,7 @@ def generate_scala(designs: list[dict]) -> str:
 
         import spinal.core._
         import spinal.lib.bus.amba4.axi.Axi4Config
-        import axizero._
+        import axizero._{axi3_import}
 
         object AxiZeroUserGen extends App {{
         {textwrap.indent(blocks, "  ")}}}
@@ -577,7 +631,34 @@ EXAMPLE_YAML = textwrap.dedent("""\
             size: 0x20000000    # 512 MB
             data_width: 64
 
-      # ── Example 4: mixed AXI4 + AXI4-Lite ports ──────────────────────────────
+      # ── Example 4: AXI3 master port ──────────────────────────────────────────
+      #
+      # An AXI3 master (e.g. Cortex-A9 PS in Zynq-7000) connected to an AXI4
+      # crossbar.  The generator auto-inserts an Axi3ToAxi4 bridge.
+      #
+      # AXI3 constraints: burst length ≤ 16 (len ≤ 15), no REGION/QOS,
+      # WID field on write-data channel.  addr_width ≤ 32, id_width ≤ 4.
+      #
+      - name: MyAxi3_1M2S
+        arbitration: round_robin
+
+        masters:
+          - addr_width: 32
+            data_width: 32
+            id_width: 4
+            type: axi3         # AXI3 master — bridge auto-inserted
+
+        slaves:
+          - base: 0x00000000
+            size: 0x40000000   # 1 GB DDR
+            data_width: 32
+            type: full
+          - base: 0x40000000
+            size: 0x1000       # UART
+            data_width: 32
+            type: lite
+
+      # ── Example 5: mixed AXI4 + AXI4-Lite ports ──────────────────────────────
       #
       # A DMA engine (full AXI4, id_width=4) and a CPU config port (AXI4-Lite)
       # share three slaves: DDR (full AXI4) plus UART and GPIO (AXI4-Lite).
