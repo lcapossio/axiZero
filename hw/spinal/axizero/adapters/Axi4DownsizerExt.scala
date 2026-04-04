@@ -93,21 +93,28 @@ class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
   val cmdRatio      = UInt(cmdRatioWidth bits)
 
   when(sizeIn > sizeMaxOut) {
+    // Align start address to the wide-word boundary so all sub-AWs reference
+    // the same word (FIXED) or contiguous narrow words (INCR/WRAP).
     startAddress := (io.input.addr |>> sizeIn) |<< sizeIn
+    // widthRatio = (narrow beats per wide beat) - 1, e.g. 64→32 gives ratio=1.
     widthRatio   := (U(1, ratioWidth bits) |<< sizeDiff) - 1
     sizePerTrans := sizeMaxOut
     if (hasBurst && inputConfig.useLen) {
-      // FIXED/WRAP: flatten to single-beat sub-AW
+      // FIXED/WRAP are flattened: every output sub-AW is a single beat (len=0,
+      // burst=INCR).  Total sub-AWs = (len+1) * (widthRatio+1), one per narrow
+      // beat, so cmdRatio = (len+1)*(widthRatio+1) - 1 = (lenP1 << sizeDiff)-1.
       val lenP1 = (io.input.len +^ U(1)).resize(9)
       when(io.input.burst === B"00" || io.input.burst === B"10") {
         cmdRatio := ((lenP1 << sizeDiff) - 1).resized
       } otherwise {
+        // INCR: sub-AWs keep original len, so expansion count = widthRatio.
         cmdRatio := widthRatio.resized
       }
     } else {
       cmdRatio := widthRatio.resized
     }
   } otherwise {
+    // No downsizing needed (sizeIn <= sizeMaxOut): pass through unchanged.
     startAddress := io.input.addr
     widthRatio   := 0
     sizePerTrans := sizeIn
@@ -159,19 +166,28 @@ class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
 
   val address = RegInit(U(0, io.input.addr.getWidth bits))
   when(cmdStreamWithSize.fire) {
+    // Latch the aligned start address at the beginning of each new transaction.
     address := cmdStreamWithSize.addr
   } elsewhen (cmdExtendedStream.fire) {
     if (hasBurst) {
-      val fixedStride = (U(1) << size).resized
-      when(burstTypeReg === B"00") {         // FIXED — cycle through byte lanes
+      val fixedStride = (U(1) << size).resized   // stride = 2^sizeOut bytes
+      when(burstTypeReg === B"00") {
+        // FIXED burst: all wide beats access the same location; the narrow
+        // sub-addresses cycle through byte lanes within one wide word.
+        // nextAddr advances by fixedStride, but the upper bits (above sizeIn)
+        // are held constant so the address wraps within the wide-word boundary.
         val nextAddr     = address + fixedStride
         val wideWordMask = ((U(1) << sizeInReg) - 1).resize(inputConfig.addressWidth)
         address := (startAddrReg & ~wideWordMask) | (nextAddr & wideWordMask)
-      } elsewhen (burstTypeReg === B"10") {  // WRAP — stride by sizeOut, wrap at input boundary
+      } elsewhen (burstTypeReg === B"10") {
+        // WRAP burst: address advances by fixedStride but wraps at the burst
+        // boundary.  wrapMaskReg = (len+1)*2^sizeIn - 1 (computed on fire).
+        // wrapBase keeps bits above the wrap boundary constant.
         val nextAddr = (address + fixedStride).resize(inputConfig.addressWidth)
         val wrapBase = startAddrReg & ~wrapMaskReg
         address := wrapBase | (nextAddr & wrapMaskReg)
-      } otherwise {                          // INCR (01) or RESERVED (11)
+      } otherwise {
+        // INCR (0b01) or RESERVED (0b11): advance by the full sub-burst size.
         val incrStride = ((cmdExtendedStream.len +^ 1) << size).resized
         address := address + incrStride
       }

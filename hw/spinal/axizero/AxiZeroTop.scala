@@ -104,12 +104,17 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
 
   // ── Normalised internal ID widths ─────────────────────────────────────────
   private val effectiveIdW: Int =
-    (cfg.masters.collect { case mp if mp.mode == FullAxi4 => mp.config.idWidth } :+ 1).max
+    // Axi3Mode and FullAxi4 master ports carry IDs; LiteAxi4 drives id=0.
+    (cfg.masters.collect {
+      case mp if mp.mode == FullAxi4 || mp.mode == Axi3Mode => mp.config.idWidth
+    } :+ 1).max
 
   private val slaveIdW: Int = effectiveIdW + cfg.masterIndexBits
 
   // ── All-Full AXI4 internal configs for the crossbar ───────────────────────
   private def internalMasterCfg(mp: MasterPort): Axi4Config =
+    // Axi3Mode ports use the same internal AXI4 config; the adapter handles
+    // AXI3→AXI4 conversion before the signal reaches the crossbar.
     Axi4Config(mp.config.addressWidth, cfg.fabricDataWidth, effectiveIdW)
 
   private def internalSlaveCfg(sp: SlavePort): Axi4Config =
@@ -134,18 +139,30 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
       val rs = new Axi4LiteRegSlice(mp.config)
       rs.io.upstream <> extPort
       rs.io.downstream
-    } else if (mp.regSlice) {
+    } else if (mp.regSlice && mp.mode != Axi3Mode) {
       val rs = new Axi4RegSlice(mp.config)
       rs.io.upstream <> extPort
       rs.io.downstream
     } else extPort
 
-    // Lite → Full adapter if this master port is AXI4-Lite
-    val afterAdapt: Axi4 = if (mp.mode == LiteAxi4) {
-      val adpt = new Axi4LiteToFullAdapter(mp.config, xbarCfg.masters(mi).config)
-      adpt.io.lite <> afterRS
-      adpt.io.full
-    } else afterRS
+    // Lite → Full adapter, AXI3 → AXI4 adapter, or pass-through
+    val afterAdapt: Axi4 = mp.mode match {
+      case LiteAxi4 =>
+        val adpt = new Axi4LiteToFullAdapter(mp.config, xbarCfg.masters(mi).config)
+        adpt.io.lite <> afterRS
+        adpt.io.full
+      case Axi3Mode =>
+        // Auto-insert AXI3→AXI4 bridge.  The external port (extPort) is an
+        // Axi4 bundle whose fields are constrained to AXI3 limits (4-bit LEN
+        // etc.) by the caller; the shim converts it to Axi3 then the adapter
+        // converts back to full AXI4 for the crossbar fabric.
+        val a3cfg   = mp.axi3Cfg.get
+        val bridge  = new Axi3MasterBridgeFromAxi4(mp.config, a3cfg,
+                            xbarCfg.masters(mi).config, cfg.maxOutstanding)
+        bridge.io.axi4in <> afterRS
+        bridge.io.axi4out
+      case _ => afterRS
+    }
 
     // Data-width upsizing for narrow Full AXI4 master ports
     val afterWidthConv: Axi4 = if (mp.mode == FullAxi4 &&

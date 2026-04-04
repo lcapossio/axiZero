@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Leonardo Capossio
+// Copyright (c) 2026 Leonardo Capossio — bard0 design  hello@bard0.com
 // SPDX-License-Identifier: MIT
 package axizero.adapters
 
@@ -319,7 +319,8 @@ class Axi3ToAxi4Adapter(
     }
 
     is(FsmState.WAIT_B) {
-      // B is handled below; transition back on B fire
+      // B is forwarded below under the WAIT_B guard; the FSM just waits for
+      // the AXI3 master to consume the response (io.axi3.b.fire).
       when(io.axi3.b.fire) {
         state := FsmState.IDLE
       }
@@ -328,6 +329,16 @@ class Axi3ToAxi4Adapter(
 
   // =========================================================================
   // B path — pass through, inject SLVERR for converted locked accesses
+  //
+  // Gating on (state === FsmState.WAIT_B) prevents AXI4 B responses from
+  // leaking to the AXI3 master while the FSM is still in DRAIN_W (a pipelined
+  // AXI4 slave could theoretically return B before the FSM transitions, though
+  // in practice the slave waits for all W beats).
+  //
+  // AXI4 has no "locked" access type; AXI3 locked (2'b10) is converted to
+  // AXI4 exclusive (1'b1) on the way in.  On the way back the response is
+  // overridden with SLVERR (2'b10) to signal to the AXI3 master that locked
+  // semantics are not guaranteed.
   // =========================================================================
   io.axi3.b.valid := io.axi4.b.valid && (state === FsmState.WAIT_B)
   io.axi4.b.ready := io.axi3.b.ready && (state === FsmState.WAIT_B)
@@ -335,4 +346,144 @@ class Axi3ToAxi4Adapter(
   io.axi3.b.id   := (if (axi4Cfg.useId) io.axi4.b.id else U(0, axi3Cfg.idWidth bits))
   val bResp = if (axi4Cfg.useResp) io.axi4.b.resp else B(0, 2 bits)
   io.axi3.b.resp := Mux(curCmd.locked, B"10", bResp)
+}
+
+// ---------------------------------------------------------------------------
+// Axi4ToAxi3Shim — trivial wire conversion from AXI4 to AXI3 bundle
+//
+// Truncates LEN 8→4 bits (AXI3 max burst 16), extends LOCK 1→2 bits
+// (AXI4 bit-0 → AXI3 bit-0; AXI3 bit-1 "locked" is set to 0 — no locked
+// semantics from the AXI4 side).  Assigns WID=0 on the W channel.
+//
+// NOTE: WID=0 is correct only for single-outstanding or single-ID masters.
+// For masters that issue concurrent writes with different IDs, a proper
+// WID-tracking FIFO is needed (not provided here).
+// ---------------------------------------------------------------------------
+class Axi4ToAxi3Shim(axi4Cfg: Axi4Config, axi3Cfg: Axi3Config) extends Component {
+  require(axi4Cfg.addressWidth == axi3Cfg.addressWidth)
+  require(axi4Cfg.dataWidth    == axi3Cfg.dataWidth)
+  require(axi4Cfg.idWidth      == axi3Cfg.idWidth)
+
+  val io = new Bundle {
+    val axi4 = slave(Axi4(axi4Cfg))
+    val axi3 = master(Axi3(axi3Cfg))
+  }
+
+  // AW
+  io.axi3.aw.valid   := io.axi4.aw.valid
+  io.axi4.aw.ready   := io.axi3.aw.ready
+  if (axi4Cfg.useId)    io.axi3.aw.id    := io.axi4.aw.id
+  else                  io.axi3.aw.id    := 0
+  io.axi3.aw.addr    := io.axi4.aw.addr
+  if (axi4Cfg.useLen)   io.axi3.aw.len   := io.axi4.aw.len.resize(4)
+  else                  io.axi3.aw.len   := 0
+  if (axi4Cfg.useSize)  io.axi3.aw.size  := io.axi4.aw.size
+  else                  io.axi3.aw.size  := log2Up(axi4Cfg.bytePerWord)
+  if (axi4Cfg.useBurst) io.axi3.aw.burst := io.axi4.aw.burst
+  else                  io.axi3.aw.burst := B"01"   // INCR
+  // AXI4 LOCK is 1-bit; map to AXI3 2-bit (exclusive → 2'b01, normal → 2'b00)
+  if (axi4Cfg.useLock)  io.axi3.aw.lock  := io.axi4.aw.lock.resize(2)
+  else                  io.axi3.aw.lock  := B"00"
+  if (axi4Cfg.useCache) io.axi3.aw.cache := io.axi4.aw.cache
+  else                  io.axi3.aw.cache := B"0000"
+  if (axi4Cfg.useProt)  io.axi3.aw.prot  := io.axi4.aw.prot
+  else                  io.axi3.aw.prot  := B"000"
+
+  // W (add WID=0; AXI4 has no WID)
+  io.axi3.w.valid := io.axi4.w.valid
+  io.axi4.w.ready := io.axi3.w.ready
+  io.axi3.w.id    := 0
+  io.axi3.w.data  := io.axi4.w.data
+  if (axi4Cfg.useStrb) io.axi3.w.strb := io.axi4.w.strb
+  else                 io.axi3.w.strb := B(0, axi3Cfg.bytePerWord bits)
+  io.axi3.w.last  := (if (axi4Cfg.useLast) io.axi4.w.last else True)
+
+  // B
+  io.axi4.b.valid  := io.axi3.b.valid
+  io.axi3.b.ready  := io.axi4.b.ready
+  if (axi4Cfg.useId)   io.axi4.b.id   := io.axi3.b.id
+  if (axi4Cfg.useResp) io.axi4.b.resp := io.axi3.b.resp
+
+  // AR
+  io.axi3.ar.valid   := io.axi4.ar.valid
+  io.axi4.ar.ready   := io.axi3.ar.ready
+  if (axi4Cfg.useId)    io.axi3.ar.id    := io.axi4.ar.id
+  else                  io.axi3.ar.id    := 0
+  io.axi3.ar.addr    := io.axi4.ar.addr
+  if (axi4Cfg.useLen)   io.axi3.ar.len   := io.axi4.ar.len.resize(4)
+  else                  io.axi3.ar.len   := 0
+  if (axi4Cfg.useSize)  io.axi3.ar.size  := io.axi4.ar.size
+  else                  io.axi3.ar.size  := log2Up(axi4Cfg.bytePerWord)
+  if (axi4Cfg.useBurst) io.axi3.ar.burst := io.axi4.ar.burst
+  else                  io.axi3.ar.burst := B"01"
+  if (axi4Cfg.useLock)  io.axi3.ar.lock  := io.axi4.ar.lock.resize(2)
+  else                  io.axi3.ar.lock  := B"00"
+  if (axi4Cfg.useCache) io.axi3.ar.cache := io.axi4.ar.cache
+  else                  io.axi3.ar.cache := B"0000"
+  if (axi4Cfg.useProt)  io.axi3.ar.prot  := io.axi4.ar.prot
+  else                  io.axi3.ar.prot  := B"000"
+
+  // R
+  io.axi4.r.valid  := io.axi3.r.valid
+  io.axi3.r.ready  := io.axi4.r.ready
+  if (axi4Cfg.useId)   io.axi4.r.id   := io.axi3.r.id
+  io.axi4.r.data   := io.axi3.r.data
+  if (axi4Cfg.useResp) io.axi4.r.resp := io.axi3.r.resp
+  if (axi4Cfg.useLast) io.axi4.r.last := io.axi3.r.last
+
+  private def log2Up(x: Int): Int =
+    if (x <= 1) 0 else (math.log(x - 1) / math.log(2)).toInt + 1
+}
+
+// ---------------------------------------------------------------------------
+// Axi3MasterBridge — convenience wrapper: AXI3 master → AXI4 fabric
+//
+// Combines Axi4ToAxi3Shim (AXI4 external port → AXI3 bundle) with
+// Axi3ToAxi4Adapter (AXI3 bundle → AXI4 fabric port).
+//
+// This is the component auto-inserted by AxiZeroMixedTop for Axi3Mode master
+// ports.  It can also be instantiated directly in user designs.
+//
+// External view:
+//   io.axi4in  — AXI4 slave port (connect your AXI4 master here)
+//   io.axi4out — AXI4 master port (connect to crossbar master input)
+//
+// Or use the Axi3 variant for a true AXI3 external port:
+//   io.axi3    — Axi3 slave port (connect your AXI3 master here)
+//   io.axi4out — AXI4 master port
+// ---------------------------------------------------------------------------
+class Axi3MasterBridge(
+  axi4Cfg:        Axi4Config,
+  axi3Cfg:        Axi3Config,
+  maxOutstanding: Int = 4
+) extends Component {
+
+  val io = new Bundle {
+    val axi3   = slave(Axi3(axi3Cfg))
+    val axi4out = master(Axi4(axi4Cfg))
+  }
+
+  val adapter = new Axi3ToAxi4Adapter(axi3Cfg, axi4Cfg, maxOutstanding)
+  adapter.io.axi3 <> io.axi3
+  io.axi4out      <> adapter.io.axi4
+}
+
+// Variant that accepts an AXI4 input and converts to AXI3 internally
+class Axi3MasterBridgeFromAxi4(
+  axi4InCfg:      Axi4Config,
+  axi3Cfg:        Axi3Config,
+  axi4OutCfg:     Axi4Config,
+  maxOutstanding: Int = 4
+) extends Component {
+
+  val io = new Bundle {
+    val axi4in  = slave(Axi4(axi4InCfg))
+    val axi4out = master(Axi4(axi4OutCfg))
+  }
+
+  val shim    = new Axi4ToAxi3Shim(axi4InCfg, axi3Cfg)
+  val adapter = new Axi3ToAxi4Adapter(axi3Cfg, axi4OutCfg, maxOutstanding)
+  shim.io.axi4    <> io.axi4in
+  adapter.io.axi3 <> shim.io.axi3
+  io.axi4out      <> adapter.io.axi4
 }

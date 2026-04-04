@@ -1,0 +1,28 @@
+# SymbiYosys configuration — write response routing proof
+#
+# Property: a B response always returns to the master that issued the
+# corresponding AW (no cross-routing).
+#
+# Usage:
+#   sby -f write_response_routing.sby
+#
+# Prerequisites: SymbiYosys + Yosys + z3 (or boolector/bitwuzla)
+#   sudo apt install symbiyosys yosys z3
+
+[options]
+mode prove
+depth 20
+
+[engines]
+smtbmc z3
+
+[script]
+read -formal write_response_props.sv
+# Replace with the generated Verilog file under test.
+# Adjust TOPLEVEL and file path to match the configuration being verified.
+read -formal ../generated/MyFull_2M2S.v
+prep -top write_response_props
+
+[files]
+write_response_props.sv
+../generated/MyFull_2M2S.v

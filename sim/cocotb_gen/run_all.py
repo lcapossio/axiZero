@@ -50,6 +50,12 @@ SUITES = {
         "module":   "test_qos",
         "test_dir": HERE / "qos",
     },
+    "ipif": {
+        "rtl":      REPO_ROOT / "generated" / "MyLite_1M4S.v",
+        "toplevel": "AxiZeroLiteTop",
+        "module":   "test_ipif",
+        "test_dir": HERE / "ipif",
+    },
 }
 
 

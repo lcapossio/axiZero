@@ -37,6 +37,21 @@ jobs:
       - name: Run SpinalSim tests
         run: sbt test
 
+      - name: Coverage report (SpinalSim)
+        # Runs instrumented compilation + tests + HTML report.
+        # Uses -Dcoverage=true so scalacOptions are evaluated at JVM startup.
+        run: sbt -Dcoverage=true coverageTest
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scoverage-report
+          path: target/scala-2.13/scoverage-report/
+
+      - name: Run scalafix
+        run: sbt "scalafix --check"
+
       - name: Generator smoke test (axizero.py)
         run: |
           pip install pyyaml
@@ -46,6 +61,9 @@ jobs:
   cocotb:
     name: cocotb (generated Verilog)
     runs-on: ubuntu-24.04
+    # TODO: migrate to cocotb 2.x once cocotbext-axi has a compatible release.
+    # Blocked on cocotbext-axi support for cocotb 2.0 runner API changes.
+    # Track: https://github.com/alexforencich/cocotbext-axi/issues
 
     steps:
       - uses: actions/checkout@v4
@@ -56,5 +74,10 @@ jobs:
       - name: Install Python dependencies
         run: pip install "cocotb==1.9.2" cocotbext-axi
 
-      - name: Run cocotb tests (lite + full)
+      - name: Lint Python (ruff)
+        run: |
+          pip install ruff
+          ruff check scripts/ sim/
+
+      - name: Run cocotb tests (lite + full + wrr + qos + ipif)
         run: python3 sim/cocotb_gen/run_all.py

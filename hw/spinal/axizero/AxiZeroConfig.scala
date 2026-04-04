@@ -5,11 +5,15 @@ package axizero
 import spinal.lib.bus.amba4.axi.Axi4Config
 
 // ---------------------------------------------------------------------------
-// Port mode: full AXI4 or AXI4-Lite
+// Port mode: full AXI4, AXI4-Lite, or AXI3 master
 // ---------------------------------------------------------------------------
 sealed trait PortMode
 case object FullAxi4 extends PortMode
 case object LiteAxi4 extends PortMode
+/** AXI3 master port.  The crossbar auto-inserts an Axi3ToAxi4Adapter between
+ *  the external AXI3 port and the internal AXI4 fabric.
+ *  Requires MasterPort.axi3Cfg to be set. */
+case object Axi3Mode extends PortMode
 
 // ---------------------------------------------------------------------------
 // Arbitration policy
@@ -36,14 +40,28 @@ case class WeightedRoundRobin(weights: Seq[Int]) extends ArbitrationPolicy {
 
 /** Configuration for one master-side port. */
 case class MasterPort(
-  /** AXI bus parameters (address/data/id widths, optional signals). */
+  /** AXI bus parameters (address/data/id widths, optional signals).
+   *  For Axi3Mode ports this describes the internal AXI4 representation;
+   *  the external port is an Axi3 bundle derived from axi3Cfg. */
   config  : Axi4Config,
-  /** AXI4-Lite or full AXI4. */
+  /** AXI4-Lite, full AXI4, or AXI3. */
   mode    : PortMode = FullAxi4,
   /** Insert a register slice between this master and the crossbar fabric.
    *  Helps with timing closure; costs one cycle of additional latency. */
-  regSlice: Boolean  = false
-)
+  regSlice: Boolean  = false,
+  /** Required when mode == Axi3Mode.  Describes the external AXI3 port
+   *  (address/data/id widths must match config). */
+  axi3Cfg : Option[axizero.adapters.Axi3Config] = None
+) {
+  require(
+    mode != Axi3Mode || axi3Cfg.isDefined,
+    "MasterPort: axi3Cfg must be set when mode == Axi3Mode"
+  )
+  require(
+    mode == Axi3Mode || axi3Cfg.isEmpty,
+    "MasterPort: axi3Cfg must only be set when mode == Axi3Mode"
+  )
+}
 
 /** Configuration for one slave-side port. */
 case class SlavePort(
@@ -104,9 +122,12 @@ case class AxiZeroConfig(
   val isAllLite: Boolean =
     masters.forall(_.mode == LiteAxi4) && slaves.forall(_.mode == LiteAxi4)
 
-  /** True when every master AND every slave is full AXI4. */
+  /** True when every master AND every slave is full AXI4 (no Lite, no AXI3). */
   val isAllFull: Boolean =
     masters.forall(_.mode == FullAxi4) && slaves.forall(_.mode == FullAxi4)
+
+  /** True when at least one master is AXI3 (uses Axi3Mode). */
+  val hasAxi3Masters: Boolean = masters.exists(_.mode == Axi3Mode)
 
   // ---- fabric data width --------------------------------------------------
   val fabricDataWidth: Int = internalDataWidth.getOrElse(

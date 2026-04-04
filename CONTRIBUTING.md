@@ -5,12 +5,16 @@ Thank you for your interest in contributing! Bug reports, feature requests, and 
 ## Getting started
 
 1. Fork the repository and create a branch from `main`.
-2. Follow the build instructions in the README to set up the toolchain (Java 11+, sbt, Verilator 5.x).
+2. Follow the build instructions in the README to set up the toolchain (Java 21+, sbt, Verilator 5.x).
 3. Run the test suite before and after your change:
    ```bash
    sbt test
    ```
-   All 26 tests must pass.
+   All 81 SpinalSim tests must pass.  Also run the cocotb suite:
+   ```bash
+   python3 sim/cocotb_gen/run_all.py
+   ```
+   All 24 cocotb tests must pass.
 
 ## Pull request guidelines
 
