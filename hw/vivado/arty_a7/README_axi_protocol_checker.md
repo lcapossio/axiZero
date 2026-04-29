@@ -38,20 +38,31 @@ vivado -mode batch -source hw/vivado/arty_a7/create_project.tcl -tclargs 4 1
 
 Default is `0` (off) so the baseline build is bit-identical to the original.
 
-## How to read the violation flag on hardware
+## How to read the violation status on hardware
 
-The OR-reduction of all rule violations (`pc_asserted`) is latched into a
-sticky flip-flop and routed to a new top-level output port `axi_pc_violation`
-on **LD0_R** (Arty A7-100T RGB LED 0, red — pin G6).
+The full `pc_status[159:0]` bus is latched into sticky flip-flops by
+`axi_pc_sticky.v`. The OR-reduction of all sticky bits is routed to a new
+top-level output port `axi_pc_violation` on **LD0_R** (Arty A7-100T RGB LED 0,
+red — pin G6).
 
 | LED state            | Meaning                                                       |
 |----------------------|---------------------------------------------------------------|
 | Red OFF (LD0_R = 0)  | No protocol violation detected since last reset.              |
 | Red ON  (LD0_R = 1)  | At least one rule fired. Sticky — stays on until system reset.|
 
-A successful base test run should leave LD0_R **off** at the end. If the red
-LED is on after `run_base_test.py` reports `g_pass=10`, you have an axiZero
-protocol bug that the functional test did not catch.
+The helper also exposes a 32-bit software view through AXI GPIO channel 2 at
+`0xC0020008` when the checker is enabled:
+
+| View bits | Meaning |
+|-----------|---------|
+| `view[29:0]` | `pc_status[59:30]`, bit-for-bit sticky detail view |
+| `view[30]` | Reserved, reads 0 |
+| `view[31]` | OR of all 160 sticky bits |
+
+`run_base_test.py` reads this value after halting MicroBlaze and decodes the
+visible `pc_status[59:30]` rule names. A successful base test run should leave
+LD0_R off and print `axi_pc view = 0x00000000`. If `g_pass=10` but bit 31 is
+set, the functional test passed while the protocol checker saw a violation.
 
 ## Resource impact
 
@@ -76,6 +87,6 @@ deploy. (The Xilinx IP itself ships with Vivado at no extra cost.)
 
 | File                                                          | Purpose                                                       |
 |---------------------------------------------------------------|---------------------------------------------------------------|
-| `hw/vivado/arty_a7/axi_pc_sticky.v`                           | Single-bit sticky-latch helper for `pc_asserted`              |
+| `hw/vivado/arty_a7/axi_pc_sticky.v`                           | Sticky-latches `pc_status[159:0]` and exposes a 32-bit view   |
 | `hw/vivado/arty_a7/constraints/arty_a7_100t_pc.xdc`           | Pin assignment for `axi_pc_violation` → LD0_R                 |
 | `hw/vivado/arty_a7/create_project.tcl` (`enable_axi_pc` block) | IP instantiation, snoop wiring, sticky flag, top-level port  |
