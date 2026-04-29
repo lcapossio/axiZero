@@ -255,7 +255,7 @@ set pg0_val   [mrd -value $pg0_addr]
 set pg1_val   [mrd -value $pg1_addr]
 set pg2_val   [mrd -value $pg2_addr]
 puts "  --- generator probes (after 1M-cycle delay) ---"
-puts [format "  probe_gpio  = 0x%08X (expect 0x0000000E)" $pgpio_val]
+puts [format "  probe_gpio  = 0x%08X (expect trigger mask 0x0000000F)" $pgpio_val]
 puts [format "  probe_g0    = 0x%08X (expect 0xB1000000)" $pg0_val]
 puts [format "  probe_g1    = 0x%08X (expect 0xB20001FF)" $pg1_val]
 puts [format "  probe_g2    = 0x%08X (expect 0xB3005502)" $pg2_val]

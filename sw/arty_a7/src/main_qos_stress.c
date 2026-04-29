@@ -301,8 +301,13 @@ int main(void)
             }
         }
 
+        /*
+         * The GPIO output also fans out to the traffic-generator triggers.
+         * Keep it low between iterations; otherwise the generators can restart
+         * while the next iteration is clearing/verifying memory.
+         */
         GPIO_TRI = 0;
-        GPIO_DATA = LED_ALL;
+        GPIO_DATA = 0;
         beat();
     }
 

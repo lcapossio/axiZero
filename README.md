@@ -553,6 +553,7 @@ sw/arty_a7/                    # MicroBlaze firmware (source + linker script)
 hw/quartus/
   package_ip.tcl               # Platform Designer _hw.tcl generator
 hw/vivado/arty_a7/             # Vivado TCL build and test scripts
+  ip/rtl/                      # tracked Arty handoff RTL consumed by Vivado IP integrator
   find_xilinx_tools.py         # cross-platform Vivado/xsdb/mb-gcc auto-detection
   run_wrr_test.py              # WRR HW test runner (build + program + verify)
   run_qos_test.py              # QoS HW test runner
