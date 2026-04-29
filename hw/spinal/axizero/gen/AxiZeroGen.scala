@@ -3,7 +3,9 @@
 package axizero.gen
 
 import spinal.core._
+import spinal.lib.bus.amba4.axis._
 import axizero._
+import axizero.stream._
 
 // ---------------------------------------------------------------------------
 // AxiZeroGen — Verilog generation entry point
@@ -111,5 +113,42 @@ object GenHelper {
     spinalCfg(name).generateVerilog(new AxiZeroMixedTop(cfg))
     prependCopyright(java.nio.file.Paths.get("generated", s"$name.v"))
     println(s"[axiZero] Done → generated/$name.v")
+  }
+
+  def axisRegSlice(cfg: Axi4StreamConfig, name: String): Unit = {
+    println(s"\n[axiZero] Generating $name ...")
+    spinalCfg(name).generateVerilog(new AxiStreamRegSlice(cfg))
+    prependCopyright(java.nio.file.Paths.get("generated", s"$name.v"))
+    println(s"[axiZero] Done -> generated/$name.v")
+  }
+
+  def axisWidthAdapter(
+    inputCfg: Axi4StreamConfig,
+    outputCfg: Axi4StreamConfig,
+    name: String
+  ): Unit = {
+    println(s"\n[axiZero] Generating $name ...")
+    spinalCfg(name).generateVerilog(new AxiStreamWidthAdapter(inputCfg, outputCfg))
+    prependCopyright(java.nio.file.Paths.get("generated", s"$name.v"))
+    println(s"[axiZero] Done -> generated/$name.v")
+  }
+
+  def axisArbMux(
+    cfg: Axi4StreamConfig,
+    inputCount: Int,
+    arbitration: AxiStreamArbitrationPolicy,
+    name: String
+  ): Unit = {
+    println(s"\n[axiZero] Generating $name ...")
+    spinalCfg(name).generateVerilog(new AxiStreamArbMux(cfg, inputCount, arbitration))
+    prependCopyright(java.nio.file.Paths.get("generated", s"$name.v"))
+    println(s"[axiZero] Done -> generated/$name.v")
+  }
+
+  def axisBroadcaster(cfg: Axi4StreamConfig, outputCount: Int, name: String): Unit = {
+    println(s"\n[axiZero] Generating $name ...")
+    spinalCfg(name).generateVerilog(new AxiStreamBroadcaster(cfg, outputCount))
+    prependCopyright(java.nio.file.Paths.get("generated", s"$name.v"))
+    println(s"[axiZero] Done -> generated/$name.v")
   }
 }

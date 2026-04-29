@@ -105,4 +105,61 @@ class AxiStreamCoreSpec extends AnyFunSuite {
       assert(unsigned(got) == unsigned(frame))
     }
   }
+
+  test("AXI Stream arb mux forwards competing inputs without dropping frames") {
+    val cfg = axisCfg(8)
+
+    simCfg.compile(new AxiStreamArbMux(cfg, inputCount = 2)).doSim { dut =>
+      val cd      = dut.clockDomain
+      val master0 = Axi4StreamMaster(dut.io.inputs(0), cd)
+      val master1 = Axi4StreamMaster(dut.io.inputs(1), cd)
+      val slave   = Axi4StreamSlave(dut.io.output, cd)
+      val frame0  = byteFrame(0x10, 0x11, 0x12)
+      val frame1  = byteFrame(0x20, 0x21, 0x22, 0x23)
+
+      master0.reset()
+      master1.reset()
+      slave.reset()
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      fork { master0.send(frame0) }
+      fork { master1.send(frame1) }
+
+      val got0 = slave.recv()
+      val got1 = slave.recv()
+
+      assert(unsigned(got0) == unsigned(frame0))
+      assert(unsigned(got1) == unsigned(frame1))
+    }
+  }
+
+  test("AXI Stream broadcaster replicates a frame to all outputs") {
+    val cfg = axisCfg(8)
+
+    simCfg.compile(new AxiStreamBroadcaster(cfg, outputCount = 2)).doSim { dut =>
+      val cd     = dut.clockDomain
+      val master = Axi4StreamMaster(dut.io.input, cd)
+      val slave0 = Axi4StreamSlave(dut.io.outputs(0), cd)
+      val slave1 = Axi4StreamSlave(dut.io.outputs(1), cd)
+      val frame  = byteFrame(0xa0, 0xa1, 0xa2, 0xa3, 0xa4)
+      var got0   = List.empty[Byte]
+      var got1   = List.empty[Byte]
+
+      master.reset()
+      slave0.reset()
+      slave1.reset()
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      fork { got0 = slave0.recv() }
+      fork { got1 = slave1.recv() }
+      master.send(frame)
+
+      cd.waitSampling(5)
+
+      assert(unsigned(got0) == unsigned(frame))
+      assert(unsigned(got1) == unsigned(frame))
+    }
+  }
 }

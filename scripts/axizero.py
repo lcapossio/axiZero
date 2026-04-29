@@ -130,6 +130,18 @@ ARBITRATION_MAP = {
     "weighted_round_robin": "WeightedRoundRobin",
 }
 
+AXIS_ARBITRATION_MAP = {
+    "round_robin":    "AxisRoundRobin",
+    "fixed_priority": "AxisFixedPriority",
+}
+
+AXIS_CORES = {
+    "reg_slice",
+    "width_adapter",
+    "arb_mux",
+    "broadcaster",
+}
+
 def _err(msg: str):
     print(f"ERROR: {msg}", file=sys.stderr)
     sys.exit(1)
@@ -140,6 +152,11 @@ def _validate_design(d: dict, idx: int):
 
     if "name" not in d:
         _err(f"{tag}: 'name' is required")
+
+    if d.get("kind") == "axis":
+        _validate_axis_design(d, tag)
+        return
+
     design_type = d.get("type")
     if design_type is not None and design_type not in ("lite", "full"):
         _err(f"{tag}: 'type' must be 'lite' or 'full'")
@@ -219,6 +236,41 @@ def _validate_design(d: dict, idx: int):
                          f"Set id_width to at least {required_idw} or omit it for auto-computation.")
 
 
+def _validate_axis_design(d: dict, tag: str):
+    core = d.get("core")
+    if core not in AXIS_CORES:
+        _err(f"{tag}: AXI Stream 'core' must be one of: {', '.join(sorted(AXIS_CORES))}")
+
+    def require_width(key: str):
+        width = d.get(key)
+        if not isinstance(width, int) or width <= 0 or width % 8 != 0:
+            _err(f"{tag}: '{key}' must be a positive byte-aligned integer")
+
+    if core == "width_adapter":
+        require_width("input_data_width")
+        require_width("output_data_width")
+    else:
+        require_width("data_width")
+
+    if core == "arb_mux":
+        inputs = d.get("inputs", d.get("input_count"))
+        if not isinstance(inputs, int) or inputs < 1:
+            _err(f"{tag}: 'inputs' must be a positive integer for AXI Stream arb_mux")
+        arb = d.get("arbitration", "round_robin")
+        if arb not in AXIS_ARBITRATION_MAP:
+            _err(f"{tag}: AXI Stream arbitration must be one of: {', '.join(AXIS_ARBITRATION_MAP)}")
+
+    if core == "broadcaster":
+        outputs = d.get("outputs", d.get("output_count"))
+        if not isinstance(outputs, int) or outputs < 1:
+            _err(f"{tag}: 'outputs' must be a positive integer for AXI Stream broadcaster")
+
+    for key in ("id_width", "dest_width", "user_width"):
+        value = d.get(key, 0)
+        if not isinstance(value, int) or value < 0:
+            _err(f"{tag}: '{key}' must be a non-negative integer")
+
+
 def _parse_int(v) -> int:
     """Accept int or hex string like '0x1000'."""
     if isinstance(v, int):
@@ -268,6 +320,20 @@ Axi3Config(
             idWidth      = {id_width}
           )"""
 
+AXIS_CONFIG = """\
+Axi4StreamConfig(
+            dataWidth = {data_width},
+            idWidth   = {id_width},
+            destWidth = {dest_width},
+            userWidth = {user_width},
+            useStrb   = {use_strb},
+            useKeep   = {use_keep},
+            useLast   = {use_last},
+            useId     = {use_id},
+            useDest   = {use_dest},
+            useUser   = {use_user}
+          )"""
+
 
 def _scala_bigint(value: int) -> str:
     return f'BigInt("{value:016x}", 16)'
@@ -280,6 +346,71 @@ def _scala_arbitration(d: dict) -> str:
         weights = d["weights"]
         return f"WeightedRoundRobin(Seq({', '.join(str(w) for w in weights)}))"
     return scala
+
+
+def _axis_config(d: dict, data_width: int | None = None) -> str:
+    width_bits = data_width if data_width is not None else d["data_width"]
+    id_w = d.get("id_width", 0)
+    dest_w = d.get("dest_width", 0)
+    user_w = d.get("user_width", 0)
+    return AXIS_CONFIG.format(
+        data_width=width_bits // 8,
+        id_width=id_w,
+        dest_width=dest_w,
+        user_width=user_w,
+        use_strb=str(d.get("use_strb", True)).lower(),
+        use_keep=str(d.get("use_keep", True)).lower(),
+        use_last=str(d.get("use_last", True)).lower(),
+        use_id=str(d.get("use_id", id_w > 0)).lower(),
+        use_dest=str(d.get("use_dest", dest_w > 0)).lower(),
+        use_user=str(d.get("use_user", user_w > 0)).lower(),
+    )
+
+
+def _gen_axis_design_block(d: dict) -> str:
+    name = d["name"]
+    core = d["core"]
+
+    if core == "reg_slice":
+        return textwrap.dedent(f"""\
+            // ── {name} ──
+            locally {{
+              val cfg = {_axis_config(d)}
+              GenHelper.axisRegSlice(cfg, "{name}")
+            }}
+        """)
+
+    if core == "width_adapter":
+        in_cfg = _axis_config(d, d["input_data_width"])
+        out_cfg = _axis_config(d, d["output_data_width"])
+        return textwrap.dedent(f"""\
+            // ── {name} ──
+            locally {{
+              val inputCfg = {in_cfg}
+              val outputCfg = {out_cfg}
+              GenHelper.axisWidthAdapter(inputCfg, outputCfg, "{name}")
+            }}
+        """)
+
+    if core == "arb_mux":
+        inputs = d.get("inputs", d.get("input_count"))
+        arb = AXIS_ARBITRATION_MAP[d.get("arbitration", "round_robin")]
+        return textwrap.dedent(f"""\
+            // ── {name} ──
+            locally {{
+              val cfg = {_axis_config(d)}
+              GenHelper.axisArbMux(cfg, {inputs}, {arb}, "{name}")
+            }}
+        """)
+
+    outputs = d.get("outputs", d.get("output_count"))
+    return textwrap.dedent(f"""\
+        // ── {name} ──
+        locally {{
+          val cfg = {_axis_config(d)}
+          GenHelper.axisBroadcaster(cfg, {outputs}, "{name}")
+        }}
+    """)
 
 
 def _default_addr_width(d: dict) -> int:
@@ -395,6 +526,9 @@ def _gen_slave_port(s: dict, design: dict, global_addr_width: int, slave_idw: in
 
 
 def _gen_design_block(d: dict) -> str:
+    if d.get("kind") == "axis":
+        return _gen_axis_design_block(d)
+
     name    = d["name"]
     arb     = _scala_arbitration(d)
     addr_w  = _default_addr_width(d)
@@ -440,7 +574,12 @@ def generate_scala(designs: list[dict]) -> str:
         for d in designs
         for m in d.get("masters", [])
     )
+    has_axis = any(d.get("kind") == "axis" for d in designs)
     axi3_import = "\nimport axizero.adapters.Axi3Config" if has_axi3 else ""
+    axis_imports = (
+        "\nimport spinal.lib.bus.amba4.axis.Axi4StreamConfig\nimport axizero.stream._"
+        if has_axis else ""
+    )
     blocks = "\n".join(_gen_design_block(d) for d in designs)
     return textwrap.dedent(f"""\
         // AUTO-GENERATED by axizero.py — do not edit by hand.
@@ -448,7 +587,7 @@ def generate_scala(designs: list[dict]) -> str:
 
         import spinal.core._
         import spinal.lib.bus.amba4.axi.Axi4Config
-        import axizero._{axi3_import}
+        import axizero._{axi3_import}{axis_imports}
 
         object AxiZeroUserGen extends App {{
         {textwrap.indent(blocks, "  ")}}}
@@ -491,6 +630,26 @@ _IO_PORT_RE = re.compile(
     r'\bio_(masters|slaves)_(\d+)_(aw|w|b|ar|r)_(?:payload_)?(\w+)\b'
 )
 
+_AXIS_SIGNAL = {
+    "valid": "tvalid",
+    "ready": "tready",
+    "data":  "tdata",
+    "strb":  "tstrb",
+    "keep":  "tkeep",
+    "last":  "tlast",
+    "id":    "tid",
+    "dest":  "tdest",
+    "user":  "tuser",
+}
+
+_AXIS_SINGLE_RE = re.compile(
+    r'\bio_(input|output)_(?:payload_)?(\w+)\b'
+)
+
+_AXIS_VEC_RE = re.compile(
+    r'\bio_(inputs|outputs)_(\d+)_(?:payload_)?(\w+)\b'
+)
+
 
 def _rename_to_axi(verilog: str) -> str:
     """Rename SpinalHDL io_* ports to AXI-standard Vivado-compatible names.
@@ -514,11 +673,37 @@ def _rename_to_axi(verilog: str) -> str:
     return verilog
 
 
+def _rename_to_axis(verilog: str) -> str:
+    """Rename SpinalHDL AXI Stream ports to tvalid/tready/tdata style names."""
+
+    def _replace_single(m):
+        side, signal = m.group(1), m.group(2)
+        axis_sig = _AXIS_SIGNAL.get(signal)
+        if axis_sig is None:
+            return m.group(0)
+        prefix = "s_axis" if side == "input" else "m_axis"
+        return f"{prefix}_{axis_sig}"
+
+    def _replace_vec(m):
+        side, idx, signal = m.group(1), m.group(2), m.group(3)
+        axis_sig = _AXIS_SIGNAL.get(signal)
+        if axis_sig is None:
+            return m.group(0)
+        prefix = "s" if side == "inputs" else "m"
+        return f"{prefix}{idx}_axis_{axis_sig}"
+
+    verilog = _AXIS_VEC_RE.sub(_replace_vec, verilog)
+    verilog = _AXIS_SINGLE_RE.sub(_replace_single, verilog)
+    verilog = re.sub(r'\bclk\b',    'aclk',    verilog)
+    verilog = re.sub(r'\bresetn\b', 'aresetn', verilog)
+    return verilog
+
+
 # ---------------------------------------------------------------------------
 # Run sbt
 # ---------------------------------------------------------------------------
 
-def run_sbt(java: Path, sbt: Path, output_dir: Path | None, design_names: list[str]):
+def run_sbt(java: Path, sbt: Path, output_dir: Path | None, designs: list[dict]):
     env = os.environ.copy()
     env["JAVA_HOME"] = str(java.parent.parent)   # bin/java → parent = bin → parent = JAVA_HOME
     env["PATH"]      = str(java.parent) + os.pathsep + env.get("PATH", "")
@@ -534,11 +719,12 @@ def run_sbt(java: Path, sbt: Path, output_dir: Path | None, design_names: list[s
         sys.exit(result.returncode)
 
     # Rename SpinalHDL io_* ports to AXI-standard names in generated files
-    for name in design_names:
+    for d in designs:
+        name = d["name"]
         v_file = SBT_OUTDIR / f"{name}.v"
         if v_file.exists():
             text = v_file.read_text(encoding="utf-8")
-            renamed = _rename_to_axi(text)
+            renamed = _rename_to_axis(text) if d.get("kind") == "axis" else _rename_to_axi(text)
             if renamed != text:
                 v_file.write_text(renamed, encoding="utf-8")
                 print(f"[axizero] Renamed ports -> AXI standard: {v_file.name}")
@@ -546,7 +732,8 @@ def run_sbt(java: Path, sbt: Path, output_dir: Path | None, design_names: list[s
     # Copy .v files to output_dir if requested
     if output_dir:
         output_dir.mkdir(parents=True, exist_ok=True)
-        for name in design_names:
+        for d in designs:
+            name = d["name"]
             src = SBT_OUTDIR / f"{name}.v"
             if src.exists():
                 dst = output_dir / f"{name}.v"
@@ -705,6 +892,28 @@ EXAMPLE_YAML = textwrap.dedent("""\
             size: 0x1000        # GPIO — AXI4-Lite
             data_width: 32
             type: lite
+
+      # ── Example 6: standalone AXI4-Stream utility cores ───────────────────
+      #
+      # AXI Stream cores use kind: axis and do not have address maps.
+      # Supported core values: reg_slice, width_adapter, arb_mux, broadcaster.
+      #
+      - name: MyAxisMux_2To1
+        kind: axis
+        core: arb_mux
+        data_width: 32
+        inputs: 2
+        arbitration: round_robin
+        use_keep: true
+        use_last: true
+
+      - name: MyAxisWidth_8To32
+        kind: axis
+        core: width_adapter
+        input_data_width: 8
+        output_data_width: 32
+        use_keep: true
+        use_last: true
 """)
 
 
@@ -759,7 +968,7 @@ def cmd_generate(args):
     output_dir = Path(args.output).resolve() if args.output else None
 
     # Run sbt
-    run_sbt(java, sbt, output_dir, [d["name"] for d in designs])
+    run_sbt(java, sbt, output_dir, designs)
 
     if not output_dir:
         print(f"\n[axizero] Verilog written to: {SBT_OUTDIR}/")
