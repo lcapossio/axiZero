@@ -138,6 +138,7 @@ AXIS_ARBITRATION_MAP = {
 AXIS_CORES = {
     "reg_slice",
     "width_adapter",
+    "fifo",
     "arb_mux",
     "broadcaster",
 }
@@ -251,6 +252,11 @@ def _validate_axis_design(d: dict, tag: str):
         require_width("output_data_width")
     else:
         require_width("data_width")
+
+    if core == "fifo":
+        depth = d.get("depth")
+        if not isinstance(depth, int) or depth < 2:
+            _err(f"{tag}: 'depth' must be an integer >= 2 for AXI Stream fifo")
 
     if core == "arb_mux":
         inputs = d.get("inputs", d.get("input_count"))
@@ -389,6 +395,15 @@ def _gen_axis_design_block(d: dict) -> str:
               val inputCfg = {in_cfg}
               val outputCfg = {out_cfg}
               GenHelper.axisWidthAdapter(inputCfg, outputCfg, "{name}")
+            }}
+        """)
+
+    if core == "fifo":
+        return textwrap.dedent(f"""\
+            // â”€â”€ {name} â”€â”€
+            locally {{
+              val cfg = {_axis_config(d)}
+              GenHelper.axisFifo(cfg, {d["depth"]}, "{name}")
             }}
         """)
 
@@ -896,8 +911,16 @@ EXAMPLE_YAML = textwrap.dedent("""\
       # ── Example 6: standalone AXI4-Stream utility cores ───────────────────
       #
       # AXI Stream cores use kind: axis and do not have address maps.
-      # Supported core values: reg_slice, width_adapter, arb_mux, broadcaster.
+      # Supported core values: reg_slice, width_adapter, fifo, arb_mux, broadcaster.
       #
+      - name: MyAxisFifo
+        kind: axis
+        core: fifo
+        data_width: 32
+        depth: 16
+        use_keep: true
+        use_last: true
+
       - name: MyAxisMux_2To1
         kind: axis
         core: arb_mux

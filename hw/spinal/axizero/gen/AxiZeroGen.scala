@@ -133,6 +133,13 @@ object GenHelper {
     println(s"[axiZero] Done -> generated/$name.v")
   }
 
+  def axisFifo(cfg: Axi4StreamConfig, depth: Int, name: String): Unit = {
+    println(s"\n[axiZero] Generating $name ...")
+    spinalCfg(name).generateVerilog(new AxiStreamFifo(cfg, depth))
+    prependCopyright(java.nio.file.Paths.get("generated", s"$name.v"))
+    println(s"[axiZero] Done -> generated/$name.v")
+  }
+
   def axisArbMux(
     cfg: Axi4StreamConfig,
     inputCount: Int,

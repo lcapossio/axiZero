@@ -44,6 +44,22 @@ class AxiStreamWidthAdapter(
   Axi4StreamSimpleWidthAdapter(io.input, io.output)
 }
 
+/** AXI4-Stream elastic FIFO.
+  *
+  * Stores complete stream beats, including all enabled sideband fields. TLAST is carried as part of
+  * the payload, so frame boundaries are preserved without special handling.
+  */
+class AxiStreamFifo(config: Axi4StreamConfig, depth: Int) extends Component {
+  require(depth >= 2, "AxiStreamFifo depth must be at least 2")
+
+  val io = new Bundle {
+    val input  = slave(Axi4Stream(config))
+    val output = master(Axi4Stream(config))
+  }
+
+  io.output << io.input.queue(depth)
+}
+
 /** N-to-1 AXI4-Stream packet arbiter/mux.
   *
   * Arbitration happens at frame boundaries. Once an input wins, it keeps ownership until the beat

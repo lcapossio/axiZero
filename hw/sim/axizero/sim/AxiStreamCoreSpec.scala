@@ -106,6 +106,31 @@ class AxiStreamCoreSpec extends AnyFunSuite {
     }
   }
 
+  test("AXI Stream FIFO buffers a frame while output is stalled") {
+    val cfg = axisCfg(8)
+
+    simCfg.compile(new AxiStreamFifo(cfg, depth = 8)).doSim { dut =>
+      val cd     = dut.clockDomain
+      val master = Axi4StreamMaster(dut.io.input, cd)
+      val slave  = Axi4StreamSlave(dut.io.output, cd)
+      val frame  = byteFrame(0x31, 0x32, 0x33, 0x34)
+
+      master.reset()
+      slave.reset()
+      dut.io.output.ready #= false
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      fork { master.send(frame) }
+      cd.waitSampling(3)
+      dut.io.output.ready #= true
+
+      val got = slave.recv()
+
+      assert(unsigned(got) == unsigned(frame))
+    }
+  }
+
   test("AXI Stream arb mux forwards competing inputs without dropping frames") {
     val cfg = axisCfg(8)
 
