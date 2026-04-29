@@ -9,8 +9,10 @@
 // Properties:
 //   1. prop_b_routes_to_issuer   — B.id always matches the outstanding AW.id
 //   2. prop_no_spurious_b        — B.valid only when a write is outstanding
+//   3. prop_r_routes_to_issuer   — R.id always matches the outstanding AR.id
+//   4. prop_no_spurious_r        — R.valid only when a read is outstanding
 //
-// Bounded proof depth: 20 cycles (see write_response_routing.sby).
+// Bounded proof depth: 30 cycles (see write_response_routing.sby).
 //
 // Run:
 //   sby -f write_response_routing.sby
@@ -76,6 +78,23 @@ module write_response_props (
     wire [1:0]   m1_r_resp;
     wire [63:0]  m1_r_data;
 
+    // Master 0 AR/R — free wires for read-path properties
+    wire         ar_valid;
+    wire         ar_ready;
+    wire [3:0]   ar_id;
+    wire [31:0]  ar_addr;
+    wire [7:0]   ar_len;
+    wire [2:0]   ar_size;
+    wire [1:0]   ar_burst;
+    wire [0:0]   ar_lock;
+    wire [3:0]   ar_cache, ar_qos;
+    wire [2:0]   ar_prot;
+    wire [3:0]   ar_region;
+    wire         r_valid;
+    wire         r_ready;
+    wire [3:0]   r_id;
+    wire         r_last;
+
     wire         s0_ar_valid, s0_r_ready, s1_ar_valid, s1_r_ready;
     wire [31:0]  s0_ar_addr, s1_ar_addr;
     wire [3:0]   s0_ar_id, s1_ar_id;
@@ -113,6 +132,25 @@ module write_response_props (
         .s0_axi_bready   (b_ready),
         .s0_axi_bid      (b_id[3:0]),
         .s0_axi_bresp    (),
+        // master 0 read (s0_axi_ar/r)
+        .s0_axi_arvalid  (ar_valid),
+        .s0_axi_arready  (ar_ready),
+        .s0_axi_araddr   (ar_addr),
+        .s0_axi_arid     (ar_id),
+        .s0_axi_arregion (ar_region),
+        .s0_axi_arlen    (ar_len),
+        .s0_axi_arsize   (ar_size),
+        .s0_axi_arburst  (ar_burst),
+        .s0_axi_arlock   (ar_lock),
+        .s0_axi_arcache  (ar_cache),
+        .s0_axi_arqos    (ar_qos),
+        .s0_axi_arprot   (ar_prot),
+        .s0_axi_rvalid   (r_valid),
+        .s0_axi_rready   (r_ready),
+        .s0_axi_rdata    (),
+        .s0_axi_rid      (r_id),
+        .s0_axi_rresp    (),
+        .s0_axi_rlast    (r_last),
         // master 1 (s1_axi_*)
         .s1_axi_awvalid  (s1_aw_valid),
         .s1_axi_awready  (),
@@ -135,6 +173,25 @@ module write_response_props (
         .s1_axi_bready   (s1_b_ready),
         .s1_axi_bid      (),
         .s1_axi_bresp    (),
+        // master 1 read (s1_axi_ar/r)
+        .s1_axi_arvalid  (s1_ar_valid),
+        .s1_axi_arready  (),
+        .s1_axi_araddr   (s1_ar_addr),
+        .s1_axi_arid     (s1_ar_id),
+        .s1_axi_arregion (s1_ar_region),
+        .s1_axi_arlen    (s1_ar_len),
+        .s1_axi_arsize   (s1_ar_size),
+        .s1_axi_arburst  (s1_ar_burst),
+        .s1_axi_arlock   (s1_ar_lock),
+        .s1_axi_arcache  (s1_ar_cache),
+        .s1_axi_arqos    (s1_ar_qos),
+        .s1_axi_arprot   (s1_ar_prot),
+        .s1_axi_rvalid   (),
+        .s1_axi_rready   (),
+        .s1_axi_rdata    (),
+        .s1_axi_rid      (),
+        .s1_axi_rresp    (),
+        .s1_axi_rlast    (),
         // slave 0 (m0_axi_*)
         .m0_axi_awvalid  (),
         .m0_axi_awready  (m0_aw_ready),
@@ -282,6 +339,64 @@ module write_response_props (
     prop_no_spurious_b: assert property (
         @(posedge clk) disable iff (rst)
         b_valid |-> outstanding
+    );
+
+    // =========================================================================
+    // Read path — assumptions and properties for master 0
+    // =========================================================================
+
+    // AR is stable once valid until accepted
+    always @(posedge clk) begin
+        if (!rst && $past(ar_valid) && !$past(ar_ready))
+            assume(ar_valid && ar_id == $past(ar_id) && ar_addr == $past(ar_addr));
+    end
+
+    // r_ready is eventually asserted
+    assume property (@(posedge clk) disable iff (rst) r_valid |-> ##[1:5] r_ready);
+
+    // Slaves always accept AR
+    assume property (@(posedge clk) disable iff (rst) m0_ar_ready);
+    assume property (@(posedge clk) disable iff (rst) m1_ar_ready);
+
+    // Track one outstanding read from master 0 (single-outstanding)
+    reg         rd_outstanding;
+    reg [3:0]   rd_outstanding_id;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            rd_outstanding    <= 1'b0;
+            rd_outstanding_id <= 4'b0;
+        end else begin
+            if (ar_valid && ar_ready) begin
+                rd_outstanding    <= 1'b1;
+                rd_outstanding_id <= ar_id;
+            end
+            if (r_valid && r_ready && r_last) begin
+                rd_outstanding <= 1'b0;
+            end
+        end
+    end
+
+    // Only one outstanding read at a time from master 0
+    assume property (
+        @(posedge clk) disable iff (rst)
+        (rd_outstanding && ar_valid) |-> (ar_id == rd_outstanding_id)
+    );
+
+    // =========================================================================
+    // Property 3: R.id[3:0] matches outstanding AR.id for master 0
+    // =========================================================================
+    prop_r_routes_to_issuer: assert property (
+        @(posedge clk) disable iff (rst)
+        (r_valid && rd_outstanding) |-> (r_id[3:0] == rd_outstanding_id)
+    );
+
+    // =========================================================================
+    // Property 4: No spurious R on master 0's channel
+    // =========================================================================
+    prop_no_spurious_r: assert property (
+        @(posedge clk) disable iff (rst)
+        r_valid |-> rd_outstanding
     );
 
 endmodule
