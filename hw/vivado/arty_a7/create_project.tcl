@@ -389,6 +389,12 @@ connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins ax
 connect_bd_intf_net [get_bd_intf_pins axi_bram_ctrl_0/BRAM_PORTA] [get_bd_intf_pins bram0/BRAM_PORTA]
 connect_bd_intf_net [get_bd_intf_pins axi_bram_ctrl_0/BRAM_PORTB] [get_bd_intf_pins bram0/BRAM_PORTB]
 
+# Connect the full AXI interface first so Vivado propagates optional
+# interface attributes such as ID_WIDTH and exposes the ID pins.  The
+# explicit per-pin wiring below then preserves the current named nets used
+# for checker taps and width truncation.
+connect_bd_intf_net [get_bd_intf_pins axizero_0/m0_axi] [get_bd_intf_pins axi_bram_ctrl_0/S_AXI]
+
 # AW
 connect_bd_net [get_bd_pins axizero_0/m0_axi_awvalid]           [get_bd_pins axi_bram_ctrl_0/s_axi_awvalid]
 connect_bd_net [get_bd_pins axi_bram_ctrl_0/s_axi_awready]            [get_bd_pins axizero_0/m0_axi_awready]
@@ -449,17 +455,17 @@ if {$enable_axi_pc} {
     # Earlier critical-warning-rejected names like HAS_BURST, HAS_LOCK,
     # HAS_CACHE, HAS_REGION, HAS_QOS, HAS_PROT, ENABLE_XCHECKS are NOT
     # parameters of THIS IP (they belong to the simulation AXI VIP).
-    # ID_WIDTH must match the actual bus (1 bit on m0_axi: 1 master + 0
-    # masterIndexBits = slaveIdW 1).  A wider ID_WIDTH leaves the upper
-    # bits of pc_axi_*id tied to 0 and corrupts the checker's internal
-    # AW/AR-vs-B/R tracking CAM, producing false positives like
-    # PC_32 AXI_ERRS_BRESP_AW and PC_59 AXI_ERRS_RID.
+    # The BRAM controller side of this BD is effectively an ID-less AXI4
+    # slave: Vivado leaves its ID pins disabled/tied off even though axiZero's
+    # module interface still has one-bit ID signals.  Configure the checker for
+    # the actual monitored link (ID_WIDTH=0), otherwise its response CAM sees
+    # un-driven BID/RID and reports false response-order/ID violations.
     set_property -dict {
         CONFIG.PROTOCOL          {AXI4}
         CONFIG.READ_WRITE_MODE   {READ_WRITE}
         CONFIG.DATA_WIDTH        {32}
         CONFIG.ADDR_WIDTH        {32}
-        CONFIG.ID_WIDTH          {1}
+        CONFIG.ID_WIDTH          {0}
         CONFIG.MAX_RD_BURSTS     {16}
         CONFIG.MAX_WR_BURSTS     {16}
         CONFIG.PC_MASTER_SIDE    {0}
@@ -573,6 +579,8 @@ connect_bd_net [get_bd_ports sys_clk]                            [get_bd_pins ax
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins axi_bram_ctrl_1/s_axi_aresetn]
 connect_bd_intf_net [get_bd_intf_pins axi_bram_ctrl_1/BRAM_PORTA] [get_bd_intf_pins bram1/BRAM_PORTA]
 connect_bd_intf_net [get_bd_intf_pins axi_bram_ctrl_1/BRAM_PORTB] [get_bd_intf_pins bram1/BRAM_PORTB]
+
+connect_bd_intf_net [get_bd_intf_pins axizero_0/m1_axi] [get_bd_intf_pins axi_bram_ctrl_1/S_AXI]
 
 connect_bd_net [get_bd_pins axizero_0/m1_axi_awvalid]           [get_bd_pins axi_bram_ctrl_1/s_axi_awvalid]
 connect_bd_net [get_bd_pins axi_bram_ctrl_1/s_axi_awready]            [get_bd_pins axizero_0/m1_axi_awready]
