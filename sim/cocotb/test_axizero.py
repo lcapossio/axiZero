@@ -16,7 +16,7 @@ Run:  make  (from sim/cocotb/ in WSL)
 import random
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, Timer
+from cocotb.triggers import RisingEdge
 from cocotbext.axi import AxiBus, AxiMaster, AxiRam
 
 # ── Address map ─────────────────────────────────────────────────────────────

@@ -17,7 +17,6 @@ import platform
 import shutil
 import subprocess
 import sys
-import os
 import re
 
 
@@ -136,7 +135,6 @@ def check_all():
 
     for pkg in ("pyyaml", "cocotb", "cocotbext-axi"):
         pip_name = pkg
-        import_name = pkg.replace("-", "_")
         if python_pkg_present(pip_name):
             ok(f"Python: {pkg}")
         else:

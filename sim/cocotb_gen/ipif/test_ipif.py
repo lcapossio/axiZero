@@ -17,7 +17,7 @@ Clock: aclk   Reset: aresetn (active-low)
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, Timer
+from cocotb.triggers import RisingEdge
 from cocotbext.axi import AxiLiteBus, AxiLiteMaster, AxiLiteRam
 
 SLAVE_BASES = [0x0000_0000, 0x0001_0000, 0x0002_0000, 0x0003_0000]

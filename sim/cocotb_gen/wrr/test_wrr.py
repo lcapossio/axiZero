@@ -15,11 +15,10 @@ Weights: [3, 1] — master 0 gets 3× the grants of master 1 under contention.
 Note: master 0 has a register slice, slave 0 has a register slice.
 """
 
-import asyncio
 import random
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, Timer, Combine
+from cocotb.triggers import RisingEdge, Combine
 from cocotbext.axi import AxiLiteBus, AxiLiteMaster, AxiLiteRam
 
 SLAVE0_BASE = 0x0000_0000

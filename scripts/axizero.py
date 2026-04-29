@@ -796,7 +796,7 @@ def main():
                        help="Path to sbt launcher (auto-detected if omitted)")
 
     # example
-    p_ex = sub.add_parser("example", help="Print an example YAML config to stdout")
+    sub.add_parser("example", help="Print an example YAML config to stdout")
 
     args = parser.parse_args()
 

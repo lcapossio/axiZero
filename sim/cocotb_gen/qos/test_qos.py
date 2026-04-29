@@ -21,11 +21,9 @@ s0_axi_awqos / s0_axi_arqos / s1_axi_awqos / s1_axi_arqos manually
 after reset.
 """
 
-import asyncio
-import random
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, Timer, Combine, First
+from cocotb.triggers import RisingEdge, Combine
 from cocotbext.axi import AxiBus, AxiMaster, AxiRam
 
 SLAVE0_BASE = 0x0000_0000
