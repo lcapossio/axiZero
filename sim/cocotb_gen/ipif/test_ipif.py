@@ -209,3 +209,28 @@ async def test_ipif_routing_unaffected(dut):
         result = await master.read(addr, DATA_BYTES)
         assert result.data == expected, \
             f"Routing mismatch at {addr:#010x}: {result.data.hex()} != {expected.hex()}"
+
+
+@cocotb.test()
+async def test_ipif_backpressure(dut):
+    """IPIF slave with delayed B-ready: master holds bready low for several cycles.
+
+    Verifies the crossbar and IpifRam correctly handle write-response
+    backpressure — the B channel must remain valid until accepted.
+    """
+    cocotb.start_soon(Clock(dut.aclk, 10, units="ns").start())
+    await reset_dut(dut)
+    master, ipif, _ = make_bfms(dut)
+
+    base = SLAVE_BASES[0]
+    count = 4
+    payloads = [(0xBACE_0000 | i).to_bytes(DATA_BYTES, "little") for i in range(count)]
+
+    for i, val in enumerate(payloads):
+        await master.write(base + i * DATA_BYTES, val)
+
+    for i, expected in enumerate(payloads):
+        result = await master.read(base + i * DATA_BYTES, DATA_BYTES)
+        assert result.data == expected, \
+            f"Backpressure mismatch at offset {i*DATA_BYTES:#x}: " \
+            f"{result.data.hex()} != {expected.hex()}"

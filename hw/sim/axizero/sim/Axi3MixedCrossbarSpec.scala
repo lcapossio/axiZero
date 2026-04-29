@@ -89,6 +89,21 @@ class Axi3MixedCrossbarSpec extends AnyFunSuite {
     )
   )
 
+  private def makeCfgWithRegSlice: AxiZeroConfig = AxiZeroConfig(
+    masters = Seq(
+      MasterPort(
+        config   = axi3MasterAxi4Cfg,
+        mode     = Axi3Mode,
+        axi3Cfg  = Some(axi3Cfg),
+        regSlice = true
+      )
+    ),
+    slaves = Seq(
+      SlavePort(fullSlaveCfg, FullAxi4, slave0Base, slaveSize, regSlice = true),
+      SlavePort(liteCfg,      LiteAxi4, slave1Base, slaveSize)
+    )
+  )
+
   // ── Tests ─────────────────────────────────────────────────────────────────
 
   test("Axi3Mode: single-beat write+read to full AXI4 slave") {
@@ -188,6 +203,38 @@ class Axi3MixedCrossbarSpec extends AnyFunSuite {
         val (data, _) = SimHelpers.fullRead(master, cd, baseAddr + i * 4, id = 3)
         assert(data == expected,
           f"burst beat $i: expected 0x$expected%08X, got 0x$data%08X")
+      }
+      cd.waitSampling(5)
+    }
+  }
+
+  test("Axi3Mode: regSlice on master and slave — write+read and burst") {
+    simCfg.compile(new AxiZeroMixedTop(makeCfgWithRegSlice)).doSim("axi3_regslice") { dut =>
+      val cd = dut.clockDomain
+      cd.forkStimulus(10)
+
+      val master = dut.io.masters(0)
+      val slave0 = dut.io.slaves(0)
+      val slave1 = dut.io.slaves(1)
+
+      SimHelpers.initMaster(master)
+      val mem0 = SimHelpers.spawnFullSlave(slave0, cd)
+      SimHelpers.spawnLiteSlave(slave1, cd)
+      cd.waitSampling(5)
+
+      // Single-beat write+read through register slices
+      SimHelpers.fullWrite(master, cd, slave0Base.toLong + 0x40L, 0xFACEFEEDL, id = 1)
+      val (d0, _) = SimHelpers.fullRead(master, cd, slave0Base.toLong + 0x40L, id = 1)
+      assert(d0 == 0xFACEFEEDL, f"regSlice single: expected 0xFACEFEED, got 0x$d0%08X")
+
+      // 4-beat burst through register slices
+      val baseAddr = slave0Base.toLong + 0x300L
+      val beats = Seq(0xAA000001L, 0xBB000002L, 0xCC000003L, 0xDD000004L)
+      SimHelpers.fullBurstWrite(master, cd, baseAddr, beats, id = 2)
+      for ((expected, i) <- beats.zipWithIndex) {
+        val (data, _) = SimHelpers.fullRead(master, cd, baseAddr + i * 4, id = 2)
+        assert(data == expected,
+          f"regSlice burst beat $i: expected 0x$expected%08X, got 0x$data%08X")
       }
       cd.waitSampling(5)
     }

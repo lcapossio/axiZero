@@ -42,9 +42,14 @@ class Axi4FullToLiteAdapter(fullCfg: Axi4Config, liteCfg: Axi4Config)
   io.full.aw.ready := io.lite.aw.ready
 
   // Store the incoming (expanded) write ID so it can be returned in B.
+  // The adapter supports only one outstanding write; assert this in simulation.
   if (fullCfg.useId) {
     val pendingWrId = Reg(UInt(fullCfg.idWidth bits)) init(0)
-    when(io.full.aw.fire) { pendingWrId := io.full.aw.id }
+    val wrBusy      = RegInit(False)
+    when(io.full.aw.fire) { pendingWrId := io.full.aw.id; wrBusy := True }
+    when(io.full.b.fire)  { wrBusy := False }
+    assert(!(wrBusy && io.full.aw.fire),
+      "Axi4FullToLiteAdapter: new AW while previous write still in-flight")
 
     // ── B ───────────────────────────────────────────────────────────────────
     io.full.b.valid := io.lite.b.valid
@@ -75,9 +80,14 @@ class Axi4FullToLiteAdapter(fullCfg: Axi4Config, liteCfg: Axi4Config)
   io.full.ar.ready := io.lite.ar.ready
 
   // Store the incoming (expanded) read ID so it can be returned in R.
+  // The adapter supports only one outstanding read; assert this in simulation.
   if (fullCfg.useId) {
     val pendingRdId = Reg(UInt(fullCfg.idWidth bits)) init(0)
-    when(io.full.ar.fire) { pendingRdId := io.full.ar.id }
+    val rdBusy      = RegInit(False)
+    when(io.full.ar.fire) { pendingRdId := io.full.ar.id; rdBusy := True }
+    when(io.full.r.fire && io.full.r.last) { rdBusy := False }
+    assert(!(rdBusy && io.full.ar.fire),
+      "Axi4FullToLiteAdapter: new AR while previous read still in-flight")
 
     // ── R ───────────────────────────────────────────────────────────────────
     io.full.r.valid := io.lite.r.valid
