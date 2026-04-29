@@ -153,6 +153,11 @@ def _validate_design(d: dict, idx: int):
     if not isinstance(mo, int) or mo < 1:
         _err(f"{tag}: 'max_outstanding' must be a positive integer (got {mo!r})")
 
+    fdw = d.get("fabric_data_width")
+    if fdw is not None:
+        if not isinstance(fdw, int) or fdw <= 0 or (fdw & (fdw - 1)) != 0:
+            _err(f"{tag}: 'fabric_data_width' must be a power of 2 (got {fdw!r})")
+
     if arb == "weighted_round_robin":
         weights = d.get("weights")
         if not weights or not isinstance(weights, list):
@@ -189,6 +194,12 @@ def _validate_design(d: dict, idx: int):
             _err(f"{tag} slave[{si}]: 'base' address is required")
         if "size" not in s:
             _err(f"{tag} slave[{si}]: 'size' is required")
+        sz = _parse_int(s["size"])
+        if sz <= 0 or (sz & (sz - 1)) != 0:
+            _err(f"{tag} slave[{si}]: 'size' (0x{sz:x}) must be a power of 2")
+        base = _parse_int(s["base"])
+        if (base & (sz - 1)) != 0:
+            _err(f"{tag} slave[{si}]: 'base' (0x{base:x}) must be aligned to 'size' (0x{sz:x})")
         pt = s.get("type")
         if pt is not None and pt not in ("lite", "full"):
             _err(f"{tag} slave[{si}]: 'type' must be 'lite' or 'full'")

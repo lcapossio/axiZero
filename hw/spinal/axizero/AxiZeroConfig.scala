@@ -142,6 +142,13 @@ case class AxiZeroConfig(
   def slaveSideIdWidth(masterIdWidth: Int): Int = masterIdWidth + masterIndexBits
 
   // ---- address map validation ----------------------------------------------
+  for (si <- slaves.indices) {
+    val sp = slaves(si)
+    require(sp.size > 0 && (sp.size & (sp.size - 1)) == 0,
+      s"Slave $si: size (0x${sp.size.toString(16)}) must be a power of 2")
+    require((sp.baseAddress & (sp.size - 1)) == 0,
+      s"Slave $si: baseAddress (0x${sp.baseAddress.toString(16)}) must be aligned to size (0x${sp.size.toString(16)})")
+  }
   for (i <- slaves.indices; j <- slaves.indices if i < j) {
     val a = slaves(i); val b = slaves(j)
     require(
