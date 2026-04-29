@@ -30,11 +30,11 @@ object CocotbDutGen extends App {
 
   val cfg = AxiZeroConfig(
     masters = Seq.fill(2)(MasterPort(masterCfg, FullAxi4)),
-    slaves  = Seq(
+    slaves = Seq(
       SlavePort(slaveCfg, FullAxi4, slave0Base, slaveSize),
       SlavePort(slaveCfg, FullAxi4, slave1Base, slaveSize)
     ),
-    arbitration    = RoundRobin,
+    arbitration = RoundRobin,
     maxOutstanding = 4
   )
 
@@ -42,8 +42,8 @@ object CocotbDutGen extends App {
     targetDirectory = "sim/cocotb/rtl",
     netlistFileName = "AxiZeroCocotbDUT.v",
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   ).generateVerilog(new AxiZeroMixedTop(cfg))

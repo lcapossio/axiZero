@@ -16,23 +16,24 @@ import axizero._
 object ArtyQosStressDutGen extends App {
 
   val fullMasterCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
-  val fullSlaveCfg  = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 3) // 4 masters -> +2 bits
+  val fullSlaveCfg =
+    Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 3) // 4 masters -> +2 bits
 
   val liteSlaveCfg = Axi4Config(
     addressWidth = 32,
-    dataWidth    = 32,
-    useId        = false,
-    useRegion    = false,
-    useBurst     = false,
-    useLock      = false,
-    useCache     = false,
-    useSize      = false,
-    useQos       = false,
-    useLen       = false,
-    useLast      = false,
-    useResp      = true,
-    useProt      = true,
-    useStrb      = true
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
   )
 
   val cfg = AxiZeroConfig(
@@ -48,7 +49,7 @@ object ArtyQosStressDutGen extends App {
       SlavePort(liteSlaveCfg, LiteAxi4, BigInt("C0020000", 16), BigInt("00001000", 16)),
       SlavePort(liteSlaveCfg, LiteAxi4, BigInt("C0030000", 16), BigInt("00001000", 16))
     ),
-    arbitration    = QosBased,
+    arbitration = QosBased,
     maxOutstanding = 4
   )
 
@@ -56,12 +57,14 @@ object ArtyQosStressDutGen extends App {
     targetDirectory = "hw/vivado/arty_a7/ip/rtl",
     netlistFileName = "AxiZeroArtyQosStressDUT.v",
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   ).generateVerilog(new AxiZeroMixedTop(cfg))
 
-  GenHelper.prependCopyright(java.nio.file.Paths.get("hw/vivado/arty_a7/ip/rtl/AxiZeroArtyQosStressDUT.v"))
+  GenHelper.prependCopyright(
+    java.nio.file.Paths.get("hw/vivado/arty_a7/ip/rtl/AxiZeroArtyQosStressDUT.v")
+  )
   println("[ArtyQosStressDutGen] Done -> hw/vivado/arty_a7/ip/rtl/AxiZeroArtyQosStressDUT.v")
 }

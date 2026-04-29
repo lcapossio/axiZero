@@ -23,7 +23,7 @@ class AxiZeroLiteTop(cfg: AxiZeroConfig) extends Component {
   // Expose external ports using each port's declared config
   val io = new Bundle {
     val masters = Vec(cfg.masters.indices.map(i => slave(Axi4(cfg.masters(i).config))))
-    val slaves  = Vec(cfg.slaves.indices.map(i  => master(Axi4(cfg.slaves(i).config))))
+    val slaves  = Vec(cfg.slaves.indices.map(i => master(Axi4(cfg.slaves(i).config))))
   }
 
   val xbar = new Axi4LiteCrossbar(cfg)
@@ -31,7 +31,7 @@ class AxiZeroLiteTop(cfg: AxiZeroConfig) extends Component {
   // ── Master-side wiring ───────────────────────────────────────────────────
   for (mi <- 0 until cfg.numMasters) {
     val mp      = cfg.masters(mi)
-    val extPort = io.masters(mi)   // external (user-facing)
+    val extPort = io.masters(mi) // external (user-facing)
 
     // Step 1: optional register slice
     val afterRS: Axi4 = if (mp.regSlice) {
@@ -43,7 +43,7 @@ class AxiZeroLiteTop(cfg: AxiZeroConfig) extends Component {
     // Step 2: optional width conversion (narrow → fabric width)
     val afterConv: Axi4 = if (mp.config.dataWidth != cfg.fabricDataWidth) {
       val fabricCfg = mp.config.copy(dataWidth = cfg.fabricDataWidth)
-      val conv = new Axi4LiteWidthConverter(mp.config, fabricCfg)
+      val conv      = new Axi4LiteWidthConverter(mp.config, fabricCfg)
       conv.io.narrow <> afterRS
       conv.io.wide
     } else afterRS
@@ -55,22 +55,22 @@ class AxiZeroLiteTop(cfg: AxiZeroConfig) extends Component {
   // ── Slave-side wiring ────────────────────────────────────────────────────
   for (si <- 0 until cfg.numSlaves) {
     val sp      = cfg.slaves(si)
-    val extPort = io.slaves(si)    // external (user-facing)
+    val extPort = io.slaves(si) // external (user-facing)
 
     // Step 1: optional width conversion (fabric width → slave width)
     val afterConv: Axi4 = if (sp.config.dataWidth != cfg.fabricDataWidth) {
       val fabricCfg = sp.config.copy(dataWidth = cfg.fabricDataWidth)
-      val conv = new Axi4LiteWidthConverter(sp.config, fabricCfg)
+      val conv      = new Axi4LiteWidthConverter(sp.config, fabricCfg)
       // xbar drives wide side; narrow side goes to slave
-      conv.io.wide   <> xbar.io.slaves(si)
+      conv.io.wide <> xbar.io.slaves(si)
       conv.io.narrow
     } else xbar.io.slaves(si)
 
     // Step 2: optional register slice
     if (sp.regSlice) {
       val rs = new Axi4LiteRegSlice(sp.config)
-      rs.io.upstream   <> afterConv
-      extPort          <> rs.io.downstream
+      rs.io.upstream <> afterConv
+      extPort <> rs.io.downstream
     } else {
       extPort <> afterConv
     }
@@ -94,12 +94,14 @@ class AxiZeroLiteTop(cfg: AxiZeroConfig) extends Component {
 // echo back the routing ID.  The Python generator sets this automatically.
 // ---------------------------------------------------------------------------
 class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
-  require(!cfg.isAllLite,
-    "AxiZeroMixedTop requires at least one FullAxi4 port. Use AxiZeroLiteTop for all-Lite.")
+  require(
+    !cfg.isAllLite,
+    "AxiZeroMixedTop requires at least one FullAxi4 port. Use AxiZeroLiteTop for all-Lite."
+  )
 
   val io = new Bundle {
     val masters = Vec(cfg.masters.indices.map(i => slave(Axi4(cfg.masters(i).config))))
-    val slaves  = Vec(cfg.slaves.indices.map(i  => master(Axi4(cfg.slaves(i).config))))
+    val slaves  = Vec(cfg.slaves.indices.map(i => master(Axi4(cfg.slaves(i).config))))
   }
 
   // ── Normalised internal ID widths ─────────────────────────────────────────
@@ -121,10 +123,10 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
     Axi4Config(sp.config.addressWidth, cfg.fabricDataWidth, slaveIdW)
 
   private val xbarCfg = cfg.copy(
-    masters = cfg.masters.map(mp =>
-      MasterPort(internalMasterCfg(mp), FullAxi4, regSlice = false)),
-    slaves  = cfg.slaves.map(sp  =>
-      SlavePort(internalSlaveCfg(sp), FullAxi4, sp.baseAddress, sp.size, regSlice = false))
+    masters = cfg.masters.map(mp => MasterPort(internalMasterCfg(mp), FullAxi4, regSlice = false)),
+    slaves = cfg.slaves.map(sp =>
+      SlavePort(internalSlaveCfg(sp), FullAxi4, sp.baseAddress, sp.size, regSlice = false)
+    )
   )
 
   private val xbar = new Axi4Crossbar(xbarCfg)
@@ -158,22 +160,28 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
         // Axi4 bundle whose fields are constrained to AXI3 limits (4-bit LEN
         // etc.) by the caller; the shim converts it to Axi3 then the adapter
         // converts back to full AXI4 for the crossbar fabric.
-        val a3cfg   = mp.axi3Cfg.get
-        val bridge  = new Axi3MasterBridgeFromAxi4(mp.config, a3cfg,
-                            xbarCfg.masters(mi).config, cfg.maxOutstanding)
+        val a3cfg = mp.axi3Cfg.get
+        val bridge = new Axi3MasterBridgeFromAxi4(
+          mp.config,
+          a3cfg,
+          xbarCfg.masters(mi).config,
+          cfg.maxOutstanding
+        )
         bridge.io.axi4in <> afterRS
         bridge.io.axi4out
       case _ => afterRS
     }
 
     // Data-width upsizing for narrow Full AXI4 master ports
-    val afterWidthConv: Axi4 = if (mp.mode == FullAxi4 &&
-                                   mp.config.dataWidth != cfg.fabricDataWidth) {
-      val conv = new Axi4WidthConverter(mp.config, xbarCfg.masters(mi).config,
-                                        cfg.maxOutstanding)
-      conv.io.input  <> afterAdapt
-      conv.io.output
-    } else afterAdapt
+    val afterWidthConv: Axi4 =
+      if (
+        mp.mode == FullAxi4 &&
+        mp.config.dataWidth != cfg.fabricDataWidth
+      ) {
+        val conv = new Axi4WidthConverter(mp.config, xbarCfg.masters(mi).config, cfg.maxOutstanding)
+        conv.io.input <> afterAdapt
+        conv.io.output
+      } else afterAdapt
 
     xbar.io.masters(mi) <> afterWidthConv
   }
@@ -182,7 +190,7 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
   for (si <- 0 until cfg.numSlaves) {
     val sp       = cfg.slaves(si)
     val extPort  = io.slaves(si)
-    val xbarPort = xbar.io.slaves(si)   // Full AXI4 with slaveIdW-bit IDs
+    val xbarPort = xbar.io.slaves(si) // Full AXI4 with slaveIdW-bit IDs
 
     // Full → Lite adapter if this slave port is AXI4-Lite
     val afterAdapt: Axi4 = if (sp.mode == LiteAxi4) {
@@ -192,23 +200,25 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
     } else xbarPort
 
     // Data-width downsizing for narrow Full AXI4 slave ports
-    val afterWidthConv: Axi4 = if (sp.mode == FullAxi4 &&
-                                   sp.config.dataWidth != cfg.fabricDataWidth) {
-      val conv = new Axi4WidthConverter(xbarCfg.slaves(si).config, sp.config,
-                                        cfg.maxOutstanding)
-      conv.io.input  <> afterAdapt
-      conv.io.output
-    } else afterAdapt
+    val afterWidthConv: Axi4 =
+      if (
+        sp.mode == FullAxi4 &&
+        sp.config.dataWidth != cfg.fabricDataWidth
+      ) {
+        val conv = new Axi4WidthConverter(xbarCfg.slaves(si).config, sp.config, cfg.maxOutstanding)
+        conv.io.input <> afterAdapt
+        conv.io.output
+      } else afterAdapt
 
     // Optional register slice between adapter/converter and external port
     if (sp.regSlice && sp.mode == LiteAxi4) {
       val rs = new Axi4LiteRegSlice(sp.config)
       rs.io.upstream <> afterWidthConv
-      extPort        <> rs.io.downstream
+      extPort <> rs.io.downstream
     } else if (sp.regSlice) {
       val rs = new Axi4RegSlice(sp.config)
       rs.io.upstream <> afterWidthConv
-      extPort        <> rs.io.downstream
+      extPort <> rs.io.downstream
     } else {
       extPort <> afterWidthConv
     }
@@ -222,11 +232,11 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
 class AxiZeroFullTop(cfg: AxiZeroConfig) extends Component {
   val io = new Bundle {
     val masters = Vec(cfg.masters.indices.map(i => slave(Axi4(cfg.masters(i).config))))
-    val slaves  = Vec(cfg.slaves.indices.map(i  => master(Axi4(cfg.slaves(i).config))))
+    val slaves  = Vec(cfg.slaves.indices.map(i => master(Axi4(cfg.slaves(i).config))))
   }
 
   val inner = new AxiZeroMixedTop(cfg)
 
   for (mi <- 0 until cfg.numMasters) inner.io.masters(mi) <> io.masters(mi)
-  for (si <- 0 until cfg.numSlaves)  inner.io.slaves(si)  <> io.slaves(si)
+  for (si <- 0 until cfg.numSlaves) inner.io.slaves(si) <> io.slaves(si)
 }

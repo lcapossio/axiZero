@@ -40,23 +40,23 @@ import spinal.lib.bus.amba4.axi._
 // ---------------------------------------------------------------------------
 object Axi4DownsizerExtSubTransactionGenerator {
   def apply[T <: Axi4Ax](
-      input:        Stream[T],
-      output:       Stream[T],
-      inputConfig:  Axi4Config,
-      outputConfig: Axi4Config
+    input: Stream[T],
+    output: Stream[T],
+    inputConfig: Axi4Config,
+    outputConfig: Axi4Config
   ): Axi4DownsizerExtSubTransactionGenerator[T] = {
-    val gen = new Axi4DownsizerExtSubTransactionGenerator(
-      input.payloadType, inputConfig, outputConfig)
-    gen.io.input  << input
+    val gen =
+      new Axi4DownsizerExtSubTransactionGenerator(input.payloadType, inputConfig, outputConfig)
+    gen.io.input << input
     gen.io.output >> output
     gen
   }
 }
 
 class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
-    dataType:     HardType[T],
-    inputConfig:  Axi4Config,
-    outputConfig: Axi4Config
+  dataType: HardType[T],
+  inputConfig: Axi4Config,
+  outputConfig: Axi4Config
 ) extends Component {
 
   val sizeWidth  = 3
@@ -123,15 +123,15 @@ class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
 
   val cmdStreamWithSize = cloneOf(io.input)
   cmdStreamWithSize.translateFrom(io.input) { (to, from) =>
-    to.addr := startAddress
+    to.addr                          := startAddress
     if (inputConfig.useSize) to.size := sizePerTrans
     // For FIXED/WRAP with actual downsizing: force single-beat INCR
     if (hasBurst) {
-      to.burst := from.burst
+      to.burst                       := from.burst
       if (inputConfig.useLen) to.len := from.len
       when(sizeIn > sizeMaxOut) {
         when(from.burst === B"00" || from.burst === B"10") {
-          to.burst := B"01"
+          to.burst                       := B"01"
           if (inputConfig.useLen) to.len := U(0).resized
         }
       }
@@ -141,7 +141,7 @@ class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
   val size = RegNextWhen(sizePerTrans, io.input.fire) init sizeMaxOut
 
   val cmdExtendedStream = cloneOf(io.input)
-  val cmdExtender       = StreamTransactionExtender(cmdStreamWithSize, cmdExtendedStream, cmdRatio) {
+  val cmdExtender = StreamTransactionExtender(cmdStreamWithSize, cmdExtendedStream, cmdRatio) {
     (id, p, _) => p
   }
 
@@ -153,7 +153,7 @@ class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
   val burstTypeReg = if (hasBurst) RegNextWhen(io.input.burst, io.input.fire) init B"01" else null
   val startAddrReg = if (hasBurst) RegNextWhen(startAddress, io.input.fire) init U(0) else null
   val sizeInReg    = if (hasBurst) RegNextWhen(sizeIn, io.input.fire) init sizeMaxIn else null
-  val wrapMaskReg  = if (hasBurst) {
+  val wrapMaskReg = if (hasBurst) {
     val reg = Reg(UInt(inputConfig.addressWidth bits)) init 0
     when(io.input.fire) {
       // WRAP len is always 1,3,7,15 → len+1 is power of 2
@@ -170,7 +170,7 @@ class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
     address := cmdStreamWithSize.addr
   } elsewhen (cmdExtendedStream.fire) {
     if (hasBurst) {
-      val fixedStride = (U(1) << size).resized   // stride = 2^sizeOut bytes
+      val fixedStride = (U(1) << size).resized // stride = 2^sizeOut bytes
       when(burstTypeReg === B"00") {
         // FIXED burst: all wide beats access the same location; the narrow
         // sub-addresses cycle through byte lanes within one wide word.
@@ -215,7 +215,7 @@ class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
   io.last    := cmdExtender.io.last
   io.done    := cmdExtender.io.done
   io.start   := startAddress
-  io.output  << cmdStream
+  io.output << cmdStream
 
   def formalAsserts() = new Composite(this, "asserts") {
     def ratio2size(x: UInt): UInt = {
@@ -237,9 +237,9 @@ class Axi4DownsizerExtSubTransactionGenerator[T <: Axi4Ax](
 // Write-only downsizer (FIXED/INCR/WRAP burst, with ID support)
 // ---------------------------------------------------------------------------
 case class Axi4WriteOnlyDownsizerExt(
-    inputConfig:  Axi4Config,
-    outputConfig: Axi4Config,
-    rspDepth:     Int = 2
+  inputConfig: Axi4Config,
+  outputConfig: Axi4Config,
+  rspDepth: Int = 2
 ) extends Component {
 
   val io = new Bundle {
@@ -254,8 +254,8 @@ case class Axi4WriteOnlyDownsizerExt(
   val dataWorking = Bool()
   val writeCmd    = io.input.writeCmd.haltWhen(dataWorking)
   val cmdStream   = cloneOf(writeCmd)
-  val generator   = Axi4DownsizerExtSubTransactionGenerator(
-    writeCmd, cmdStream, inputConfig, outputConfig)
+  val generator =
+    Axi4DownsizerExtSubTransactionGenerator(writeCmd, cmdStream, inputConfig, outputConfig)
 
   val staleInputData   = Bool()
   val writeData        = io.input.writeData.haltWhen(staleInputData)
@@ -266,13 +266,11 @@ case class Axi4WriteOnlyDownsizerExt(
   writeStream.writeCmd << outCmdStream
 
   val dataStream    = cloneOf(writeData)
-  val streamCounter = StreamTransactionCounter(
-    countCmdStream, dataStream, countCmdStream.len, true)
+  val streamCounter = StreamTransactionCounter(countCmdStream, dataStream, countCmdStream.len, true)
   countCmdStream.ready := streamCounter.io.available
 
-  val beatOffsetReg = RegNextWhen(
-    countCmdStream.addr(inputConfig.symbolRange), countCmdStream.fire)
-  val beatOffset = CombInit(beatOffsetReg)
+  val beatOffsetReg = RegNextWhen(countCmdStream.addr(inputConfig.symbolRange), countCmdStream.fire)
+  val beatOffset    = CombInit(beatOffsetReg)
   when(countCmdStream.fire) {
     beatOffset := countCmdStream.addr(inputConfig.symbolRange)
   }
@@ -292,7 +290,7 @@ case class Axi4WriteOnlyDownsizerExt(
 
   val staleData = !streamCounter.io.working
   writeStream.writeData.translateFrom(dataStream.haltWhen(staleData)) { (to, from) =>
-    to.data := from.data(offset << 3, outputConfig.dataWidth bits)
+    to.data                           := from.data(offset << 3, outputConfig.dataWidth bits)
     if (outputConfig.useLast) to.last := streamCounter.io.last
     if (outputConfig.useStrb) to.strb := from.strb(offset, outputConfig.bytePerWord bits)
     to.assignUnassignedByName(from)
@@ -314,8 +312,8 @@ case class Axi4WriteOnlyDownsizerExt(
 // Read-only downsizer (FIXED/INCR/WRAP burst, with ID support)
 // ---------------------------------------------------------------------------
 case class Axi4ReadOnlyDownsizerExt(
-    inputConfig:  Axi4Config,
-    outputConfig: Axi4Config
+  inputConfig: Axi4Config,
+  outputConfig: Axi4Config
 ) extends Component {
 
   val io = new Bundle {
@@ -330,8 +328,8 @@ case class Axi4ReadOnlyDownsizerExt(
   val (readCmdGen, readCmdCount) = StreamFork2(readCmd, true)
 
   val cmdStream = cloneOf(readCmd)
-  val generator = Axi4DownsizerExtSubTransactionGenerator(
-    readCmdGen, cmdStream, inputConfig, outputConfig)
+  val generator =
+    Axi4DownsizerExtSubTransactionGenerator(readCmdGen, cmdStream, inputConfig, outputConfig)
   io.output.readCmd << cmdStream
 
   val cmdState = new Bundle {
@@ -349,13 +347,16 @@ case class Axi4ReadOnlyDownsizerExt(
     to.start := generator.io.start
   }
   val countOutStream = Stream(cmdState)
-  val dataOutCounter = StreamTransactionExtender(
-    countCmdStream, countOutStream, countCmdStream.len) { (_, p, last) => p }
+  val dataOutCounter =
+    StreamTransactionExtender(countCmdStream, countOutStream, countCmdStream.len) { (_, p, last) =>
+      p
+    }
 
   val dataIn      = io.output.readRsp
   val countStream = Stream(cmdState)
-  val dataCounter = StreamTransactionExtender(
-    countOutStream, countStream, countOutStream.ratio) { (_, p, _) => p }
+  val dataCounter = StreamTransactionExtender(countOutStream, countStream, countOutStream.ratio) {
+    (_, p, _) => p
+  }
   countStream.ready := dataIn.fire
 
   val dataReg    = Reg(Bits(inputConfig.dataWidth bits)) init (0)
@@ -379,7 +380,7 @@ case class Axi4ReadOnlyDownsizerExt(
     lastLast := False
   }
   dataOut.translateFrom(dataIn.throwWhen(!dataCounter.io.last)) { (to, from) =>
-    to.data := dataReg.getAheadValue().addAttribute("nowrshmsk")
+    to.data                          := dataReg.getAheadValue().addAttribute("nowrshmsk")
     if (inputConfig.useLast) to.last := from.last && lastLast
     to.assignUnassignedByName(from)
   }
@@ -405,8 +406,8 @@ case class Axi4ReadOnlyDownsizerExt(
       assert(countStream.size === sizeMaxOut)
     }
     when(lenCounter.working) {
-      assert(countOutStream.size  === cmdStream.size)
-      assert(countOutStream.len   === cmdStream.len)
+      assert(countOutStream.size === cmdStream.size)
+      assert(countOutStream.len === cmdStream.len)
       assert(countOutStream.ratio === cmdCounter.expected)
     }
 
@@ -425,9 +426,9 @@ case class Axi4ReadOnlyDownsizerExt(
 // Combined read+write downsizer (drop-in replacement for Axi4Downsizer)
 // ---------------------------------------------------------------------------
 case class Axi4DownsizerExt(
-    inputConfig:  Axi4Config,
-    outputConfig: Axi4Config,
-    rspDepth:     Int = 2
+  inputConfig: Axi4Config,
+  outputConfig: Axi4Config,
+  rspDepth: Int = 2
 ) extends Component {
 
   val io = new Bundle {
@@ -438,17 +439,17 @@ case class Axi4DownsizerExt(
   val readOnly  = Axi4ReadOnlyDownsizerExt(inputConfig, outputConfig)
   val writeOnly = Axi4WriteOnlyDownsizerExt(inputConfig, outputConfig, rspDepth)
 
-  readOnly.io.input.ar  <> io.input.ar
-  readOnly.io.input.r   <> io.input.r
+  readOnly.io.input.ar <> io.input.ar
+  readOnly.io.input.r <> io.input.r
   writeOnly.io.input.aw <> io.input.aw
-  writeOnly.io.input.w  <> io.input.w
-  writeOnly.io.input.b  <> io.input.b
+  writeOnly.io.input.w <> io.input.w
+  writeOnly.io.input.b <> io.input.b
 
-  readOnly.io.output.ar  <> io.output.ar
-  readOnly.io.output.r   <> io.output.r
+  readOnly.io.output.ar <> io.output.ar
+  readOnly.io.output.r <> io.output.r
   writeOnly.io.output.aw <> io.output.aw
-  writeOnly.io.output.w  <> io.output.w
-  writeOnly.io.output.b  <> io.output.b
+  writeOnly.io.output.w <> io.output.w
+  writeOnly.io.output.b <> io.output.b
 
   // Simulation assertion: reject reserved burst type 0b11
   if (inputConfig.useBurst) {

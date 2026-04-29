@@ -22,11 +22,11 @@ object AxiZeroGen extends App {
   //   Slave 2  GPIO regs   0x0002_0000 – 0x0002_0FFF
   //   Slave 3  SPI regs    0x0003_0000 – 0x0003_0FFF
   val lite1M4S = AxiZeroConfig.allLite(
-    numMasters  = 1,
-    numSlaves   = 4,
-    addrWidth   = 32,
-    dataWidth   = 32,
-    addressMap  = Seq(
+    numMasters = 1,
+    numSlaves = 4,
+    addrWidth = 32,
+    dataWidth = 32,
+    addressMap = Seq(
       BigInt("00000000", 16) -> BigInt("00001000", 16),
       BigInt("00010000", 16) -> BigInt("00001000", 16),
       BigInt("00020000", 16) -> BigInt("00001000", 16),
@@ -38,29 +38,29 @@ object AxiZeroGen extends App {
 
   // ── 2 masters × 4 slaves, AXI4-Lite, with register slices ───────────────
   val lite2M4S_RS = AxiZeroConfig.allLite(
-    numMasters      = 2,
-    numSlaves       = 4,
-    addrWidth       = 32,
-    dataWidth       = 32,
-    addressMap      = Seq(
+    numMasters = 2,
+    numSlaves = 4,
+    addrWidth = 32,
+    dataWidth = 32,
+    addressMap = Seq(
       BigInt("00000000", 16) -> BigInt("00010000", 16),
       BigInt("00010000", 16) -> BigInt("00010000", 16),
       BigInt("00020000", 16) -> BigInt("00010000", 16),
       BigInt("00030000", 16) -> BigInt("00010000", 16)
     ),
-    arbitration      = RoundRobin,
-    masterRegSlices  = true,
-    slaveRegSlices   = true
+    arbitration = RoundRobin,
+    masterRegSlices = true,
+    slaveRegSlices = true
   )
   GenHelper.liteCrossbar(lite2M4S_RS, "AxiZeroLite_2M4S_RS")
 
   // ── 4 masters × 4 slaves, AXI4-Lite, fixed priority ─────────────────────
   val lite4M4S_FP = AxiZeroConfig.allLite(
-    numMasters  = 4,
-    numSlaves   = 4,
-    addrWidth   = 32,
-    dataWidth   = 32,
-    addressMap  = Seq(
+    numMasters = 4,
+    numSlaves = 4,
+    addrWidth = 32,
+    dataWidth = 32,
+    addressMap = Seq(
       BigInt("00000000", 16) -> BigInt("00010000", 16),
       BigInt("00010000", 16) -> BigInt("00010000", 16),
       BigInt("00020000", 16) -> BigInt("00010000", 16),
@@ -76,15 +76,15 @@ object GenHelper {
 
   private val COPYRIGHT =
     "// Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com\n" +
-    "// SPDX-License-Identifier: MIT\n"
+      "// SPDX-License-Identifier: MIT\n"
 
   private def spinalCfg(name: String) =
     SpinalConfig(
-      targetDirectory  = "generated",
-      netlistFileName  = s"$name.v",
+      targetDirectory = "generated",
+      netlistFileName = s"$name.v",
       defaultConfigForClockDomains = ClockDomainConfig(
-        clockEdge        = RISING,
-        resetKind        = SYNC,
+        clockEdge = RISING,
+        resetKind = SYNC,
         resetActiveLevel = LOW
       )
     )

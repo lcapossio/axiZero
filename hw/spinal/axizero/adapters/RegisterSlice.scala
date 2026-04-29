@@ -29,13 +29,13 @@ import spinal.lib.bus.amba4.axi._
 
 class Axi4LiteRegSlice(config: Axi4Config) extends Component {
   val io = new Bundle {
-    val upstream   = slave(Axi4(config))   // toward the master
-    val downstream = master(Axi4(config))  // toward the slave / crossbar
+    val upstream   = slave(Axi4(config))  // toward the master
+    val downstream = master(Axi4(config)) // toward the slave / crossbar
   }
 
   // Forward channels (master → slave): register each
   io.downstream.aw << io.upstream.aw.stage()
-  io.downstream.w  << io.upstream.w.stage()
+  io.downstream.w << io.upstream.w.stage()
   io.downstream.ar << io.upstream.ar.stage()
 
   // Backward channels (slave → master): register each
@@ -52,7 +52,7 @@ class Axi4RegSlice(config: Axi4Config) extends Component {
   }
 
   io.downstream.aw << io.upstream.aw.stage()
-  io.downstream.w  << io.upstream.w.stage()
+  io.downstream.w << io.upstream.w.stage()
   io.downstream.ar << io.upstream.ar.stage()
 
   io.upstream.b << io.downstream.b.stage()

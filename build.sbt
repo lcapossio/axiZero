@@ -3,6 +3,8 @@
 ThisBuild / version      := "0.1.0"
 ThisBuild / scalaVersion := "2.13.12"
 ThisBuild / organization := "io.axizero"
+ThisBuild / semanticdbEnabled := true
+ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
 val spinalVersion = "1.10.1"
 

@@ -19,19 +19,19 @@ object ArtyQosDutGen extends App {
   // Master 1: Traffic Gen (AXI4-Lite)
   val tgenCfg = Axi4Config(
     addressWidth = 32,
-    dataWidth    = 32,
-    useId        = false,
-    useRegion    = false,
-    useBurst     = false,
-    useLock      = false,
-    useCache     = false,
-    useSize      = false,
-    useQos       = false,
-    useLen       = false,
-    useLast      = false,
-    useResp      = true,
-    useProt      = true,
-    useStrb      = true
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
   )
 
   // Full AXI4 slave config (BRAM controllers, slaveIdW=2)
@@ -40,25 +40,25 @@ object ArtyQosDutGen extends App {
   // AXI4-Lite slave config (GPIO, UART)
   val liteSlaveCfg = Axi4Config(
     addressWidth = 32,
-    dataWidth    = 32,
-    useId        = false,
-    useRegion    = false,
-    useBurst     = false,
-    useLock      = false,
-    useCache     = false,
-    useSize      = false,
-    useQos       = false,
-    useLen       = false,
-    useLast      = false,
-    useResp      = true,
-    useProt      = true,
-    useStrb      = true
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
   )
 
   val cfg = AxiZeroConfig(
     masters = Seq(
       MasterPort(masterCfg, FullAxi4),
-      MasterPort(tgenCfg,   LiteAxi4)
+      MasterPort(tgenCfg, LiteAxi4)
     ),
     slaves = Seq(
       SlavePort(fullSlaveCfg, FullAxi4, BigInt("C0000000", 16), BigInt("00010000", 16)),
@@ -66,7 +66,7 @@ object ArtyQosDutGen extends App {
       SlavePort(liteSlaveCfg, LiteAxi4, BigInt("C0020000", 16), BigInt("00001000", 16)),
       SlavePort(liteSlaveCfg, LiteAxi4, BigInt("C0030000", 16), BigInt("00001000", 16))
     ),
-    arbitration    = QosBased,
+    arbitration = QosBased,
     maxOutstanding = 4
   )
 
@@ -74,12 +74,14 @@ object ArtyQosDutGen extends App {
     targetDirectory = "hw/vivado/arty_a7/ip/rtl",
     netlistFileName = "AxiZeroArtyQosDUT.v",
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   ).generateVerilog(new AxiZeroMixedTop(cfg))
 
-  GenHelper.prependCopyright(java.nio.file.Paths.get("hw/vivado/arty_a7/ip/rtl/AxiZeroArtyQosDUT.v"))
+  GenHelper.prependCopyright(
+    java.nio.file.Paths.get("hw/vivado/arty_a7/ip/rtl/AxiZeroArtyQosDUT.v")
+  )
   println("[ArtyQosDutGen] Done -> hw/vivado/arty_a7/ip/rtl/AxiZeroArtyQosDUT.v")
 }

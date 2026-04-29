@@ -42,19 +42,19 @@ object ArtyDutGen extends App {
   // ── AXI4-Lite slave config (GPIO, UART) ────────────────────────────────
   val liteSlaveCfg = Axi4Config(
     addressWidth = 32,
-    dataWidth    = 32,
-    useId        = false,
-    useRegion    = false,
-    useBurst     = false,
-    useLock      = false,
-    useCache     = false,
-    useSize      = false,
-    useQos       = false,
-    useLen       = false,
-    useLast      = false,
-    useResp      = true,
-    useProt      = true,
-    useStrb      = true
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
   )
 
   val cfg = AxiZeroConfig(
@@ -62,12 +62,32 @@ object ArtyDutGen extends App {
       MasterPort(masterCfg, FullAxi4)
     ),
     slaves = Seq(
-      SlavePort(fullSlaveCfg, FullAxi4, BigInt("C0000000", 16), BigInt("00010000", 16)),  // BRAM #0 64 KB
-      SlavePort(fullSlaveCfg, FullAxi4, BigInt("C0010000", 16), BigInt("00010000", 16)),  // BRAM #1 64 KB
-      SlavePort(liteSlaveCfg, LiteAxi4, BigInt("C0020000", 16), BigInt("00001000", 16)),  // GPIO 4 KB
-      SlavePort(liteSlaveCfg, LiteAxi4, BigInt("C0030000", 16), BigInt("00001000", 16))   // UART Lite 4 KB
+      SlavePort(
+        fullSlaveCfg,
+        FullAxi4,
+        BigInt("C0000000", 16),
+        BigInt("00010000", 16)
+      ), // BRAM #0 64 KB
+      SlavePort(
+        fullSlaveCfg,
+        FullAxi4,
+        BigInt("C0010000", 16),
+        BigInt("00010000", 16)
+      ), // BRAM #1 64 KB
+      SlavePort(
+        liteSlaveCfg,
+        LiteAxi4,
+        BigInt("C0020000", 16),
+        BigInt("00001000", 16)
+      ), // GPIO 4 KB
+      SlavePort(
+        liteSlaveCfg,
+        LiteAxi4,
+        BigInt("C0030000", 16),
+        BigInt("00001000", 16)
+      ) // UART Lite 4 KB
     ),
-    arbitration    = RoundRobin,
+    arbitration = RoundRobin,
     maxOutstanding = 4
   )
 
@@ -75,8 +95,8 @@ object ArtyDutGen extends App {
     targetDirectory = "hw/vivado/arty_a7/ip/rtl",
     netlistFileName = "AxiZeroArtyDUT.v",
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   ).generateVerilog(new AxiZeroMixedTop(cfg))

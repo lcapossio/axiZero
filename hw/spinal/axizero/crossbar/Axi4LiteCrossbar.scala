@@ -27,8 +27,7 @@ import axizero._
 //           back → IDLE
 // ---------------------------------------------------------------------------
 class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
-  require(cfg.isAllLite,
-    "Axi4LiteCrossbar requires all master and slave ports to be LiteAxi4")
+  require(cfg.isAllLite, "Axi4LiteCrossbar requires all master and slave ports to be LiteAxi4")
 
   val M = cfg.numMasters
   val S = cfg.numSlaves
@@ -36,27 +35,27 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
   // Single normalised Axi4Config used for every internal port.
   val normCfg = Axi4Config(
     addressWidth = (cfg.masters.map(_.config.addressWidth) ++
-                    cfg.slaves.map(_.config.addressWidth)).max,
-    dataWidth    = cfg.fabricDataWidth,
-    useId        = false,
-    useRegion    = false,
-    useBurst     = false,
-    useLock      = false,
-    useCache     = false,
-    useSize      = false,
-    useQos       = false,
-    useLen       = false,
-    useLast      = false,
-    useResp      = true,
-    useProt      = true,
-    useStrb      = true
+      cfg.slaves.map(_.config.addressWidth)).max,
+    dataWidth = cfg.fabricDataWidth,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
   )
 
   val io = new Bundle {
     // Masters drive AW/W/AR in; crossbar drives B/R back.
     val masters = Vec(slave(Axi4(normCfg)), M)
     // Crossbar drives AW/W/AR out; slaves drive B/R back.
-    val slaves  = Vec(master(Axi4(normCfg)), S)
+    val slaves = Vec(master(Axi4(normCfg)), S)
   }
 
   // -------------------------------------------------------------------------
@@ -79,32 +78,35 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
   // to 0..rrPtr-1 if no request in the upper half.
   // -------------------------------------------------------------------------
   def rrGrant(requests: Bits, rrPtr: UInt): Bits = {
-    val n    = requests.getWidth
+    val n = requests.getWidth
     // Build maskLow: bit i = 1 iff i < rrPtr  (lower-priority half).
     // We build it via a priority-encoded when ladder so no arithmetic
     // overflow edge-cases arise.
     val maskLow = Bits(n bits)
-    maskLow := B(0, n bits)   // default: rrPtr=0 → no bits masked
+    maskLow := B(0, n bits) // default: rrPtr=0 → no bits masked
     for (ptr <- 1 until n) {
       when(rrPtr >= U(ptr)) {
-        maskLow := B((BigInt(1) << ptr) - 1, n bits)  // bits 0..ptr-1 set
+        maskLow := B((BigInt(1) << ptr) - 1, n bits) // bits 0..ptr-1 set
       }
     }
     val maskedReqs = requests & ~maskLow
-    Mux(maskedReqs.orR,
-      OHMasking.first(maskedReqs),   // someone in high-priority half
-      OHMasking.first(requests))     // wrap: use full scan
+    Mux(
+      maskedReqs.orR,
+      OHMasking.first(maskedReqs), // someone in high-priority half
+      OHMasking.first(requests)
+    ) // wrap: use full scan
   }
 
   // -------------------------------------------------------------------------
   // Dispatch to selected arbitration policy.
   // -------------------------------------------------------------------------
-  def arbitrate(requests: Bits, rrPtr: UInt, credits: Vec[UInt] = null): Bits = cfg.arbitration match {
-    case RoundRobin            => rrGrant(requests, rrPtr)
-    case FixedPriority         => OHMasking.first(requests)
-    case QosBased              => rrGrant(requests, rrPtr)  // AXI4-Lite has no QoS field — RR is correct
-    case WeightedRoundRobin(_) => wrrGrant(requests, rrPtr, credits)
-  }
+  def arbitrate(requests: Bits, rrPtr: UInt, credits: Vec[UInt] = null): Bits =
+    cfg.arbitration match {
+      case RoundRobin    => rrGrant(requests, rrPtr)
+      case FixedPriority => OHMasking.first(requests)
+      case QosBased      => rrGrant(requests, rrPtr) // AXI4-Lite has no QoS field — RR is correct
+      case WeightedRoundRobin(_) => wrrGrant(requests, rrPtr, credits)
+    }
 
   // -------------------------------------------------------------------------
   // Weighted round-robin: only consider masters that still have credit.
@@ -113,9 +115,7 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
   def wrrGrant(requests: Bits, rrPtr: UInt, credits: Vec[UInt]): Bits = {
     val eligible = Bits(M bits)
     for (mi <- 0 until M) eligible(mi) := requests(mi) && (credits(mi) =/= 0)
-    Mux(eligible.orR,
-      rrGrant(eligible, rrPtr),
-      rrGrant(requests, rrPtr))
+    Mux(eligible.orR, rrGrant(eligible, rrPtr), rrGrant(requests, rrPtr))
   }
 
   // -------------------------------------------------------------------------
@@ -145,20 +145,22 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
   // ── WRR credit counters (only allocated when WeightedRoundRobin) ────────
   val wrrWeights = cfg.arbitration match {
     case WeightedRoundRobin(w) => w
-    case _ => Seq.fill(M)(1)
+    case _                     => Seq.fill(M)(1)
   }
   val creditW = log2Up(wrrWeights.max + 1)
 
   val wrCredits = cfg.arbitration match {
     case WeightedRoundRobin(_) =>
-      Vec(Seq.tabulate(S)(_ =>
-        Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits))))))
+      Vec(
+        Seq.tabulate(S)(_ => Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits)))))
+      )
     case _ => null
   }
   val rdCredits = cfg.arbitration match {
     case WeightedRoundRobin(_) =>
-      Vec(Seq.tabulate(S)(_ =>
-        Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits))))))
+      Vec(
+        Seq.tabulate(S)(_ => Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits)))))
+      )
     case _ => null
   }
 
@@ -175,14 +177,14 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
     io.masters(mi).r.payload.clearAll()
   }
   for (si <- 0 until S) {
-    io.slaves(si).aw.valid  := False
+    io.slaves(si).aw.valid := False
     io.slaves(si).aw.payload.clearAll()
-    io.slaves(si).w.valid   := False
+    io.slaves(si).w.valid := False
     io.slaves(si).w.payload.clearAll()
-    io.slaves(si).b.ready   := False
-    io.slaves(si).ar.valid  := False
+    io.slaves(si).b.ready  := False
+    io.slaves(si).ar.valid := False
     io.slaves(si).ar.payload.clearAll()
-    io.slaves(si).r.ready   := False
+    io.slaves(si).r.ready := False
   }
 
   // =========================================================================
@@ -196,10 +198,10 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
       val requests = Bits(M bits)
       for (mi <- 0 until M) {
         requests(mi) := io.masters(mi).aw.valid &&
-                        addrDecodeOH(io.masters(mi).aw.addr)(si)
+          addrDecodeOH(io.masters(mi).aw.addr)(si)
       }
 
-      val grant    = arbitrate(requests, wrRrPtr(si), if (wrCredits != null) wrCredits(si) else null)
+      val grant = arbitrate(requests, wrRrPtr(si), if (wrCredits != null) wrCredits(si) else null)
       val grantIdx = ohToIdx(grant)
       val anyReq   = requests.orR
 
@@ -212,9 +214,9 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
             io.masters(mi).aw.ready := slv.aw.ready
             // Also forward W alongside AW so that IPIF-based AXI4-Lite slaves
             // (which require AWVALID & WVALID simultaneously) can accept AW.
-            slv.w.valid              := io.masters(mi).w.valid
-            slv.w.payload            := io.masters(mi).w.payload
-            io.masters(mi).w.ready   := slv.w.ready
+            slv.w.valid            := io.masters(mi).w.valid
+            slv.w.payload          := io.masters(mi).w.payload
+            io.masters(mi).w.ready := slv.w.ready
           }
         }
 
@@ -222,7 +224,7 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
         when(slv.aw.fire) {
           wrActive(si)  := True
           wrGranted(si) := grantIdx
-          wrRrPtr(si)   := (grantIdx + 1).resized  // advance RR pointer
+          wrRrPtr(si)   := (grantIdx + 1).resized // advance RR pointer
 
           // WRR: decrement credit; reset all when exhausted
           if (wrCredits != null) {
@@ -260,9 +262,9 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
 
       for (mi <- 0 until M) {
         when(gmi === mi) {
-          slv.w.valid              := io.masters(mi).w.valid
-          slv.w.payload            := io.masters(mi).w.payload
-          io.masters(mi).w.ready   := slv.w.ready
+          slv.w.valid            := io.masters(mi).w.valid
+          slv.w.payload          := io.masters(mi).w.payload
+          io.masters(mi).w.ready := slv.w.ready
 
           io.masters(mi).b.valid   := slv.b.valid
           io.masters(mi).b.payload := slv.b.payload
@@ -284,10 +286,10 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
       val requests = Bits(M bits)
       for (mi <- 0 until M) {
         requests(mi) := io.masters(mi).ar.valid &&
-                        addrDecodeOH(io.masters(mi).ar.addr)(si)
+          addrDecodeOH(io.masters(mi).ar.addr)(si)
       }
 
-      val grant    = arbitrate(requests, rdRrPtr(si), if (rdCredits != null) rdCredits(si) else null)
+      val grant = arbitrate(requests, rdRrPtr(si), if (rdCredits != null) rdCredits(si) else null)
       val grantIdx = ohToIdx(grant)
       val anyReq   = requests.orR
 

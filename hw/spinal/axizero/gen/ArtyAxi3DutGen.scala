@@ -32,19 +32,19 @@ object ArtyAxi3DutGen extends App {
 
   val liteSlaveCfg = Axi4Config(
     addressWidth = 32,
-    dataWidth    = 32,
-    useId        = false,
-    useRegion    = false,
-    useBurst     = false,
-    useLock      = false,
-    useCache     = false,
-    useSize      = false,
-    useQos       = false,
-    useLen       = false,
-    useLast      = false,
-    useResp      = true,
-    useProt      = true,
-    useStrb      = true
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
   )
 
   val crossbarCfg = AxiZeroConfig(
@@ -78,46 +78,46 @@ object ArtyAxi3DutGen extends App {
     // ── AXI4 → AXI3 conversion (trivial wire shim) ──
     val axi3Bus = Axi3(axi3Cfg)
 
-    axi3Bus.aw.valid   := io.s0.aw.valid
-    io.s0.aw.ready     := axi3Bus.aw.ready
-    axi3Bus.aw.id      := io.s0.aw.id
-    axi3Bus.aw.addr    := io.s0.aw.addr
-    axi3Bus.aw.len     := io.s0.aw.len.resize(4)
-    axi3Bus.aw.size    := io.s0.aw.size
-    axi3Bus.aw.burst   := io.s0.aw.burst
-    axi3Bus.aw.lock    := io.s0.aw.lock.resize(2)
-    axi3Bus.aw.cache   := io.s0.aw.cache
-    axi3Bus.aw.prot    := io.s0.aw.prot
+    axi3Bus.aw.valid := io.s0.aw.valid
+    io.s0.aw.ready   := axi3Bus.aw.ready
+    axi3Bus.aw.id    := io.s0.aw.id
+    axi3Bus.aw.addr  := io.s0.aw.addr
+    axi3Bus.aw.len   := io.s0.aw.len.resize(4)
+    axi3Bus.aw.size  := io.s0.aw.size
+    axi3Bus.aw.burst := io.s0.aw.burst
+    axi3Bus.aw.lock  := io.s0.aw.lock.resize(2)
+    axi3Bus.aw.cache := io.s0.aw.cache
+    axi3Bus.aw.prot  := io.s0.aw.prot
 
-    axi3Bus.w.valid    := io.s0.w.valid
-    io.s0.w.ready      := axi3Bus.w.ready
-    axi3Bus.w.id       := 0
-    axi3Bus.w.data     := io.s0.w.data
-    axi3Bus.w.strb     := io.s0.w.strb
-    axi3Bus.w.last     := io.s0.w.last
+    axi3Bus.w.valid := io.s0.w.valid
+    io.s0.w.ready   := axi3Bus.w.ready
+    axi3Bus.w.id    := 0
+    axi3Bus.w.data  := io.s0.w.data
+    axi3Bus.w.strb  := io.s0.w.strb
+    axi3Bus.w.last  := io.s0.w.last
 
-    io.s0.b.valid      := axi3Bus.b.valid
-    axi3Bus.b.ready    := io.s0.b.ready
-    io.s0.b.id         := axi3Bus.b.id
-    io.s0.b.resp       := axi3Bus.b.resp
+    io.s0.b.valid   := axi3Bus.b.valid
+    axi3Bus.b.ready := io.s0.b.ready
+    io.s0.b.id      := axi3Bus.b.id
+    io.s0.b.resp    := axi3Bus.b.resp
 
-    axi3Bus.ar.valid   := io.s0.ar.valid
-    io.s0.ar.ready     := axi3Bus.ar.ready
-    axi3Bus.ar.id      := io.s0.ar.id
-    axi3Bus.ar.addr    := io.s0.ar.addr
-    axi3Bus.ar.len     := io.s0.ar.len.resize(4)
-    axi3Bus.ar.size    := io.s0.ar.size
-    axi3Bus.ar.burst   := io.s0.ar.burst
-    axi3Bus.ar.lock    := io.s0.ar.lock.resize(2)
-    axi3Bus.ar.cache   := io.s0.ar.cache
-    axi3Bus.ar.prot    := io.s0.ar.prot
+    axi3Bus.ar.valid := io.s0.ar.valid
+    io.s0.ar.ready   := axi3Bus.ar.ready
+    axi3Bus.ar.id    := io.s0.ar.id
+    axi3Bus.ar.addr  := io.s0.ar.addr
+    axi3Bus.ar.len   := io.s0.ar.len.resize(4)
+    axi3Bus.ar.size  := io.s0.ar.size
+    axi3Bus.ar.burst := io.s0.ar.burst
+    axi3Bus.ar.lock  := io.s0.ar.lock.resize(2)
+    axi3Bus.ar.cache := io.s0.ar.cache
+    axi3Bus.ar.prot  := io.s0.ar.prot
 
-    io.s0.r.valid      := axi3Bus.r.valid
-    axi3Bus.r.ready    := io.s0.r.ready
-    io.s0.r.id         := axi3Bus.r.id
-    io.s0.r.data       := axi3Bus.r.data
-    io.s0.r.resp       := axi3Bus.r.resp
-    io.s0.r.last       := axi3Bus.r.last
+    io.s0.r.valid   := axi3Bus.r.valid
+    axi3Bus.r.ready := io.s0.r.ready
+    io.s0.r.id      := axi3Bus.r.id
+    io.s0.r.data    := axi3Bus.r.data
+    io.s0.r.resp    := axi3Bus.r.resp
+    io.s0.r.last    := axi3Bus.r.last
 
     // ── AXI3 → AXI4 adapter (module under test) ──
     val adapter = new Axi3ToAxi4Adapter(axi3Cfg, axi4MasterCfg, maxOutstanding = 4)
@@ -138,22 +138,24 @@ object ArtyAxi3DutGen extends App {
     targetDirectory = "hw/vivado/arty_a7/ip/rtl",
     netlistFileName = "AxiZeroArtyAxi3DUT.v",
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   ).generateVerilog(new Axi3BridgeTestTop)
 
-  GenHelper.prependCopyright(java.nio.file.Paths.get("hw/vivado/arty_a7/ip/rtl/AxiZeroArtyAxi3DUT.v"))
+  GenHelper.prependCopyright(
+    java.nio.file.Paths.get("hw/vivado/arty_a7/ip/rtl/AxiZeroArtyAxi3DUT.v")
+  )
 
   // Rename ports to AXI standard naming (flatten SpinalHDL Stream payloads)
-  val path = java.nio.file.Paths.get("hw/vivado/arty_a7/ip/rtl/AxiZeroArtyAxi3DUT.v")
+  val path    = java.nio.file.Paths.get("hw/vivado/arty_a7/ip/rtl/AxiZeroArtyAxi3DUT.v")
   val content = new String(java.nio.file.Files.readAllBytes(path), "UTF-8")
   val renamed = content
     // io_s0_aw_valid → s0_axi_awvalid, io_s0_aw_payload_addr → s0_axi_awaddr, etc.
     .replaceAll("io_s(\\d+)_", "s$1_axi_")
     .replaceAll("io_m(\\d+)_", "m$1_axi_")
-    .replaceAll("_payload_", "")        // flatten aw_payload_addr → awaddr
+    .replaceAll("_payload_", "") // flatten aw_payload_addr → awaddr
     .replaceAll("_aw_valid", "_awvalid")
     .replaceAll("_aw_ready", "_awready")
     .replaceAll("_w_valid", "_wvalid")

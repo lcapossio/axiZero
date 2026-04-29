@@ -38,19 +38,19 @@ object ArtyWrrDutGen extends App {
   // ── Master 1: Traffic Gen (AXI4-Lite) ────────────────────────────────────
   val tgenCfg = Axi4Config(
     addressWidth = 32,
-    dataWidth    = 32,
-    useId        = false,
-    useRegion    = false,
-    useBurst     = false,
-    useLock      = false,
-    useCache     = false,
-    useSize      = false,
-    useQos       = false,
-    useLen       = false,
-    useLast      = false,
-    useResp      = true,
-    useProt      = true,
-    useStrb      = true
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
   )
 
   // ── Full AXI4 slave config (BRAM controllers, slaveIdW=2) ───────────────
@@ -59,33 +59,53 @@ object ArtyWrrDutGen extends App {
   // ── AXI4-Lite slave config (GPIO, UART) ──────────────────────────────────
   val liteSlaveCfg = Axi4Config(
     addressWidth = 32,
-    dataWidth    = 32,
-    useId        = false,
-    useRegion    = false,
-    useBurst     = false,
-    useLock      = false,
-    useCache     = false,
-    useSize      = false,
-    useQos       = false,
-    useLen       = false,
-    useLast      = false,
-    useResp      = true,
-    useProt      = true,
-    useStrb      = true
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
   )
 
   val cfg = AxiZeroConfig(
     masters = Seq(
-      MasterPort(masterCfg, FullAxi4),    // M0: MicroBlaze (weight 3)
-      MasterPort(tgenCfg,   LiteAxi4)     // M1: Traffic Gen (weight 1)
+      MasterPort(masterCfg, FullAxi4), // M0: MicroBlaze (weight 3)
+      MasterPort(tgenCfg, LiteAxi4)    // M1: Traffic Gen (weight 1)
     ),
     slaves = Seq(
-      SlavePort(fullSlaveCfg, FullAxi4, BigInt("C0000000", 16), BigInt("00010000", 16)),  // BRAM #0 64 KB
-      SlavePort(fullSlaveCfg, FullAxi4, BigInt("C0010000", 16), BigInt("00010000", 16)),  // BRAM #1 64 KB
-      SlavePort(liteSlaveCfg, LiteAxi4, BigInt("C0020000", 16), BigInt("00001000", 16)),  // GPIO 4 KB
-      SlavePort(liteSlaveCfg, LiteAxi4, BigInt("C0030000", 16), BigInt("00001000", 16))   // UART Lite 4 KB
+      SlavePort(
+        fullSlaveCfg,
+        FullAxi4,
+        BigInt("C0000000", 16),
+        BigInt("00010000", 16)
+      ), // BRAM #0 64 KB
+      SlavePort(
+        fullSlaveCfg,
+        FullAxi4,
+        BigInt("C0010000", 16),
+        BigInt("00010000", 16)
+      ), // BRAM #1 64 KB
+      SlavePort(
+        liteSlaveCfg,
+        LiteAxi4,
+        BigInt("C0020000", 16),
+        BigInt("00001000", 16)
+      ), // GPIO 4 KB
+      SlavePort(
+        liteSlaveCfg,
+        LiteAxi4,
+        BigInt("C0030000", 16),
+        BigInt("00001000", 16)
+      ) // UART Lite 4 KB
     ),
-    arbitration    = WeightedRoundRobin(Seq(3, 1)),
+    arbitration = WeightedRoundRobin(Seq(3, 1)),
     maxOutstanding = 4
   )
 
@@ -93,12 +113,14 @@ object ArtyWrrDutGen extends App {
     targetDirectory = "hw/vivado/arty_a7/ip/rtl",
     netlistFileName = "AxiZeroArtyWrrDUT.v",
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   ).generateVerilog(new AxiZeroMixedTop(cfg))
 
-  GenHelper.prependCopyright(java.nio.file.Paths.get("hw/vivado/arty_a7/ip/rtl/AxiZeroArtyWrrDUT.v"))
+  GenHelper.prependCopyright(
+    java.nio.file.Paths.get("hw/vivado/arty_a7/ip/rtl/AxiZeroArtyWrrDUT.v")
+  )
   println("[ArtyWrrDutGen] Done → hw/vivado/arty_a7/ip/rtl/AxiZeroArtyWrrDUT.v")
 }
