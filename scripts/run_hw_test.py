@@ -26,7 +26,7 @@ Options
                     Auto-detected if omitted and pyserial is installed.
   --baud N          Baud rate for UART monitor (default: 115200).
   --uart-timeout N  Seconds to wait for PASS/FAIL over UART (default: 120).
-  --jobs N          Vivado parallel jobs (default: CPU count).
+  --jobs N          Vivado parallel jobs (default: 4).
   --log-dir DIR     Directory for per-step log files (default: logs/hw_test).
   --no-color        Disable ANSI colour output.
 
@@ -88,6 +88,7 @@ SCRIPT_DIR  = Path(__file__).resolve().parent
 REPO_ROOT   = SCRIPT_DIR.parent
 VIVADO_DIR  = REPO_ROOT / "hw" / "vivado" / "arty_a7"
 CREATE_TCL  = VIVADO_DIR / "create_project.tcl"
+RENAME_PY   = VIVADO_DIR / "rename_base_ports.py"
 BITSTREAM   = VIVADO_DIR / "axizero_arty" / "axizero_arty.runs" / "impl_1" / "system_wrapper.bit"
 
 # ── Vivado auto-detection ────────────────────────────────────────────────────
@@ -213,6 +214,16 @@ def run_cmd(cmd, cwd, log_path, env=None, interesting=None):
             errors="replace",
         )
 
+        # Force-tolerate non-cp1252 characters in stdout (Windows default).
+        # Use ASCII-safe replacement for the echo, but keep full UTF-8 in log file.
+        def _safe_print(s: str) -> None:
+            try:
+                print(s, flush=True)
+            except UnicodeEncodeError:
+                enc = sys.stdout.encoding or "ascii"
+                print(s.encode(enc, errors="replace").decode(enc, errors="replace"),
+                      flush=True)
+
         for raw in proc.stdout:
             line = raw.rstrip()
             log_lines.append(line)
@@ -220,9 +231,9 @@ def run_cmd(cmd, cwd, log_path, env=None, interesting=None):
             # Highlight interesting lines
             highlighted = any(pat.search(line) for pat in compiled)
             if highlighted and USE_COLOR:
-                print(f"  {YELLOW}{line}{RESET}", flush=True)
+                _safe_print(f"  {YELLOW}{line}{RESET}")
             else:
-                print(f"  {line}", flush=True)
+                _safe_print(f"  {line}")
 
             logger.file.write(line + "\n")
             logger.file.flush()
@@ -264,22 +275,47 @@ def step_gen_rtl(log_dir):
     return True
 
 
-def step_create_and_build(vivado, log_dir, jobs):
-    """vivado -mode batch -source create_project.tcl -tclargs <jobs>"""
-    step(2, "Vivado project creation + synthesis + implementation + bitstream")
-    log = log_dir / "02_build.log"
+def step_rename_ports(log_dir):
+    """Run rename_base_ports.py — required after sbt regenerates AxiZeroArtyDUT.v
+    so that create_project.tcl's get_bd_pins references match.  Idempotent."""
+    step(2, "Rename SpinalHDL io_* ports -> AXI standard names")
+    if not RENAME_PY.exists():
+        err(f"Rename script not found: {RENAME_PY}")
+        return False
+    rc, _ = run_cmd(
+        [sys.executable, str(RENAME_PY)],
+        cwd=REPO_ROOT,
+        log_path=log_dir / "01b_rename.log",
+    )
+    if rc != 0:
+        err("Port rename failed.")
+        return False
+    return True
 
-    if BITSTREAM.exists():
+
+def step_create_and_build(vivado, log_dir, jobs, enable_axi_pc=False, force=False):
+    """vivado -mode batch -source create_project.tcl -tclargs <jobs> [<enable_axi_pc>]"""
+    step(3, "Vivado project creation + synthesis + implementation + bitstream")
+    log = log_dir / "03_build.log"
+
+    if BITSTREAM.exists() and not force:
         ok(f"Bitstream already exists: {BITSTREAM}")
         return True
+    if force and BITSTREAM.exists():
+        BITSTREAM.unlink()
+        ok(f"Removed stale bitstream (--force-rebuild): {BITSTREAM}")
 
     # Fix HOME for Vivado child processes: Unix-style /c/Users/... breaks tclapp::load_apps
     env = dict(os.environ)
     if "HOME" in env and env["HOME"].startswith("/"):
         env["HOME"] = str(Path.home())
 
+    tclargs = [str(jobs)]
+    if enable_axi_pc:
+        tclargs.append("1")
+
     rc, text = run_cmd(
-        [vivado, "-mode", "batch", "-source", str(CREATE_TCL), "-tclargs", str(jobs)],
+        [vivado, "-mode", "batch", "-source", str(CREATE_TCL), "-tclargs", *tclargs],
         cwd=REPO_ROOT,
         log_path=log,
         env=env,
@@ -410,10 +446,14 @@ def parse_args():
     p.add_argument("--uart-timeout",   type=int, default=120, metavar="SEC",
                    help="Seconds to wait for PASS/FAIL on UART (default: 120)")
     p.add_argument("--jobs",           type=int, default=None, metavar="N",
-                   help="Vivado parallel jobs (default: CPU count)")
+                   help="Vivado parallel jobs (default: 4)")
     p.add_argument("--log-dir",        metavar="DIR", default="logs/hw_test",
                    help="Log directory (default: logs/hw_test)")
     p.add_argument("--no-color",       action="store_true", help="Disable colour output")
+    p.add_argument("--enable-axi-pc",  action="store_true",
+                   help="Build with AMD AXI Protocol Checker on m0_axi (LD0_R = sticky violation flag)")
+    p.add_argument("--force-rebuild",  action="store_true",
+                   help="Force Vivado rebuild even if bitstream exists")
     return p.parse_args()
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -431,7 +471,7 @@ def main():
     log_dir = REPO_ROOT / args.log_dir / ts
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    jobs = args.jobs or os.cpu_count() or 4
+    jobs = args.jobs or 4
 
     banner("axiZero Arty A7-100T Hardware Test Flow")
     info(f"Repo root : {REPO_ROOT}")
@@ -462,10 +502,17 @@ def main():
     else:
         info("Skipping RTL generation (--skip-gen).")
 
-    # ── Step 2: Vivado build ─────────────────────────────────────────────────
+    # ── Step 2: Rename SpinalHDL ports → AXI standard names ──────────────────
+    # Always run (idempotent) — required by create_project.tcl regardless of
+    # whether the user just regenerated the RTL or is reusing an existing file.
+    if not args.skip_build:
+        if not step_rename_ports(log_dir):
+            sys.exit(1)
+
+    # ── Step 3: Vivado build ─────────────────────────────────────────────────
     if not args.skip_build:
         start = time.time()
-        if not step_create_and_build(vivado, log_dir, jobs):
+        if not step_create_and_build(vivado, log_dir, jobs, args.enable_axi_pc, args.force_rebuild):
             sys.exit(1)
         elapsed = time.time() - start
         ok(f"Build completed in {elapsed/60:.1f} minutes.")

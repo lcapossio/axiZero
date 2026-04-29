@@ -37,6 +37,22 @@
 set script_dir [file dirname [file normalize [info script]]]
 set repo_root  [file normalize "$script_dir/../../.."]
 
+## Optional: AMD AXI Protocol Checker integration.
+## Set to 1 to instantiate the checker on the m0_axi interface (axiZero →
+## axi_bram_ctrl_0) and route a sticky violation flag to LD0_R (red).
+## Default OFF — preserves the baseline build exactly.
+##   To enable from the command line:
+##     vivado -mode batch -source create_project.tcl -tclargs 4 1
+##   (first arg = jobs, second arg = enable_axi_pc)
+if {![info exists enable_axi_pc]} {
+    set enable_axi_pc 0
+}
+# Parse tclargs early so the BD section can read enable_axi_pc.
+# First arg = jobs, second arg = enable_axi_pc (both optional).
+if {[info exists argc] && $argc > 1} {
+    set enable_axi_pc [lindex $argv 1]
+}
+
 ## ─── 1. Project creation ────────────────────────────────────────────────────
 set proj_dir "$script_dir/axizero_arty"
 
@@ -255,6 +271,9 @@ connect_bd_net [get_bd_pins proc_sys_reset_0/mb_reset] [get_bd_pins ilmb_bram_if
 connect_bd_net [get_bd_pins proc_sys_reset_0/mb_reset] [get_bd_pins dlmb_bram_if_cntlr_0/LMB_Rst]
 
 ## -- axiZero crossbar (RTL module reference) --
+## NOTE: requires hw/vivado/arty_a7/rename_base_ports.py to have been run
+## on the SpinalHDL output (renames io_masters_0_* → s0_axi_*, clk → aclk,
+## resetn → aresetn).  run_hw_test.py invokes the rename automatically.
 create_bd_cell -type module -reference AxiZeroMixedTop axizero_0
 
 connect_bd_net [get_bd_ports sys_clk] [get_bd_pins axizero_0/aclk]
@@ -411,6 +430,124 @@ safe_net axi_bram_ctrl_0/s_axi_rid axizero_0/m0_axi_rid
 connect_bd_net [get_bd_pins axi_bram_ctrl_0/s_axi_rresp]              [get_bd_pins axizero_0/m0_axi_rresp]
 connect_bd_net [get_bd_pins axi_bram_ctrl_0/s_axi_rlast]              [get_bd_pins axizero_0/m0_axi_rlast]
 
+## ─────────────────────────────────────────────────────────────────────────────
+## OPTIONAL: AMD AXI Protocol Checker on the m0_axi interface
+## ─────────────────────────────────────────────────────────────────────────────
+## When enable_axi_pc=1, instantiate axi_protocol_checker_v2_0 as a passive
+## snoop on every m0_axi signal (axiZero → axi_bram_ctrl_0).  Sticky-latch the
+## OR-reduction of all rule violations and expose it as a top-level output
+## `axi_pc_violation` driving LD0_R (Arty A7-100T RGB LED 0, red).
+##
+## Multi-fanout: the checker's pc_axi_* inputs are driven by the SAME nets that
+## already feed axi_bram_ctrl_0/s_axi_*.  Vivado allows multiple sinks on a net,
+## so this is non-invasive — no signal is rerouted, no functional change.
+if {$enable_axi_pc} {
+    puts "\[axiZero\] AXI Protocol Checker enabled — tapping m0_axi"
+
+    create_bd_cell -type ip -vlnv xilinx.com:ip:axi_protocol_checker:2.0 axi_pc_0
+    # Valid axi_protocol_checker_v2_0 user parameters (from xgui).
+    # Earlier critical-warning-rejected names like HAS_BURST, HAS_LOCK,
+    # HAS_CACHE, HAS_REGION, HAS_QOS, HAS_PROT, ENABLE_XCHECKS are NOT
+    # parameters of THIS IP (they belong to the simulation AXI VIP).
+    # ID_WIDTH must match the actual bus (1 bit on m0_axi: 1 master + 0
+    # masterIndexBits = slaveIdW 1).  A wider ID_WIDTH leaves the upper
+    # bits of pc_axi_*id tied to 0 and corrupts the checker's internal
+    # AW/AR-vs-B/R tracking CAM, producing false positives like
+    # PC_32 AXI_ERRS_BRESP_AW and PC_59 AXI_ERRS_RID.
+    set_property -dict {
+        CONFIG.PROTOCOL          {AXI4}
+        CONFIG.READ_WRITE_MODE   {READ_WRITE}
+        CONFIG.DATA_WIDTH        {32}
+        CONFIG.ADDR_WIDTH        {32}
+        CONFIG.ID_WIDTH          {1}
+        CONFIG.MAX_RD_BURSTS     {16}
+        CONFIG.MAX_WR_BURSTS     {16}
+        CONFIG.PC_MASTER_SIDE    {0}
+        CONFIG.ENABLE_MARK_DEBUG {0}
+    } [get_bd_cells axi_pc_0]
+
+    connect_bd_net [get_bd_ports sys_clk]                            [get_bd_pins axi_pc_0/aclk]
+    # Delay aresetn to the protocol checker by 63 cycles so transient
+    # slave-side outputs during reset deassertion don't trip false
+    # positives like AXI_ERRS_BRESP_AW or AXI_ERRS_RID.  See pc_reset_delay.v.
+    add_files -norecurse "$script_dir/pc_reset_delay.v"
+    set_property file_type {Verilog} [get_files pc_reset_delay.v]
+    update_compile_order -fileset sources_1
+    create_bd_cell -type module -reference pc_reset_delay pc_rst_delay_0
+    connect_bd_net [get_bd_ports sys_clk]                            [get_bd_pins pc_rst_delay_0/clk]
+    connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins pc_rst_delay_0/aresetn_in]
+    connect_bd_net [get_bd_pins pc_rst_delay_0/aresetn_out]          [get_bd_pins axi_pc_0/aresetn]
+
+    # ── Snoop AW ────────────────────────────────────────────────────────────
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_awvalid] [get_bd_pins axi_pc_0/pc_axi_awvalid]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_awready] [get_bd_pins axi_pc_0/pc_axi_awready]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_awaddr]  [get_bd_pins axi_pc_0/pc_axi_awaddr]
+    safe_net axizero_0/m0_axi_awid    axi_pc_0/pc_axi_awid
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_awlen]   [get_bd_pins axi_pc_0/pc_axi_awlen]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_awsize]  [get_bd_pins axi_pc_0/pc_axi_awsize]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_awburst] [get_bd_pins axi_pc_0/pc_axi_awburst]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_awlock]  [get_bd_pins axi_pc_0/pc_axi_awlock]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_awcache] [get_bd_pins axi_pc_0/pc_axi_awcache]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_awprot]  [get_bd_pins axi_pc_0/pc_axi_awprot]
+    safe_net axizero_0/m0_axi_awqos    axi_pc_0/pc_axi_awqos
+    safe_net axizero_0/m0_axi_awregion axi_pc_0/pc_axi_awregion
+
+    # ── Snoop W ─────────────────────────────────────────────────────────────
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_wvalid] [get_bd_pins axi_pc_0/pc_axi_wvalid]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_wready] [get_bd_pins axi_pc_0/pc_axi_wready]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_wdata]  [get_bd_pins axi_pc_0/pc_axi_wdata]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_wstrb]  [get_bd_pins axi_pc_0/pc_axi_wstrb]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_wlast]  [get_bd_pins axi_pc_0/pc_axi_wlast]
+
+    # ── Snoop B ─────────────────────────────────────────────────────────────
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_bvalid] [get_bd_pins axi_pc_0/pc_axi_bvalid]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_bready] [get_bd_pins axi_pc_0/pc_axi_bready]
+    safe_net axizero_0/m0_axi_bid axi_pc_0/pc_axi_bid
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_bresp]  [get_bd_pins axi_pc_0/pc_axi_bresp]
+
+    # ── Snoop AR ────────────────────────────────────────────────────────────
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_arvalid] [get_bd_pins axi_pc_0/pc_axi_arvalid]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_arready] [get_bd_pins axi_pc_0/pc_axi_arready]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_araddr]  [get_bd_pins axi_pc_0/pc_axi_araddr]
+    safe_net axizero_0/m0_axi_arid    axi_pc_0/pc_axi_arid
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_arlen]   [get_bd_pins axi_pc_0/pc_axi_arlen]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_arsize]  [get_bd_pins axi_pc_0/pc_axi_arsize]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_arburst] [get_bd_pins axi_pc_0/pc_axi_arburst]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_arlock]  [get_bd_pins axi_pc_0/pc_axi_arlock]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_arcache] [get_bd_pins axi_pc_0/pc_axi_arcache]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_arprot]  [get_bd_pins axi_pc_0/pc_axi_arprot]
+    safe_net axizero_0/m0_axi_arqos    axi_pc_0/pc_axi_arqos
+    safe_net axizero_0/m0_axi_arregion axi_pc_0/pc_axi_arregion
+
+    # ── Snoop R ─────────────────────────────────────────────────────────────
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_rvalid] [get_bd_pins axi_pc_0/pc_axi_rvalid]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_rready] [get_bd_pins axi_pc_0/pc_axi_rready]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_rdata]  [get_bd_pins axi_pc_0/pc_axi_rdata]
+    safe_net axizero_0/m0_axi_rid axi_pc_0/pc_axi_rid
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_rresp]  [get_bd_pins axi_pc_0/pc_axi_rresp]
+    connect_bd_net [get_bd_pins axizero_0/m0_axi_rlast]  [get_bd_pins axi_pc_0/pc_axi_rlast]
+
+    # ── Sticky-latch helper + LD0_R port + GPIO ch2 readback ───────────────
+    # axi_pc_sticky latches every bit of pc_status[159:0] (one FF per rule)
+    # and exposes a compressed 32-bit "view" suitable for AXI GPIO ch2
+    # readout.  any_violation (OR of all 160 sticky bits) drives LD0_R.
+    add_files -norecurse "$script_dir/axi_pc_sticky.v"
+    set_property file_type {Verilog} [get_files axi_pc_sticky.v]
+    update_compile_order -fileset sources_1
+
+    create_bd_cell -type module -reference axi_pc_sticky axi_pc_sticky_0
+    create_bd_port -dir O axi_pc_violation
+
+    connect_bd_net [get_bd_ports sys_clk]                            [get_bd_pins axi_pc_sticky_0/clk]
+    # Use the SAME delayed aresetn so the sticky FFs don't latch
+    # transients while axi_pc_0 itself is still in held-reset.
+    connect_bd_net [get_bd_pins pc_rst_delay_0/aresetn_out]          [get_bd_pins axi_pc_sticky_0/aresetn]
+    connect_bd_net [get_bd_pins axi_pc_0/pc_status]                  [get_bd_pins axi_pc_sticky_0/pc_status]
+    connect_bd_net [get_bd_pins axi_pc_sticky_0/any_violation]       [get_bd_ports axi_pc_violation]
+    # NB: axi_gpio_0 is wired to gpio2_io_i LATER, after the GPIO is created
+    # in the slave-2 section below.
+}
+
 ## ── axiZero S1 → AXI BRAM Controller 1 ─────────────────────────────────────
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_bram_ctrl:4.1 axi_bram_ctrl_1
 set_property -dict {
@@ -474,11 +611,27 @@ connect_bd_net [get_bd_pins axi_bram_ctrl_1/s_axi_rresp]              [get_bd_pi
 connect_bd_net [get_bd_pins axi_bram_ctrl_1/s_axi_rlast]              [get_bd_pins axizero_0/m1_axi_rlast]
 
 ## ── axiZero S2 → AXI GPIO (AXI-Lite) ────────────────────────────────────────
+## Channel 1: 4 LED outputs (LD4-LD7).
+## Channel 2 is enabled only when enable_axi_pc=1 (added later in this script
+## as 32-bit input wired to the pc_status sticky latches).
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_gpio:2.0 axi_gpio_0
 set_property -dict {
     CONFIG.C_GPIO_WIDTH  {4}
     CONFIG.C_ALL_OUTPUTS {1}
 } [get_bd_cells axi_gpio_0]
+
+# When the protocol checker is enabled, flip the GPIO into dual-channel mode
+# and wire ch2 (32-bit input) to the pc_status sticky bus.  Channel 2 is
+# AXI-mapped at offset 0x08 from the GPIO base, so xsdb can read the
+# violation flags via mrd 0xC0020008.
+if {$enable_axi_pc} {
+    set_property -dict {
+        CONFIG.C_IS_DUAL       {1}
+        CONFIG.C_GPIO2_WIDTH   {32}
+        CONFIG.C_ALL_INPUTS_2  {1}
+    } [get_bd_cells axi_gpio_0]
+    connect_bd_net [get_bd_pins axi_pc_sticky_0/view] [get_bd_pins axi_gpio_0/gpio2_io_i]
+}
 
 connect_bd_net [get_bd_ports sys_clk]                            [get_bd_pins axi_gpio_0/s_axi_aclk]
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins axi_gpio_0/s_axi_aresetn]
@@ -566,6 +719,9 @@ set_property top system_wrapper [current_fileset]
 
 ## ─── 7. Constraints ──────────────────────────────────────────────────────────
 add_files -fileset constrs_1 -norecurse "$script_dir/constraints/arty_a7_100t.xdc"
+if {$enable_axi_pc} {
+    add_files -fileset constrs_1 -norecurse "$script_dir/constraints/arty_a7_100t_pc.xdc"
+}
 
 ## ─── 8. Synthesis and implementation ────────────────────────────────────────
 # Accept -jobs from tclargs (default: 4)
@@ -574,6 +730,7 @@ if {[info exists argc] && $argc > 0} {
 } else {
     set jobs 4
 }
+# enable_axi_pc was parsed earlier (before BD section) — see top of script.
 
 launch_runs synth_1 -jobs $jobs
 wait_on_run synth_1
@@ -582,4 +739,7 @@ wait_on_run impl_1
 
 puts "\n\[axiZero\] Project created at: $proj_dir"
 puts "\[axiZero\] Bitstream generated with $jobs parallel jobs."
+if {$enable_axi_pc} {
+    puts "\[axiZero\] AXI Protocol Checker ENABLED — LD0_R = sticky violation flag."
+}
 puts "\[axiZero\] Software project: sw/arty_a7/  (build with Vitis / xsct)\n"
