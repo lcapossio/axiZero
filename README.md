@@ -487,6 +487,16 @@ All 5 tests pass (g\_fail=0, g\_pass=5).
 | T4 | GPIO LED sweep (AXI-Lite slave path through adapter) |
 | T5 | UART status read (second AXI-Lite slave path) |
 
+### AXI4-Stream smoke test
+
+Topology: MicroBlaze -> axiZero 1M x 5S -> the normal base-test slaves plus a 32-bit AXI GPIO input at `0xC004_0000`.
+
+The GPIO samples a self-running `AxiStreamArtySmoke` datapath:
+
+`3 sources` -> `AxiStreamArbMux` -> `AxiStreamFifo` -> `AxiStreamRegSlice` -> `AxiStreamWidthAdapter` 32-to-8 -> `AxiStreamDemux` -> direct byte sink or `AxiStreamWidthAdapter` 8-to-32 -> `AxiStreamBroadcaster`.
+
+The smoke engine sends three two-beat 32-bit frames, arbitrates between all three sources, unpacks to bytes, routes frame 1 through the repack/broadcast path and frames 0/2 through the direct byte path, deliberately stalls one broadcast sink, then reports done/pass/fail, byte counts, frame counts, checksum matches, route checks, and backpressure observation. The MicroBlaze firmware polls that status through axiZero and passes only when the board-observed status has `done=1`, `pass=1`, `fail=0`, the expected counts/checksums/frame boundaries match, and backpressure was actually seen.
+
 ### Running HW tests
 
 All four test runners auto-detect Vivado, xsdb, and mb-gcc by searching `PATH` and common AMD/Xilinx install locations (Windows and Linux). Override with environment variables if needed:
@@ -497,6 +507,7 @@ python hw/vivado/arty_a7/run_wrr_test.py
 python hw/vivado/arty_a7/run_qos_test.py
 python hw/vivado/arty_a7/run_qos_stress_test.py
 python hw/vivado/arty_a7/run_axi3_test.py
+python hw/vivado/arty_a7/run_axis_test.py
 
 # Override tool paths via env vars
 VIVADO_BIN=/opt/Xilinx/2025.2/Vivado/bin/vivado \
