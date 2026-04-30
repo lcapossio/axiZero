@@ -28,6 +28,7 @@ Hardware-validated on Xilinx Arty A7-100T. 93 SpinalSim + 27 cocotb tests pass.
   - [Arbitration modes](#arbitration-modes)
   - [Data-width conversion](#data-width-conversion)
   - [Pipelined vs blocking mode](#pipelined-vs-blocking-mode)
+  - [AXI4-Stream utility cores](#axi4-stream-utility-cores)
 - [Simulation](#simulation)
   - [SpinalSim (unit tests)](#spinalsim-unit-tests-run-with-sbt)
   - [cocotb (integration tests)](#cocotb-integration-tests-against-pre-built-verilog-run-with-python)
@@ -57,6 +58,8 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - IPIF compatibility — AW and W are presented simultaneously to slaves that require it
 - YAML → Verilog generator with port-name post-processing for Vivado AXI naming conventions
 - AXI3-to-AXI4 bridge adapter with WID reorder buffer (write interleaving → strict AW-order), locked access conversion, LEN/LOCK field adaptation
+
+- Standalone AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster
 
 **Not yet implemented:**
 
@@ -294,6 +297,65 @@ When a port's `data_width` differs from `fabric_data_width`, the generator inser
 | `> 1` | Pipelined | Per-slave W-route FIFOs, ID-based B/R response routing. Multiple transactions can be in flight simultaneously to different slaves. Required for high-throughput designs. |
 
 Only affects the Full AXI4 crossbar. The Lite-only crossbar is always single-outstanding (blocking).
+
+### AXI4-Stream utility cores
+
+Standalone AXI4-Stream cores use `kind: axis` in the YAML generator. They do not use `masters`, `slaves`, address maps, or memory-mapped arbitration settings.
+
+Common keys:
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `kind` | string | *required* | Set to `axis`. |
+| `core` | string | *required* | `reg_slice`, `width_adapter`, `fifo`, `arb_mux`, `demux`, or `broadcaster`. |
+| `data_width` | int | *required except width adapter* | AXIS `TDATA` width in bits. Must be byte-aligned. |
+| `input_data_width` | int | *width adapter only* | Input `TDATA` width in bits. |
+| `output_data_width` | int | *width adapter only* | Output `TDATA` width in bits. |
+| `use_keep` / `use_strb` / `use_last` | bool | `true` | Enable `TKEEP`, `TSTRB`, and `TLAST`. Packet mux/demux require `use_last: true`. |
+| `id_width` / `dest_width` / `user_width` | int | `0` | Sideband widths. `use_id`, `use_dest`, and `use_user` default to true when the matching width is non-zero. |
+
+Core-specific keys:
+
+| Core | Extra keys | Behavior |
+|---|---|---|
+| `reg_slice` | none | One-stage ready/valid register slice for timing closure. |
+| `width_adapter` | `input_data_width`, `output_data_width` | Packs or unpacks byte streams between different `TDATA` widths. |
+| `fifo` | `depth` | Elastic FIFO storing full AXIS beats, including enabled sidebands. `depth` must be at least 2. |
+| `arb_mux` | `inputs`, `arbitration` | N-to-1 packet arbiter/mux. `arbitration` is `round_robin` or `fixed_priority`; ownership is held until `TLAST`. |
+| `demux` | `outputs` | 1-to-N packet demux. The explicit `select` input is sampled at packet start and held until `TLAST`. |
+| `broadcaster` | `outputs` | 1-to-N synchronous broadcaster. A beat is accepted only when every output accepts it. |
+
+Example:
+
+```yaml
+designs:
+  - name: MyAxisFifo
+    kind: axis
+    core: fifo
+    data_width: 32
+    depth: 16
+    use_keep: true
+    use_last: true
+
+  - name: MyAxisMux_2To1
+    kind: axis
+    core: arb_mux
+    data_width: 32
+    inputs: 2
+    arbitration: round_robin
+    use_keep: true
+    use_last: true
+
+  - name: MyAxisDemux_1To2
+    kind: axis
+    core: demux
+    data_width: 32
+    outputs: 2
+    use_keep: true
+    use_last: true
+```
+
+Generated ports are renamed to AXI4-Stream style: `s_axis_t*` and `m_axis_t*` for single-input/single-output cores, `s0_axis_t*`/`s1_axis_t*` for vector inputs, and `m0_axis_t*`/`m1_axis_t*` for vector outputs. The demux selector is emitted as `select`.
 
 Full example with all options: [`scripts/example.yaml`](scripts/example.yaml).
 

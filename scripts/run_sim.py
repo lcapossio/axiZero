@@ -148,6 +148,10 @@ def _run_axis_generator_smoke() -> int:
     yaml_path = smoke_dir / "axis_smoke.yaml"
     smoke_dir.mkdir(parents=True, exist_ok=True)
     rtl_dir.mkdir(parents=True, exist_ok=True)
+    for name in _AXIS_SMOKE_NAMES:
+        stale = rtl_dir / f"{name}.v"
+        if stale.exists():
+            stale.unlink()
     yaml_path.write_text(_AXIS_SMOKE_YAML, encoding="utf-8")
 
     if platform.system() == "Windows":

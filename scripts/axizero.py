@@ -929,6 +929,13 @@ EXAMPLE_YAML = textwrap.dedent("""\
       # AXI Stream cores use kind: axis and do not have address maps.
       # Supported core values: reg_slice, width_adapter, fifo, arb_mux, demux, broadcaster.
       #
+      - name: MyAxisRegSlice
+        kind: axis
+        core: reg_slice
+        data_width: 32
+        use_keep: true
+        use_last: true
+
       - name: MyAxisFifo
         kind: axis
         core: fifo
@@ -949,6 +956,14 @@ EXAMPLE_YAML = textwrap.dedent("""\
       - name: MyAxisDemux_1To2
         kind: axis
         core: demux
+        data_width: 32
+        outputs: 2
+        use_keep: true
+        use_last: true
+
+      - name: MyAxisBroadcaster_1To2
+        kind: axis
+        core: broadcaster
         data_width: 32
         outputs: 2
         use_keep: true

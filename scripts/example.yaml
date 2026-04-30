@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT
+
 # axiZero interconnect configuration
 # Run with: python axizero.py generate example.yaml
 
@@ -163,5 +166,56 @@ designs:
         size: 0x1000        # GPIO — AXI4-Lite
         data_width: 32
         type: lite
-# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
-# SPDX-License-Identifier: MIT
+
+  # ── Example 7: standalone AXI4-Stream utility cores ─────────────────────
+  #
+  # AXI Stream cores use kind: axis and do not have address maps.
+  # Supported core values: reg_slice, width_adapter, fifo, arb_mux, demux, broadcaster.
+  #
+  - name: MyAxisRegSlice
+    kind: axis
+    core: reg_slice
+    data_width: 32
+    use_keep: true
+    use_last: true
+
+  - name: MyAxisWidth_8To32
+    kind: axis
+    core: width_adapter
+    input_data_width: 8
+    output_data_width: 32
+    use_keep: true
+    use_last: true
+
+  - name: MyAxisFifo
+    kind: axis
+    core: fifo
+    data_width: 32
+    depth: 16
+    use_keep: true
+    use_last: true
+
+  - name: MyAxisMux_2To1
+    kind: axis
+    core: arb_mux
+    data_width: 32
+    inputs: 2
+    arbitration: round_robin
+    use_keep: true
+    use_last: true
+
+  - name: MyAxisDemux_1To2
+    kind: axis
+    core: demux
+    data_width: 32
+    outputs: 2
+    use_keep: true
+    use_last: true
+
+  - name: MyAxisBroadcaster_1To2
+    kind: axis
+    core: broadcaster
+    data_width: 32
+    outputs: 2
+    use_keep: true
+    use_last: true
