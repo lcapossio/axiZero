@@ -16,6 +16,7 @@ MicroBlaze C test program for the axiZero 1M×4S hardware test.
 | T8   | UART Lite TX FIFO reset + banner via AXI Lite (S3) |
 | T9   | Full 64 KB BRAM #0 checkerboard (AA/55) |
 | T10  | Cross-slave boundary: last word B0 / first word B1 |
+| AXIS | AXI4-Stream smoke status poll via GPIO at `0xC004_0000` |
 
 Pass: all 4 LEDs on.  Fail: LD7 blinks.
 
@@ -26,6 +27,7 @@ Pass: all 4 LEDs on.  Fail: LD7 blinks.
 0xC001_0000  AXI BRAM #1   64 KB (S1, Full AXI4)
 0xC002_0000  AXI GPIO       4 KB (S2, AXI Lite)
 0xC003_0000  AXI UART Lite  4 KB (S3, AXI Lite)
+0xC004_0000  AXIS status    4 KB (S4, AXI GPIO input, AXIS smoke design only)
 ```
 
 ## Building in Vitis (2025.2)
