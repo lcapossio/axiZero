@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 85 SpinalSim + 27 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 93 SpinalSim + 27 cocotb tests pass.
 
 ---
 
@@ -309,7 +309,13 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-85 tests pass across 15 suites:
+93 tests pass across 16 suites:
+
+For the focused AXI4-Stream loop, including lint and YAML generator smoke tests:
+
+```bash
+python3 scripts/run_sim.py axis
+```
 
 | Suite | Tests | Description |
 |---|---|---|
@@ -328,6 +334,7 @@ sbt test
 | `QosStressShortSpec` | 1 | Short 4-master QoS stress: distinct patterns (sequential, reverse, sparse, random short bursts), concurrent traffic, end-state validation |
 | `Axi3ToAxi4Spec` | 5 | AXI3→AXI4 bridge: single-beat, INCR burst, write interleaving (WID reorder), locked→SLVERR, multiple outstanding |
 | `Axi3MixedCrossbarSpec` | 4 | Axi3Mode auto-adapter: single-beat to full slave, single-beat to Lite slave, routing to both, 4-beat INCR burst |
+| `AxiStreamCoreSpec` | 8 | AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster |
 
 ### cocotb (integration tests against pre-built Verilog, run with Python)
 
@@ -535,6 +542,8 @@ hw/spinal/axizero/
     WidthConverter.scala       # Lite and Full AXI4 data-width conversion
     Axi4DownsizerExt.scala     # fork of SpinalHDL Axi4Downsizer; FIXED/WRAP flattened, INCR multi-beat
     Axi3ToAxi4Adapter.scala    # AXI3→AXI4 bridge: WID reorder buffer, locked access conversion
+  stream/
+    AxiStreamCores.scala       # AXI4-Stream reg slice, width adapter, FIFO, arb-mux, demux, broadcaster
   gen/
     AxiZeroGen.scala           # built-in generation entry point
     ArtyDutGen.scala           # Arty A7 DUT (1M×4S)
