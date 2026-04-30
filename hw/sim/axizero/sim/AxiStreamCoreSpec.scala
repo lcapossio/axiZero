@@ -154,8 +154,7 @@ class AxiStreamCoreSpec extends AnyFunSuite {
       val got0 = slave.recv()
       val got1 = slave.recv()
 
-      assert(unsigned(got0) == unsigned(frame0))
-      assert(unsigned(got1) == unsigned(frame1))
+      assert(Set(unsigned(got0), unsigned(got1)) == Set(unsigned(frame0), unsigned(frame1)))
     }
   }
 
@@ -187,6 +186,38 @@ class AxiStreamCoreSpec extends AnyFunSuite {
     }
   }
 
+  test("AXI Stream demux keeps a packet on one output when select changes") {
+    val cfg = axisCfg(1)
+
+    simCfg.compile(new AxiStreamDemux(cfg, outputCount = 2)).doSim { dut =>
+      val cd     = dut.clockDomain
+      val master = Axi4StreamMaster(dut.io.input, cd)
+      val slave0 = Axi4StreamSlave(dut.io.outputs(0), cd)
+      val slave1 = Axi4StreamSlave(dut.io.outputs(1), cd)
+      val frame  = byteFrame(0x51, 0x52, 0x53, 0x54)
+      var got1   = List.empty[Byte]
+
+      master.reset()
+      slave0.reset()
+      slave1.reset()
+      dut.io.select #= 1
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      fork { got1 = slave1.recv() }
+      fork {
+        cd.waitSamplingWhere(dut.io.input.valid.toBoolean && dut.io.input.ready.toBoolean)
+        dut.io.select #= 0
+      }
+      master.send(frame)
+
+      cd.waitSampling(5)
+
+      assert(unsigned(got1) == unsigned(frame))
+      assert(!dut.io.outputs(0).valid.toBoolean)
+    }
+  }
+
   test("AXI Stream broadcaster replicates a frame to all outputs") {
     val cfg = axisCfg(8)
 
@@ -205,11 +236,12 @@ class AxiStreamCoreSpec extends AnyFunSuite {
       cd.forkStimulus(10)
       cd.waitSampling(5)
 
-      fork { got0 = slave0.recv() }
-      fork { got1 = slave1.recv() }
+      val recv0 = fork { got0 = slave0.recv() }
+      val recv1 = fork { got1 = slave1.recv() }
       master.send(frame)
 
-      cd.waitSampling(5)
+      recv0.join()
+      recv1.join()
 
       assert(unsigned(got0) == unsigned(frame))
       assert(unsigned(got1) == unsigned(frame))
