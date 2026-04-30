@@ -28,3 +28,5 @@ prep -top write_response_props
 [files]
 write_response_props.sv
 ../generated/MyFull_2M2S.v
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT

@@ -31,3 +31,5 @@ sim:
 clean:
 	$(MAKE) -f $$(cocotb-config --makefiles)/Makefile.sim clean
 	rm -rf sim_build __pycache__ results.xml dump.vcd
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT

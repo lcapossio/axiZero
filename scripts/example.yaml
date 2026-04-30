@@ -163,3 +163,5 @@ designs:
         size: 0x1000        # GPIO — AXI4-Lite
         data_width: 32
         type: lite
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT
