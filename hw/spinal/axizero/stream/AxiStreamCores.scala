@@ -149,6 +149,49 @@ class AxiStreamArbMux(
   }
 }
 
+/** 1-to-N AXI4-Stream packet demux.
+  *
+  * The select input is sampled on the first transferred beat of a packet and held until TLAST, so a
+  * packet always exits on one output even if select changes mid-frame.
+  */
+class AxiStreamDemux(config: Axi4StreamConfig, outputCount: Int) extends Component {
+  require(outputCount >= 1, "AxiStreamDemux requires at least one output")
+  require(config.useLast, "AxiStreamDemux requires TLAST so packet ownership can be locked")
+
+  private val selWidth = log2Up(outputCount max 2)
+
+  val io = new Bundle {
+    val input   = slave(Axi4Stream(config))
+    val select  = in UInt (selWidth bits)
+    val outputs = Vec(master(Axi4Stream(config)), outputCount)
+  }
+
+  val active = RegInit(False)
+  val owner  = RegInit(U(0, selWidth bits))
+  val selIdx = UInt(selWidth bits)
+  selIdx := Mux(active, owner, io.select)
+
+  io.input.ready := False
+  for (i <- 0 until outputCount) {
+    io.outputs(i).valid := False
+    io.outputs(i).payload.clearAll()
+    when(selIdx === i) {
+      io.outputs(i).valid   := io.input.valid
+      io.outputs(i).payload := io.input.payload
+      io.input.ready        := io.outputs(i).ready
+    }
+  }
+
+  when(!active && io.input.fire) {
+    owner := io.select
+    when(!io.input.last) {
+      active := True
+    }
+  } elsewhen (active && io.input.fire && io.input.last) {
+    active := False
+  }
+}
+
 /** 1-to-N AXI4-Stream broadcaster.
   *
   * Each input beat is accepted only when every output has accepted that beat, so all downstream

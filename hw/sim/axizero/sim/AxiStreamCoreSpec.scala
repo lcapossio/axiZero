@@ -159,6 +159,34 @@ class AxiStreamCoreSpec extends AnyFunSuite {
     }
   }
 
+  test("AXI Stream demux forwards a frame to the selected output") {
+    val cfg = axisCfg(8)
+
+    simCfg.compile(new AxiStreamDemux(cfg, outputCount = 2)).doSim { dut =>
+      val cd     = dut.clockDomain
+      val master = Axi4StreamMaster(dut.io.input, cd)
+      val slave0 = Axi4StreamSlave(dut.io.outputs(0), cd)
+      val slave1 = Axi4StreamSlave(dut.io.outputs(1), cd)
+      val frame  = byteFrame(0x41, 0x42, 0x43)
+      var got1   = List.empty[Byte]
+
+      master.reset()
+      slave0.reset()
+      slave1.reset()
+      dut.io.select #= 1
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      fork { got1 = slave1.recv() }
+      master.send(frame)
+
+      cd.waitSampling(5)
+
+      assert(unsigned(got1) == unsigned(frame))
+      assert(!dut.io.outputs(0).valid.toBoolean)
+    }
+  }
+
   test("AXI Stream broadcaster replicates a frame to all outputs") {
     val cfg = axisCfg(8)
 

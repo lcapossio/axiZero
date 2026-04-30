@@ -152,6 +152,13 @@ object GenHelper {
     println(s"[axiZero] Done -> generated/$name.v")
   }
 
+  def axisDemux(cfg: Axi4StreamConfig, outputCount: Int, name: String): Unit = {
+    println(s"\n[axiZero] Generating $name ...")
+    spinalCfg(name).generateVerilog(new AxiStreamDemux(cfg, outputCount))
+    prependCopyright(java.nio.file.Paths.get("generated", s"$name.v"))
+    println(s"[axiZero] Done -> generated/$name.v")
+  }
+
   def axisBroadcaster(cfg: Axi4StreamConfig, outputCount: Int, name: String): Unit = {
     println(s"\n[axiZero] Generating $name ...")
     spinalCfg(name).generateVerilog(new AxiStreamBroadcaster(cfg, outputCount))

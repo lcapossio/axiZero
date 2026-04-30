@@ -140,6 +140,7 @@ AXIS_CORES = {
     "width_adapter",
     "fifo",
     "arb_mux",
+    "demux",
     "broadcaster",
 }
 
@@ -258,6 +259,9 @@ def _validate_axis_design(d: dict, tag: str):
         if not isinstance(depth, int) or depth < 2:
             _err(f"{tag}: 'depth' must be an integer >= 2 for AXI Stream fifo")
 
+    if core in ("arb_mux", "demux") and not d.get("use_last", True):
+        _err(f"{tag}: AXI Stream {core} requires use_last: true for packet locking")
+
     if core == "arb_mux":
         inputs = d.get("inputs", d.get("input_count"))
         if not isinstance(inputs, int) or inputs < 1:
@@ -266,10 +270,10 @@ def _validate_axis_design(d: dict, tag: str):
         if arb not in AXIS_ARBITRATION_MAP:
             _err(f"{tag}: AXI Stream arbitration must be one of: {', '.join(AXIS_ARBITRATION_MAP)}")
 
-    if core == "broadcaster":
+    if core in ("demux", "broadcaster"):
         outputs = d.get("outputs", d.get("output_count"))
         if not isinstance(outputs, int) or outputs < 1:
-            _err(f"{tag}: 'outputs' must be a positive integer for AXI Stream broadcaster")
+            _err(f"{tag}: 'outputs' must be a positive integer for AXI Stream {core}")
 
     for key in ("id_width", "dest_width", "user_width"):
         value = d.get(key, 0)
@@ -415,6 +419,16 @@ def _gen_axis_design_block(d: dict) -> str:
             locally {{
               val cfg = {_axis_config(d)}
               GenHelper.axisArbMux(cfg, {inputs}, {arb}, "{name}")
+            }}
+        """)
+
+    if core == "demux":
+        outputs = d.get("outputs", d.get("output_count"))
+        return textwrap.dedent(f"""\
+            // -- {name} --
+            locally {{
+              val cfg = {_axis_config(d)}
+              GenHelper.axisDemux(cfg, {outputs}, "{name}")
             }}
         """)
 
@@ -691,6 +705,8 @@ def _rename_to_axi(verilog: str) -> str:
 def _rename_to_axis(verilog: str) -> str:
     """Rename SpinalHDL AXI Stream ports to tvalid/tready/tdata style names."""
 
+    verilog = re.sub(r'\bio_select\b', 'select', verilog)
+
     def _replace_single(m):
         side, signal = m.group(1), m.group(2)
         axis_sig = _AXIS_SIGNAL.get(signal)
@@ -911,7 +927,7 @@ EXAMPLE_YAML = textwrap.dedent("""\
       # ── Example 6: standalone AXI4-Stream utility cores ───────────────────
       #
       # AXI Stream cores use kind: axis and do not have address maps.
-      # Supported core values: reg_slice, width_adapter, fifo, arb_mux, broadcaster.
+      # Supported core values: reg_slice, width_adapter, fifo, arb_mux, demux, broadcaster.
       #
       - name: MyAxisFifo
         kind: axis
@@ -927,6 +943,14 @@ EXAMPLE_YAML = textwrap.dedent("""\
         data_width: 32
         inputs: 2
         arbitration: round_robin
+        use_keep: true
+        use_last: true
+
+      - name: MyAxisDemux_1To2
+        kind: axis
+        core: demux
+        data_width: 32
+        outputs: 2
         use_keep: true
         use_last: true
 
