@@ -13,7 +13,19 @@ volatile uint32_t g_axis_status = 0;
 #define AXIS_DONE       (1u << 0)
 #define AXIS_PASS       (1u << 1)
 #define AXIS_FAIL       (1u << 2)
-#define AXIS_EXPECTED   0x000007FBu
+#define AXIS_DEMUX0_BYTES_OK      (1u << 3)
+#define AXIS_DEMUX1_BYTES_OK      (1u << 4)
+#define AXIS_BCAST0_BEATS_OK      (1u << 5)
+#define AXIS_BCAST1_BEATS_OK      (1u << 6)
+#define AXIS_SUMS_OK              (1u << 7)
+#define AXIS_FRAMES_OK            (1u << 8)
+#define AXIS_BACKPRESSURE_SEEN    (1u << 9)
+#define AXIS_ROUTE_OK             (1u << 10)
+#define AXIS_DETAIL_MASK          0x000007FFu
+#define AXIS_EXPECTED \
+    (AXIS_DONE | AXIS_PASS | AXIS_DEMUX0_BYTES_OK | AXIS_DEMUX1_BYTES_OK | \
+     AXIS_BCAST0_BEATS_OK | AXIS_BCAST1_BEATS_OK | AXIS_SUMS_OK | \
+     AXIS_FRAMES_OK | AXIS_BACKPRESSURE_SEEN | AXIS_ROUTE_OK)
 #define AXIS_STATUS     (*(volatile uint32_t *)(AXIS_STATUS_BASEADDR + GPIO_DATA_OFF))
 
 static void pass(const char *name)
@@ -52,13 +64,18 @@ static void test_axis_smoke(void)
     uart_hex32(status);
     uart_puts("\n");
 
+    if (!(status & AXIS_DONE)) {
+        fail("AXI4-Stream smoke timeout", status, AXIS_DONE);
+        return;
+    }
+
     if ((status & (AXIS_DONE | AXIS_PASS | AXIS_FAIL)) != (AXIS_DONE | AXIS_PASS)) {
         fail("AXI4-Stream smoke status bits", status, AXIS_EXPECTED);
         return;
     }
 
-    if ((status & 0x000007FFu) != AXIS_EXPECTED) {
-        fail("AXI4-Stream smoke detail bits", status & 0x000007FFu, AXIS_EXPECTED);
+    if ((status & AXIS_DETAIL_MASK) != AXIS_EXPECTED) {
+        fail("AXI4-Stream smoke detail bits", status & AXIS_DETAIL_MASK, AXIS_EXPECTED);
         return;
     }
 
