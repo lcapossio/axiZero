@@ -91,6 +91,11 @@ AXIS_RUNS = {
         "toplevel": "AxiStreamWidthAdapter",
         "module": "test_axis_width",
     },
+    "axis_fifo": {
+        "rtl_name": "SmokeAxisFifo",
+        "toplevel": "AxiStreamFifo",
+        "module": "test_axis_fifo",
+    },
     "axis_mux": {
         "rtl_name": "SmokeAxisMux_2To1",
         "toplevel": "AxiStreamArbMux",
@@ -213,10 +218,6 @@ def generate_axis_rtl():
         generated = REPO_ROOT / "generated" / f"{cfg['rtl_name']}.v"
         if generated.exists():
             generated.unlink()
-    generated_fifo = REPO_ROOT / "generated" / "SmokeAxisFifo.v"
-    if generated_fifo.exists():
-        generated_fifo.unlink()
-
     return rtl_dir
 
 
