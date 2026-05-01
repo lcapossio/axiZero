@@ -1,0 +1,29 @@
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT
+
+name: Set up Java and sbt
+description: Install Java 21 and a pinned sbt launcher for axiZero CI jobs.
+
+inputs:
+  sbt-version:
+    description: sbt launcher version to install.
+    required: false
+    default: 1.9.9
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Java 21
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: 21
+        cache: sbt
+
+    - name: Install sbt
+      shell: bash
+      run: |
+        wget -qO /tmp/sbt.tgz \
+          "https://github.com/sbt/sbt/releases/download/v${{ inputs.sbt-version }}/sbt-${{ inputs.sbt-version }}.tgz"
+        sudo tar -xzf /tmp/sbt.tgz -C /usr/local
+        echo "/usr/local/sbt/bin" >> "$GITHUB_PATH"
