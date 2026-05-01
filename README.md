@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 95 SpinalSim + 32 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 96 SpinalSim + 33 cocotb tests pass.
 
 ---
 
@@ -373,7 +373,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-95 tests pass across 16 suites:
+96 tests pass across 16 suites:
 
 For the focused AXI4-Stream loop, including lint, YAML generator smoke tests, and cocotbext-axi generated-RTL tests:
 
@@ -397,7 +397,7 @@ python3 scripts/run_sim.py axis
 | `QosCrossbarSpec` | 5 | QoS arbitration: higher AWQOS/ARQOS wins (blocking + pipelined), equal-QoS round-robin tie-break, aging anti-starvation |
 | `QosStressShortSpec` | 1 | Short 4-master QoS stress: distinct patterns (sequential, reverse, sparse, random short bursts), concurrent traffic, end-state validation |
 | `Axi3ToAxi4Spec` | 5 | AXI3→AXI4 bridge: single-beat, INCR burst, write interleaving (WID reorder), locked→SLVERR, multiple outstanding |
-| `Axi3MixedCrossbarSpec` | 4 | Axi3Mode auto-adapter: single-beat to full slave, single-beat to Lite slave, routing to both, 4-beat INCR burst |
+| `Axi3MixedCrossbarSpec` | 5 | Axi3Mode auto-adapter: single-beat to full slave, single-beat to Lite slave, routing to both, 4-beat INCR burst, register-sliced path |
 | `AxiStreamCoreSpec` | 10 | AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster, sparse TKEEP/TSTRB/TLAST edge cases |
 
 ### cocotb (integration tests against pre-built Verilog, run with Python)
@@ -406,16 +406,16 @@ Tests the generated Verilog files directly using [cocotbext-axi](https://github.
 
 ```bash
 # requires: pip install cocotb cocotbext-axi
-python3 sim/cocotb_gen/run_all.py          # all prebuilt-Verilog suites
+python3 sim/cocotb_gen/run_all.py          # all cocotb suites
 python3 sim/cocotb_gen/run_all.py lite     # MyLite_1M4S.v only
 python3 sim/cocotb_gen/run_all.py full     # MyFull_2M2S.v only
 python3 sim/cocotb_gen/run_all.py wrr      # MyLite_2M2S_WRR.v only
 python3 sim/cocotb_gen/run_all.py qos      # MyFull_2M2S_QoS.v only
 python3 sim/cocotb_gen/run_all.py ipif     # MyLite_1M4S.v IPIF slave only
-python3 scripts/run_sim.py axis            # generated AXI4-Stream cocotb suite
+python3 sim/cocotb_gen/run_all.py axis     # generated AXI4-Stream cocotb suite
 ```
 
-32 tests pass across 6 suites:
+33 tests pass across 6 suites:
 
 | Suite | DUT | Tests | Description |
 |---|---|---|---|
@@ -423,7 +423,7 @@ python3 scripts/run_sim.py axis            # generated AXI4-Stream cocotb suite
 | `full` | `MyFull_2M2S.v` | 6 | AxiMaster → 2-slave crossbar: single R/W, address routing + isolation, 16-beat burst, 64-beat burst (AWLEN=63), alternating slaves, 40× random |
 | `wrr` | `MyLite_2M2S_WRR.v` | 6 | 2-master WRR crossbar: dual-master R/W, address routing, concurrent bandwidth, no starvation, concurrent different slaves, 80× random |
 | `qos` | `MyFull_2M2S_QoS.v` | 6 | 2-master QoS crossbar: dual-master R/W, address routing, higher QoS wins contention, equal-QoS round-robin, aging anti-starvation, QoS read priority |
-| `ipif` | `MyLite_1M4S.v` | 3 | IPIF slave compatibility: strict IpifRam model requires AWVALID+WVALID simultaneously, routing unaffected |
+| `ipif` | `MyLite_1M4S.v` | 4 | IPIF slave compatibility: strict IpifRam model requires AWVALID+WVALID simultaneously, routing unaffected |
 | `axis` | generated AXI4-Stream cores | 5 | cocotbext-axi stream BFM tests for reg slice, width adapter, arb-mux, demux, broadcaster |
 
 ---
@@ -628,7 +628,7 @@ hw/spinal/axizero/
     ArtyAxi3DutGen.scala       # Arty A7 AXI3 adapter DUT (AXI4→AXI3→AXI4→crossbar)
 hw/sim/axizero/sim/            # SpinalSim testbenches (sbt test)
 sim/cocotb_gen/
-  run_all.py                   # Python runner (lite + full suites)
+  run_all.py                   # Python runner (lite + full + wrr + qos + ipif + axis suites)
   lite/test_lite.py            # AxiLiteMaster tests against MyLite_1M4S.v
   full/test_full.py            # AxiMaster tests against MyFull_2M2S.v
 scripts/
