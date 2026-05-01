@@ -44,8 +44,12 @@ class AxiStreamArtySmoke extends Component {
   private val src1Beat = RegInit(False)
   private val src2Beat = RegInit(False)
 
-  src0.valid        := !src0Sent
-  src0.payload.data := Mux(src0Beat, B(BigInt("17161514", 16), 32 bits), B(BigInt("13121110", 16), 32 bits))
+  src0.valid := !src0Sent
+  src0.payload.data := Mux(
+    src0Beat,
+    B(BigInt("17161514", 16), 32 bits),
+    B(BigInt("13121110", 16), 32 bits)
+  )
   src0.payload.strb := B"4'b1111"
   src0.payload.keep := B"4'b1111"
   src0.payload.last := src0Beat
@@ -57,8 +61,12 @@ class AxiStreamArtySmoke extends Component {
     }
   }
 
-  src1.valid        := !src1Sent
-  src1.payload.data := Mux(src1Beat, B(BigInt("27262524", 16), 32 bits), B(BigInt("23222120", 16), 32 bits))
+  src1.valid := !src1Sent
+  src1.payload.data := Mux(
+    src1Beat,
+    B(BigInt("27262524", 16), 32 bits),
+    B(BigInt("23222120", 16), 32 bits)
+  )
   src1.payload.strb := B"4'b1111"
   src1.payload.keep := B"4'b1111"
   src1.payload.last := src1Beat
@@ -70,8 +78,12 @@ class AxiStreamArtySmoke extends Component {
     }
   }
 
-  src2.valid        := !src2Sent
-  src2.payload.data := Mux(src2Beat, B(BigInt("37363534", 16), 32 bits), B(BigInt("33323130", 16), 32 bits))
+  src2.valid := !src2Sent
+  src2.payload.data := Mux(
+    src2Beat,
+    B(BigInt("37363534", 16), 32 bits),
+    B(BigInt("33323130", 16), 32 bits)
+  )
   src2.payload.strb := B"4'b1111"
   src2.payload.keep := B"4'b1111"
   src2.payload.last := src2Beat
@@ -110,7 +122,7 @@ class AxiStreamArtySmoke extends Component {
   repack.io.input <> demux.io.outputs(1)
   broadcast.io.input <> repack.io.output
   private val stallCounter = RegInit(U(0, 2 bits))
-  stallCounter := stallCounter + 1
+  stallCounter                  := stallCounter + 1
   broadcast.io.outputs(0).ready := True
   broadcast.io.outputs(1).ready := stallCounter =/= 0
 
@@ -203,19 +215,19 @@ class AxiStreamArtySmoke extends Component {
   private val done = pass || timeout.andR
   private val fail = done && !pass
 
-  io.status := B(0, 32 bits)
-  io.status(0)             := done
-  io.status(1)             := pass
-  io.status(2)             := fail
-  io.status(3)             := demux0BytesOk
-  io.status(4)             := demux1BytesOk
-  io.status(5)             := bcast0BeatsOk
-  io.status(6)             := bcast1BeatsOk
-  io.status(7)             := sumsOk
-  io.status(8)             := framesOk
-  io.status(9)             := backpressureSeen
-  io.status(10)            := routeOk
-  io.status(15 downto 11)  := packetIndex.asBits.resized
-  io.status(23 downto 16)  := demux0Bytes.asBits
-  io.status(31 downto 24)  := demux1Bytes.asBits
+  io.status               := B(0, 32 bits)
+  io.status(0)            := done
+  io.status(1)            := pass
+  io.status(2)            := fail
+  io.status(3)            := demux0BytesOk
+  io.status(4)            := demux1BytesOk
+  io.status(5)            := bcast0BeatsOk
+  io.status(6)            := bcast1BeatsOk
+  io.status(7)            := sumsOk
+  io.status(8)            := framesOk
+  io.status(9)            := backpressureSeen
+  io.status(10)           := routeOk
+  io.status(15 downto 11) := packetIndex.asBits.resized
+  io.status(23 downto 16) := demux0Bytes.asBits
+  io.status(31 downto 24) := demux1Bytes.asBits
 }
