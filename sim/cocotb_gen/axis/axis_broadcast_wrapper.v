@@ -1,6 +1,10 @@
 // Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
 // SPDX-License-Identifier: MIT
-// Clocked cocotb wrapper for the combinational AXI4-Stream broadcaster core.
+// Clocked cocotb wrapper for axizero.stream.AxiStreamBroadcaster.
+//
+// AxiStreamBroadcaster is combinational and intentionally has no clock/reset
+// ports, while cocotbext-axi stream BFMs are clocked. Keep this port list in
+// lockstep with the generated AxiStreamBroadcaster wrapper port naming.
 
 `timescale 1ns/1ps
 
