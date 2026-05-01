@@ -12,8 +12,8 @@ case object AxisFixedPriority extends AxiStreamArbitrationPolicy
 
 /** One-stage AXI4-Stream register slice.
   *
-  * This is the streaming equivalent of the memory-mapped AXI register slices: it preserves payload
-  * sideband fields while registering the ready/valid path for timing closure.
+  * This is a full one-beat stream pipeline stage: TVALID and all payload sideband fields are
+  * registered, while TREADY is driven from the downstream stage through SpinalHDL's stage helper.
   */
 class AxiStreamRegSlice(config: Axi4StreamConfig) extends Component {
   val io = new Bundle {
@@ -82,28 +82,12 @@ class AxiStreamArbMux(
 
   private def firstOh(requests: Bits): Bits = OHMasking.first(requests)
 
-  private def roundRobinOh(requests: Bits, ptr: UInt): Bits = {
-    val maskLow = Bits(inputCount bits)
-    maskLow := B(0, inputCount bits)
-    for (i <- 1 until inputCount) {
-      when(ptr >= U(i, ptrWidth bits)) {
-        maskLow := B((BigInt(1) << i) - 1, inputCount bits)
-      }
-    }
-    val masked = requests & ~maskLow
-    Mux(masked.orR, OHMasking.first(masked), OHMasking.first(requests))
-  }
+  private def roundRobinOh(requests: Bits, ptr: UInt): Bits =
+    if (inputCount == 1) requests
+    else OHMasking.roundRobin(requests, (U(1, inputCount bits) |<< ptr).asBits)
 
-  private def ohToIdx(oh: Bits): UInt = {
-    val idx = UInt(ptrWidth bits)
-    idx := 0
-    for (i <- 0 until inputCount) {
-      when(oh(i)) {
-        idx := i
-      }
-    }
-    idx
-  }
+  private def ohToIdx(oh: Bits): UInt =
+    if (inputCount == 1) U(0, ptrWidth bits) else OHToUInt(oh).resize(ptrWidth)
 
   val rrPtr  = RegInit(U(0, ptrWidth bits))
   val active = RegInit(False)
@@ -123,13 +107,11 @@ class AxiStreamArbMux(
   val selIdx   = UInt(ptrWidth bits)
   selIdx := Mux(active, owner, grantIdx)
 
-  io.output.valid := False
-  io.output.payload.clearAll()
+  io.output.valid   := io.inputs(selIdx).valid
+  io.output.payload := io.inputs(selIdx).payload
 
   for (i <- 0 until inputCount) {
     when(selIdx === i) {
-      io.output.valid    := io.inputs(i).valid
-      io.output.payload  := io.inputs(i).payload
       io.inputs(i).ready := io.output.ready
     }
   }
@@ -173,12 +155,11 @@ class AxiStreamDemux(config: Axi4StreamConfig, outputCount: Int) extends Compone
 
   io.input.ready := False
   for (i <- 0 until outputCount) {
-    io.outputs(i).valid := False
-    io.outputs(i).payload.clearAll()
+    io.outputs(i).valid   := False
+    io.outputs(i).payload := io.input.payload
     when(selIdx === i) {
-      io.outputs(i).valid   := io.input.valid
-      io.outputs(i).payload := io.input.payload
-      io.input.ready        := io.outputs(i).ready
+      io.outputs(i).valid := io.input.valid
+      io.input.ready      := io.outputs(i).ready
     }
   }
 
