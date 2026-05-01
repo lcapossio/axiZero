@@ -1,0 +1,20 @@
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT
+
+[options]
+mode prove
+depth 20
+
+[engines]
+smtbmc z3
+
+[script]
+read -formal axis_ready_valid_props.sv
+read -formal axis_ready_valid_regslice.sv
+read -formal ../tmp/axis_formal/rtl/SmokeAxisRegSlice.v
+prep -top axis_ready_valid_regslice
+
+[files]
+axis_ready_valid_props.sv
+axis_ready_valid_regslice.sv
+../tmp/axis_formal/rtl/SmokeAxisRegSlice.v

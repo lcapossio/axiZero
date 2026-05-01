@@ -17,19 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Java 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-          cache: sbt
-
-      - name: Install sbt
-        run: |
-          wget -qO /tmp/sbt.tgz \
-            https://github.com/sbt/sbt/releases/download/v1.9.9/sbt-1.9.9.tgz
-          sudo tar -xzf /tmp/sbt.tgz -C /usr/local
-          echo "/usr/local/sbt/bin" >> $GITHUB_PATH
+      - uses: ./.github/actions/setup-sbt
 
       - name: Install Verilator
         run: sudo apt-get install -y --no-install-recommends verilator
@@ -64,26 +52,13 @@ jobs:
   cocotb:
     name: cocotb (generated Verilog)
     runs-on: ubuntu-24.04
-    # TODO: migrate to cocotb 2.x once cocotbext-axi has a compatible release.
-    # Blocked on cocotbext-axi support for cocotb 2.0 runner API changes.
-    # Track: https://github.com/alexforencich/cocotbext-axi/issues
+    # Checked 2026-05-01: keep cocotb 1.9.2 until cocotbext-axi supports cocotb 2.x.
+    # Track: https://github.com/alexforencich/cocotbext-axi/issues/119
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Java 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-          cache: sbt
-
-      - name: Install sbt
-        run: |
-          wget -qO /tmp/sbt.tgz \
-            https://github.com/sbt/sbt/releases/download/v1.9.9/sbt-1.9.9.tgz
-          sudo tar -xzf /tmp/sbt.tgz -C /usr/local
-          echo "/usr/local/sbt/bin" >> $GITHUB_PATH
+      - uses: ./.github/actions/setup-sbt
 
       - name: Install Verilator
         run: sudo apt-get install -y --no-install-recommends verilator
@@ -98,3 +73,40 @@ jobs:
 
       - name: Run cocotb tests (lite + full + wrr + qos + ipif + axis)
         run: python3 sim/cocotb_gen/run_all.py
+
+  formal:
+    name: Formal checks
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-sbt
+
+      - name: Set up OSS CAD Suite
+        uses: YosysHQ/setup-oss-cad-suite@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Python dependencies
+        run: pip install pyyaml
+
+      - name: Generate AXIS formal RTL
+        run: |
+          mkdir -p tmp/axis_formal
+          cat > tmp/axis_formal/config.yaml <<'EOF'
+          designs:
+            - name: SmokeAxisRegSlice
+              kind: axis
+              core: reg_slice
+              data_width: 32
+              use_keep: true
+              use_last: true
+          EOF
+          python3 scripts/axizero.py generate tmp/axis_formal/config.yaml --output tmp/axis_formal/rtl
+
+      - name: Run SymbiYosys
+        run: |
+          cd formal
+          sby -f write_response_routing.sby
+          sby -f axis_ready_valid_regslice.sby
