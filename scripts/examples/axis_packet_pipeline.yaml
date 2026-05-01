@@ -1,0 +1,66 @@
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT
+#
+# Practical AXI4-Stream packet-pipeline building blocks.
+#
+# This generates reusable cores for a common ingress pipeline:
+#   two packet sources -> arbiter -> elastic FIFO -> timing slice
+#     -> 32-bit to 8-bit unpacker -> packet demux -> optional broadcaster
+#
+# Wire these cores in your top-level RTL or block design using the generated
+# AXIS ports: s_axis_t*, m_axis_t*, s0_axis_t*, m0_axis_t*, and select.
+
+designs:
+  - name: IngressPacketMux_2To1
+    kind: axis
+    core: arb_mux
+    data_width: 32
+    inputs: 2
+    arbitration: round_robin
+    use_keep: true
+    use_strb: true
+    use_last: true
+
+  - name: IngressElasticFifo
+    kind: axis
+    core: fifo
+    data_width: 32
+    depth: 32
+    use_keep: true
+    use_strb: true
+    use_last: true
+
+  - name: IngressTimingSlice
+    kind: axis
+    core: reg_slice
+    data_width: 32
+    use_keep: true
+    use_strb: true
+    use_last: true
+
+  - name: IngressUnpack32To8
+    kind: axis
+    core: width_adapter
+    input_data_width: 32
+    output_data_width: 8
+    use_keep: true
+    use_strb: true
+    use_last: true
+
+  - name: IngressPacketDemux_1To2
+    kind: axis
+    core: demux
+    data_width: 8
+    outputs: 2
+    use_keep: true
+    use_strb: true
+    use_last: true
+
+  - name: MonitorBroadcaster_1To2
+    kind: axis
+    core: broadcaster
+    data_width: 8
+    outputs: 2
+    use_keep: true
+    use_strb: true
+    use_last: true
