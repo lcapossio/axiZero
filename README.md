@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 96 SpinalSim + 33 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 96 SpinalSim + 34 cocotb tests pass.
 
 ---
 
@@ -415,7 +415,7 @@ python3 sim/cocotb_gen/run_all.py ipif     # MyLite_1M4S.v IPIF slave only
 python3 sim/cocotb_gen/run_all.py axis     # generated AXI4-Stream cocotb suite
 ```
 
-33 tests pass across 6 suites:
+34 tests pass across 6 suites:
 
 | Suite | DUT | Tests | Description |
 |---|---|---|---|
@@ -424,7 +424,7 @@ python3 sim/cocotb_gen/run_all.py axis     # generated AXI4-Stream cocotb suite
 | `wrr` | `MyLite_2M2S_WRR.v` | 6 | 2-master WRR crossbar: dual-master R/W, address routing, concurrent bandwidth, no starvation, concurrent different slaves, 80× random |
 | `qos` | `MyFull_2M2S_QoS.v` | 6 | 2-master QoS crossbar: dual-master R/W, address routing, higher QoS wins contention, equal-QoS round-robin, aging anti-starvation, QoS read priority |
 | `ipif` | `MyLite_1M4S.v` | 4 | IPIF slave compatibility: strict IpifRam model requires AWVALID+WVALID simultaneously, routing unaffected |
-| `axis` | generated AXI4-Stream cores | 5 | cocotbext-axi stream BFM tests for reg slice, width adapter, arb-mux, demux, broadcaster |
+| `axis` | generated AXI4-Stream cores | 6 | cocotbext-axi stream BFM tests for reg slice, width adapter, FIFO, arb-mux, demux, broadcaster |
 
 ---
 
