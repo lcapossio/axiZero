@@ -131,6 +131,48 @@ class AxiStreamCoreSpec extends AnyFunSuite {
     }
   }
 
+  test("AXI Stream FIFO preserves TKEEP TSTRB TLAST while output is stalled") {
+    val cfg = axisCfg(32)
+
+    simCfg.compile(new AxiStreamFifo(cfg, depth = 4)).doSim { dut =>
+      val cd = dut.clockDomain
+
+      dut.io.input.valid #= false
+      dut.io.input.payload.data #= 0
+      dut.io.input.payload.strb #= 0
+      dut.io.input.payload.keep #= 0
+      dut.io.input.payload.last #= false
+      dut.io.output.ready #= false
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      dut.io.input.valid #= true
+      dut.io.input.payload.data #= BigInt("ddccbbaa", 16)
+      dut.io.input.payload.strb #= 0x7
+      dut.io.input.payload.keep #= 0x5
+      dut.io.input.payload.last #= true
+      cd.waitSamplingWhere(dut.io.input.ready.toBoolean)
+      cd.waitSampling()
+      dut.io.input.valid #= false
+      dut.io.input.payload.data #= 0
+      dut.io.input.payload.strb #= 0
+      dut.io.input.payload.keep #= 0
+      dut.io.input.payload.last #= false
+
+      cd.waitSamplingWhere(dut.io.output.valid.toBoolean)
+      for (_ <- 0 until 4) {
+        assert(dut.io.output.payload.data.toBigInt == BigInt("ddccbbaa", 16))
+        assert(dut.io.output.payload.strb.toBigInt == 0x7)
+        assert(dut.io.output.payload.keep.toBigInt == 0x5)
+        assert(dut.io.output.payload.last.toBoolean)
+        cd.waitSampling()
+      }
+
+      dut.io.output.ready #= true
+      cd.waitSamplingWhere(!dut.io.output.valid.toBoolean)
+    }
+  }
+
   test("AXI Stream arb mux forwards competing inputs without dropping frames") {
     val cfg = axisCfg(8)
 
@@ -215,6 +257,51 @@ class AxiStreamCoreSpec extends AnyFunSuite {
 
       assert(unsigned(got1) == unsigned(frame))
       assert(!dut.io.outputs(0).valid.toBoolean)
+    }
+  }
+
+  test("AXI Stream demux preserves sidebands and packet routing across select changes") {
+    val cfg = axisCfg(32)
+
+    simCfg.compile(new AxiStreamDemux(cfg, outputCount = 2)).doSim { dut =>
+      val cd = dut.clockDomain
+
+      dut.io.input.valid #= false
+      dut.io.input.payload.data #= 0
+      dut.io.input.payload.strb #= 0
+      dut.io.input.payload.keep #= 0
+      dut.io.input.payload.last #= false
+      dut.io.outputs(0).ready #= true
+      dut.io.outputs(1).ready #= true
+      dut.io.select #= 0
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      dut.io.input.valid #= true
+      dut.io.input.payload.data #= BigInt("04030201", 16)
+      dut.io.input.payload.strb #= 0xf
+      dut.io.input.payload.keep #= 0xf
+      dut.io.input.payload.last #= false
+      cd.waitSamplingWhere(dut.io.input.ready.toBoolean)
+      cd.waitSampling()
+
+      dut.io.outputs(0).ready #= false
+      dut.io.select #= 1
+      dut.io.input.payload.data #= BigInt("08070605", 16)
+      dut.io.input.payload.strb #= 0x3
+      dut.io.input.payload.keep #= 0x3
+      dut.io.input.payload.last #= true
+      cd.waitSampling()
+
+      assert(dut.io.outputs(0).valid.toBoolean)
+      assert(dut.io.outputs(0).payload.data.toBigInt == BigInt("08070605", 16))
+      assert(dut.io.outputs(0).payload.strb.toBigInt == 0x3)
+      assert(dut.io.outputs(0).payload.keep.toBigInt == 0x3)
+      assert(dut.io.outputs(0).payload.last.toBoolean)
+      assert(!dut.io.outputs(1).valid.toBoolean)
+
+      dut.io.outputs(0).ready #= true
+      cd.waitSamplingWhere(dut.io.input.ready.toBoolean)
     }
   }
 
