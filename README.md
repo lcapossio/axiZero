@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 93 SpinalSim + 27 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 95 SpinalSim + 32 cocotb tests pass.
 
 ---
 
@@ -358,6 +358,8 @@ designs:
 Generated ports are renamed to AXI4-Stream style: `s_axis_t*` and `m_axis_t*` for single-input/single-output cores, `s0_axis_t*`/`s1_axis_t*` for vector inputs, and `m0_axis_t*`/`m1_axis_t*` for vector outputs. The demux selector is emitted as `select`.
 
 Full example with all options: [`scripts/example.yaml`](scripts/example.yaml).
+Packet-pipeline example: [`scripts/examples/axis_packet_pipeline.yaml`](scripts/examples/axis_packet_pipeline.yaml).
+Verification details: [`docs/axis-stream-verification.md`](docs/axis-stream-verification.md).
 
 ---
 
@@ -371,9 +373,9 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-93 tests pass across 16 suites:
+95 tests pass across 16 suites:
 
-For the focused AXI4-Stream loop, including lint and YAML generator smoke tests:
+For the focused AXI4-Stream loop, including lint, YAML generator smoke tests, and cocotbext-axi generated-RTL tests:
 
 ```bash
 python3 scripts/run_sim.py axis
@@ -396,7 +398,7 @@ python3 scripts/run_sim.py axis
 | `QosStressShortSpec` | 1 | Short 4-master QoS stress: distinct patterns (sequential, reverse, sparse, random short bursts), concurrent traffic, end-state validation |
 | `Axi3ToAxi4Spec` | 5 | AXI3→AXI4 bridge: single-beat, INCR burst, write interleaving (WID reorder), locked→SLVERR, multiple outstanding |
 | `Axi3MixedCrossbarSpec` | 4 | Axi3Mode auto-adapter: single-beat to full slave, single-beat to Lite slave, routing to both, 4-beat INCR burst |
-| `AxiStreamCoreSpec` | 8 | AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster |
+| `AxiStreamCoreSpec` | 10 | AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster, sparse TKEEP/TSTRB/TLAST edge cases |
 
 ### cocotb (integration tests against pre-built Verilog, run with Python)
 
@@ -404,15 +406,16 @@ Tests the generated Verilog files directly using [cocotbext-axi](https://github.
 
 ```bash
 # requires: pip install cocotb cocotbext-axi
-python3 sim/cocotb_gen/run_all.py          # all suites
+python3 sim/cocotb_gen/run_all.py          # all prebuilt-Verilog suites
 python3 sim/cocotb_gen/run_all.py lite     # MyLite_1M4S.v only
 python3 sim/cocotb_gen/run_all.py full     # MyFull_2M2S.v only
 python3 sim/cocotb_gen/run_all.py wrr      # MyLite_2M2S_WRR.v only
 python3 sim/cocotb_gen/run_all.py qos      # MyFull_2M2S_QoS.v only
 python3 sim/cocotb_gen/run_all.py ipif     # MyLite_1M4S.v IPIF slave only
+python3 scripts/run_sim.py axis            # generated AXI4-Stream cocotb suite
 ```
 
-27 tests pass across 5 suites:
+32 tests pass across 6 suites:
 
 | Suite | DUT | Tests | Description |
 |---|---|---|---|
@@ -421,6 +424,7 @@ python3 sim/cocotb_gen/run_all.py ipif     # MyLite_1M4S.v IPIF slave only
 | `wrr` | `MyLite_2M2S_WRR.v` | 6 | 2-master WRR crossbar: dual-master R/W, address routing, concurrent bandwidth, no starvation, concurrent different slaves, 80× random |
 | `qos` | `MyFull_2M2S_QoS.v` | 6 | 2-master QoS crossbar: dual-master R/W, address routing, higher QoS wins contention, equal-QoS round-robin, aging anti-starvation, QoS read priority |
 | `ipif` | `MyLite_1M4S.v` | 3 | IPIF slave compatibility: strict IpifRam model requires AWVALID+WVALID simultaneously, routing unaffected |
+| `axis` | generated AXI4-Stream cores | 5 | cocotbext-axi stream BFM tests for reg slice, width adapter, arb-mux, demux, broadcaster |
 
 ---
 
