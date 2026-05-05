@@ -8,9 +8,8 @@
 
 module axis_ready_valid_regslice (
     input wire clk,
-    input wire rst
+    input wire resetn
 );
-    wire resetn = !rst;
 
     (* anyseq *) wire        s_valid;
     wire                    s_ready;

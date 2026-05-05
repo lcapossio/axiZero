@@ -325,6 +325,12 @@ Core-specific keys:
 | `demux` | `outputs` | 1-to-N packet demux. The explicit `select` input is sampled at packet start and held until `TLAST`. |
 | `broadcaster` | `outputs` | 1-to-N synchronous broadcaster. A beat is accepted only when every output accepts it. |
 
+Measured xc7a100t datapoint for the Arty AXIS smoke datapath, which instantiates all six utility cores (`AxiStreamArbMux`, FIFO, register slice, 32-to-8 and 8-to-32 width adapters, demux, broadcaster):
+
+| Design | LUTs | FFs | LUTRAM | BRAM | DSP | Clock | Fmax note |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `AxiStreamArtySmoke` submodule | 185 | 208 | 20 | 0 | 0 | 100 MHz | Routed Arty AXIS build WNS 1.199 ns, equivalent single-clock margin to about 114 MHz |
+
 Example:
 
 ```yaml

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Leonardo Capossio
+// Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
 // SPDX-License-Identifier: MIT
 package axizero.sim
 
@@ -196,7 +196,46 @@ class AxiStreamCoreSpec extends AnyFunSuite {
       val got0 = slave.recv()
       val got1 = slave.recv()
 
-      assert(Set(unsigned(got0), unsigned(got1)) == Set(unsigned(frame0), unsigned(frame1)))
+      val frames = List(unsigned(got0), unsigned(got1))
+      assert(
+        frames == List(unsigned(frame0), unsigned(frame1)) ||
+          frames == List(unsigned(frame1), unsigned(frame0))
+      )
+      assert(frames.forall(frame => frame == unsigned(frame0) || frame == unsigned(frame1)))
+    }
+  }
+
+  test("AXI Stream arb mux round robin wraps for three inputs") {
+    val cfg = axisCfg(8)
+
+    simCfg.compile(new AxiStreamArbMux(cfg, inputCount = 3)).doSim { dut =>
+      val cd = dut.clockDomain
+
+      for (i <- 0 until 3) {
+        dut.io.inputs(i).valid #= false
+        dut.io.inputs(i).payload.data #= 0
+        dut.io.inputs(i).payload.strb #= 1
+        dut.io.inputs(i).payload.keep #= 1
+        dut.io.inputs(i).payload.last #= true
+      }
+      dut.io.output.ready #= true
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      dut.io.inputs(2).valid #= true
+      dut.io.inputs(2).payload.data #= 0x30
+      cd.waitSamplingWhere(dut.io.output.valid.toBoolean && dut.io.output.ready.toBoolean)
+      assert(dut.io.output.payload.data.toBigInt == 0x30)
+      cd.waitSampling()
+      dut.io.inputs(2).valid #= false
+
+      for (i <- 0 until 3) {
+        dut.io.inputs(i).valid #= true
+        dut.io.inputs(i).payload.data #= 0x10 + i
+      }
+
+      cd.waitSamplingWhere(dut.io.output.valid.toBoolean && dut.io.output.ready.toBoolean)
+      assert(dut.io.output.payload.data.toBigInt == 0x10)
     }
   }
 
@@ -257,6 +296,39 @@ class AxiStreamCoreSpec extends AnyFunSuite {
 
       assert(unsigned(got1) == unsigned(frame))
       assert(!dut.io.outputs(0).valid.toBoolean)
+    }
+  }
+
+  test("AXI Stream demux samples select before a stalled first beat") {
+    val cfg = axisCfg(8)
+
+    simCfg.compile(new AxiStreamDemux(cfg, outputCount = 2)).doSim { dut =>
+      val cd = dut.clockDomain
+
+      dut.io.input.valid #= false
+      dut.io.input.payload.data #= 0
+      dut.io.input.payload.strb #= 1
+      dut.io.input.payload.keep #= 1
+      dut.io.input.payload.last #= true
+      dut.io.outputs(0).ready #= false
+      dut.io.outputs(1).ready #= true
+      dut.io.select #= 0
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      dut.io.input.valid #= true
+      dut.io.input.payload.data #= 0x5a
+      cd.waitSampling(2)
+
+      dut.io.select #= 1
+      cd.waitSampling()
+
+      assert(dut.io.outputs(0).valid.toBoolean)
+      assert(!dut.io.outputs(1).valid.toBoolean)
+      assert(!dut.io.input.ready.toBoolean)
+
+      dut.io.outputs(0).ready #= true
+      cd.waitSamplingWhere(dut.io.input.ready.toBoolean)
     }
   }
 

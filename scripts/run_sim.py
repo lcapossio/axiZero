@@ -21,8 +21,6 @@ import sys
 import platform
 import shutil
 import shlex
-import textwrap
-import xml.etree.ElementTree as ET
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -38,79 +36,6 @@ _CMDS = {
     "coverage": _COVERAGE_CMD,
     "axis":     "testOnly axizero.sim.AxiStreamCoreSpec",
 }
-
-_AXIS_SMOKE_YAML = textwrap.dedent("""\
-    designs:
-      - name: SmokeAxisRegSlice
-        kind: axis
-        core: reg_slice
-        data_width: 32
-        use_keep: true
-        use_last: true
-
-      - name: SmokeAxisWidth_8To32
-        kind: axis
-        core: width_adapter
-        input_data_width: 8
-        output_data_width: 32
-        use_keep: true
-        use_last: true
-
-      - name: SmokeAxisFifo
-        kind: axis
-        core: fifo
-        data_width: 32
-        depth: 8
-        use_keep: true
-        use_last: true
-
-      - name: SmokeAxisMux_2To1
-        kind: axis
-        core: arb_mux
-        data_width: 32
-        inputs: 2
-        arbitration: round_robin
-        use_keep: true
-        use_last: true
-
-      - name: SmokeAxisDemux_1To2
-        kind: axis
-        core: demux
-        data_width: 32
-        outputs: 2
-        use_keep: true
-        use_last: true
-
-      - name: SmokeAxisBroadcaster_1To2
-        kind: axis
-        core: broadcaster
-        data_width: 32
-        outputs: 2
-        use_keep: true
-        use_last: true
-""")
-
-_AXIS_SMOKE_NAMES = (
-    "SmokeAxisRegSlice",
-    "SmokeAxisWidth_8To32",
-    "SmokeAxisFifo",
-    "SmokeAxisMux_2To1",
-    "SmokeAxisDemux_1To2",
-    "SmokeAxisBroadcaster_1To2",
-)
-
-_AXIS_COCOTB_RUNS = (
-    ("SmokeAxisRegSlice", "AxiStreamRegSlice", "test_axis_reg_slice", ""),
-    ("SmokeAxisWidth_8To32", "AxiStreamWidthAdapter", "test_axis_width", ""),
-    ("SmokeAxisMux_2To1", "AxiStreamArbMux", "test_axis_mux", ""),
-    ("SmokeAxisDemux_1To2", "AxiStreamDemux", "test_axis_demux", ""),
-    (
-        "SmokeAxisBroadcaster_1To2",
-        "AxisBroadcastWrapper",
-        "test_axis_broadcast",
-        "axis_broadcast_wrapper.v",
-    ),
-)
 
 
 def _wsl_path(p: pathlib.Path) -> str:
@@ -155,172 +80,21 @@ def _run_python_lint() -> int:
     ).returncode
 
 
-def _run_axis_generator_smoke() -> int:
-    """Generate every AXI Stream core from YAML and sanity-check AXIS port names."""
-    smoke_dir = REPO_ROOT / "tmp" / "axis_regression"
-    rtl_dir = smoke_dir / "rtl"
-    yaml_path = smoke_dir / "axis_smoke.yaml"
-    smoke_dir.mkdir(parents=True, exist_ok=True)
-    rtl_dir.mkdir(parents=True, exist_ok=True)
-    for name in _AXIS_SMOKE_NAMES:
-        stale = rtl_dir / f"{name}.v"
-        if stale.exists():
-            stale.unlink()
-    yaml_path.write_text(_AXIS_SMOKE_YAML, encoding="utf-8")
-
-    if platform.system() == "Windows":
-        if not shutil.which("wsl"):
-            print("ERROR: wsl not found. Install WSL Ubuntu-24.04:")
-            print("  wsl --install -d Ubuntu-24.04")
-            return 1
-        wsl_dir = _wsl_path(REPO_ROOT)
-        inner = (
-            f"cd {shlex.quote(wsl_dir)} && "
-            "python3 scripts/axizero.py generate "
-            f"{shlex.quote('tmp/axis_regression/axis_smoke.yaml')} "
-            f"--output {shlex.quote('tmp/axis_regression/rtl')}"
-        )
-        cmd = ["wsl", "bash", "-lc", inner]
-    else:
-        cmd = [
-            sys.executable,
-            "scripts/axizero.py",
-            "generate",
-            str(yaml_path),
-            "--output",
-            str(rtl_dir),
-        ]
-
-    rc = subprocess.run(cmd, cwd=REPO_ROOT).returncode
-    if rc != 0:
-        return rc
-
-    try:
-        _check_axis_smoke_outputs(rtl_dir)
-    finally:
-        for name in _AXIS_SMOKE_NAMES:
-            generated = REPO_ROOT / "generated" / f"{name}.v"
-            if generated.exists():
-                generated.unlink()
-
-    return 0
-
-
-def _run_axis_cocotb_smoke() -> int:
-    """Run cocotbext-axi tests against generated AXI Stream Verilog."""
-    axis_dir = REPO_ROOT / "sim" / "cocotb_gen" / "axis"
-    results_xml = axis_dir / "results.xml"
-
-    def check_results(module: str) -> int:
-        if not results_xml.exists():
-            print(f"ERROR: AXIS cocotb results.xml missing after {module}")
-            return 1
-
-        root = ET.parse(results_xml).getroot()
-        failures = root.findall(".//failure")
-        errors = root.findall(".//error")
-        if failures or errors:
-            print(f"ERROR: AXIS cocotb {module} reported {len(failures)} failures and {len(errors)} errors")
-            return 1
-        return 0
-
+def _run_axis_cocotb_regression() -> int:
+    """Run the canonical Python cocotb runner for generated AXI Stream Verilog."""
     if platform.system() == "Windows":
         if not shutil.which("wsl"):
             print("ERROR: wsl not found. Install WSL Ubuntu-24.04:")
             print("  wsl --install -d Ubuntu-24.04")
             return 1
         wsl_repo = _wsl_path(REPO_ROOT)
-        for file_stem, top, module, extra_sources in _AXIS_COCOTB_RUNS:
-            inner = (
-                f"cd {shlex.quote(wsl_repo)} && "
-                "make -C sim/cocotb_gen/axis "
-                f"FILE_STEM={shlex.quote(file_stem)} "
-                f"TOPLEVEL={shlex.quote(top)} "
-                f"MODULE={shlex.quote(module)} "
-                f"EXTRA_VERILOG_SOURCES={shlex.quote(extra_sources)}"
-            )
-            rc = subprocess.run(["wsl", "bash", "-lc", inner], cwd=REPO_ROOT).returncode
-            if rc != 0:
-                return rc
-            rc = check_results(module)
-            if rc != 0:
-                return rc
-        return 0
-    else:
-        make = shutil.which("make")
-        if not make:
-            print("ERROR: make not found on PATH")
-            return 1
-        for file_stem, top, module, extra_sources in _AXIS_COCOTB_RUNS:
-            rc = subprocess.run(
-                [
-                    make,
-                    "-C",
-                    str(axis_dir),
-                    f"FILE_STEM={file_stem}",
-                    f"TOPLEVEL={top}",
-                    f"MODULE={module}",
-                    f"EXTRA_VERILOG_SOURCES={extra_sources}",
-                ],
-                cwd=REPO_ROOT,
-            ).returncode
-            if rc != 0:
-                return rc
-            rc = check_results(module)
-            if rc != 0:
-                return rc
-        return 0
+        inner = f"cd {shlex.quote(wsl_repo)} && python3 sim/cocotb_gen/run_all.py axis"
+        return subprocess.run(["wsl", "bash", "-lc", inner], cwd=REPO_ROOT).returncode
 
-
-def _require_patterns(text: str, patterns: list[str], path: pathlib.Path) -> None:
-    for pattern in patterns:
-        if not re.search(pattern, text):
-            raise RuntimeError(f"{path}: missing expected pattern {pattern!r}")
-
-
-def _check_axis_smoke_outputs(rtl_dir: pathlib.Path) -> None:
-    checks = {
-        "SmokeAxisRegSlice": [
-            r"\bs_axis_tvalid\b",
-            r"\bm_axis_tvalid\b",
-            r"\[31:0\]\s+s_axis_tdata\b",
-            r"\[31:0\]\s+m_axis_tdata\b",
-        ],
-        "SmokeAxisWidth_8To32": [
-            r"\[7:0\]\s+s_axis_tdata\b",
-            r"\[31:0\]\s+m_axis_tdata\b",
-        ],
-        "SmokeAxisFifo": [
-            r"\bs_axis_tvalid\b",
-            r"\bm_axis_tvalid\b",
-            r"\[31:0\]\s+s_axis_tdata\b",
-            r"\[31:0\]\s+m_axis_tdata\b",
-        ],
-        "SmokeAxisMux_2To1": [
-            r"\bs0_axis_tvalid\b",
-            r"\bs1_axis_tvalid\b",
-            r"\bm_axis_tvalid\b",
-        ],
-        "SmokeAxisDemux_1To2": [
-            r"\bs_axis_tvalid\b",
-            r"\bselect\b",
-            r"\bm0_axis_tvalid\b",
-            r"\bm1_axis_tvalid\b",
-        ],
-        "SmokeAxisBroadcaster_1To2": [
-            r"\bs_axis_tvalid\b",
-            r"\bm0_axis_tvalid\b",
-            r"\bm1_axis_tvalid\b",
-        ],
-    }
-
-    for name, patterns in checks.items():
-        path = rtl_dir / f"{name}.v"
-        if not path.exists():
-            raise RuntimeError(f"Expected generated Verilog not found: {path}")
-        _require_patterns(path.read_text(encoding="utf-8"), patterns, path)
-
-    print("[run_sim] AXI Stream generator smoke passed")
+    return subprocess.run(
+        [sys.executable, "sim/cocotb_gen/run_all.py", "axis"],
+        cwd=REPO_ROOT,
+    ).returncode
 
 
 def _run_axis_regression() -> int:
@@ -334,13 +108,8 @@ def _run_axis_regression() -> int:
     if rc != 0:
         return rc
 
-    print("[run_sim] AXI Stream regression: YAML generator smoke")
-    rc = _run_axis_generator_smoke()
-    if rc != 0:
-        return rc
-
     print("[run_sim] AXI Stream regression: cocotbext-axi generated RTL")
-    return _run_axis_cocotb_smoke()
+    return _run_axis_cocotb_regression()
 
 
 def _print_coverage_summary(log_lines: list[str]) -> None:

@@ -18,6 +18,15 @@ python scripts/run_sim.py axis
 
 That command lints Python, runs `AxiStreamCoreSpec`, generates all stream cores from YAML, checks generated port names, and runs the cocotb AXIS generated-RTL tests.
 
+Current regression conditions:
+
+| Layer | Tool/version | Conditions |
+|---|---|---|
+| SpinalSim | SpinalHDL 1.10.1, sbt 1.9.7, Java 21.0.10 | `AxiStreamCoreSpec`, 10 ns clock period, synchronous active-low reset |
+| cocotb generated RTL | cocotb runner, cocotbext-axi BFMs, Verilator 5.020 | Generated smoke cores from `sim/cocotb_gen/run_all.py axis`, Verilator trace enabled |
+| Formal smoke | SymbiYosys / z3 when installed | `axis_ready_valid_regslice.sby`, depth 20, ready/valid stability on the generated register slice |
+| Hardware smoke | Vivado/Vitis 2025.2, Arty A7-100T | `run_axis_test.py`, 100 MHz board clock, status GPIO at `0xC004_0000` |
+
 For a practical generator starting point, see:
 
 ```bash

@@ -123,7 +123,11 @@ class AxiStreamArbMux(
     }
     arbitration match {
       case AxisRoundRobin =>
-        rrPtr := (grantIdx + 1).resized
+        when(grantIdx === U(inputCount - 1, ptrWidth bits)) {
+          rrPtr := U(0, ptrWidth bits)
+        } otherwise {
+          rrPtr := (grantIdx + 1).resized
+        }
       case AxisFixedPriority =>
     }
   } elsewhen (active && io.output.fire && io.output.last) {
@@ -148,10 +152,11 @@ class AxiStreamDemux(config: Axi4StreamConfig, outputCount: Int) extends Compone
     val outputs = Vec(master(Axi4Stream(config)), outputCount)
   }
 
-  val active = RegInit(False)
-  val owner  = RegInit(U(0, selWidth bits))
-  val selIdx = UInt(selWidth bits)
-  selIdx := Mux(active, owner, io.select)
+  val active     = RegInit(False)
+  val owner      = RegInit(U(0, selWidth bits))
+  val ownerValid = RegInit(False)
+  val selIdx     = UInt(selWidth bits)
+  selIdx := Mux(active || ownerValid, owner, io.select)
 
   io.input.ready := False
   for (i <- 0 until outputCount) {
@@ -163,13 +168,22 @@ class AxiStreamDemux(config: Axi4StreamConfig, outputCount: Int) extends Compone
     }
   }
 
+  when(!active && io.input.valid && !ownerValid) {
+    owner      := io.select
+    ownerValid := True
+  } elsewhen (!active && !io.input.valid) {
+    ownerValid := False
+  }
+
   when(!active && io.input.fire) {
-    owner := io.select
     when(!io.input.last) {
       active := True
+    } otherwise {
+      ownerValid := False
     }
   } elsewhen (active && io.input.fire && io.input.last) {
-    active := False
+    active     := False
+    ownerValid := False
   }
 }
 

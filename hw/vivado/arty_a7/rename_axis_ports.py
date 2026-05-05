@@ -65,6 +65,9 @@ def rename(match):
 
 text = V_FILE.read_text(encoding="utf-8")
 renamed = IO_RE.sub(rename, text)
+# Spinal emits the clock/reset as exact identifiers and also references them
+# internally. Word-boundary replacement changes only those identifiers, not
+# future names such as clk_div or resetn_sync.
 renamed = re.sub(r"\bclk\b", "aclk", renamed)
 renamed = re.sub(r"\bresetn\b", "aresetn", renamed)
 V_FILE.write_text(renamed, encoding="utf-8")

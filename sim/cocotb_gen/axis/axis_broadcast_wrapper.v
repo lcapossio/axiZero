@@ -31,7 +31,10 @@ module AxisBroadcastWrapper (
   output wire          m1_axis_tlast
 );
 
-  wire unused_clock_reset = aclk ^ aresetn;
+  // verilator lint_off UNUSED
+  wire unused_aclk = aclk;
+  wire unused_aresetn = aresetn;
+  // verilator lint_on UNUSED
 
   AxiStreamBroadcaster dut (
     .s_axis_tvalid(s_axis_tvalid),

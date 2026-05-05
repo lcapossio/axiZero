@@ -5,6 +5,7 @@
 # Run from the repo root (c:/Projects/axiZero).
 
 set gen_dir [file normalize [file join [file dirname [info script]] .. .. generated]]
+set axis_gen_dir [file normalize [file join [file dirname [info script]] .. .. tmp axis_regression rtl]]
 set out_dir [file normalize [file join [file dirname [info script]] resource_reports]]
 file mkdir $out_dir
 
@@ -25,7 +26,12 @@ proc detect_top {vfile} {
 # Collect results for summary
 set results {}
 
-foreach vfile [lsort [glob -nocomplain [file join $gen_dir *.v]]] {
+set vfiles [lsort [glob -nocomplain [file join $gen_dir *.v]]]
+if {[file isdirectory $axis_gen_dir]} {
+    set vfiles [concat $vfiles [lsort [glob -nocomplain [file join $axis_gen_dir *.v]]]]
+}
+
+foreach vfile $vfiles {
     set fname [file tail $vfile]
     set top [detect_top $vfile]
     if {$top eq ""} {
@@ -46,10 +52,15 @@ foreach vfile [lsort [glob -nocomplain [file join $gen_dir *.v]]] {
 
     # OOC synthesis — no I/O insertion
     synth_design -top $top -part $part -mode out_of_context
+    if {[llength [get_ports -quiet aclk]]} {
+        create_clock -period 10.000 [get_ports aclk]
+    }
 
     # Extract utilization
     set rpt_file [file join $out_dir "${fname}.rpt"]
+    set timing_file [file join $out_dir "${fname}.timing.rpt"]
     report_utilization -file $rpt_file
+    report_timing_summary -max_paths 1 -file $timing_file
 
     # Parse key numbers from the report
     set fp [open $rpt_file r]
@@ -61,6 +72,7 @@ foreach vfile [lsort [glob -nocomplain [file join $gen_dir *.v]]] {
     set bram 0
     set dsps 0
     set lutram 0
+    set fmax "n/a"
 
     foreach line [split $rpt "\n"] {
         set line [string trim $line]
@@ -82,9 +94,19 @@ foreach vfile [lsort [glob -nocomplain [file join $gen_dir *.v]]] {
         }
     }
 
-    lappend results [list $fname $top $luts $ffs $lutram $bram $dsps]
+    set fp [open $timing_file r]
+    set timing [read $fp]
+    close $fp
+    if {[regexp {WNS\(ns\).*?\n\s*-+.*?\n\s*(-?\d+\.\d+)} $timing -> wns]} {
+        set period [expr {10.000 - double($wns)}]
+        if {$period > 0} {
+            set fmax [format "%.1f" [expr {1000.0 / $period}]]
+        }
+    }
 
-    puts "  => LUTs=$luts  FFs=$ffs  LUTRAM=$lutram  BRAM=$bram  DSP=$dsps"
+    lappend results [list $fname $top $luts $ffs $lutram $bram $dsps $fmax]
+
+    puts "  => LUTs=$luts  FFs=$ffs  LUTRAM=$lutram  BRAM=$bram  DSP=$dsps  Fmax=$fmax MHz"
 
     close_project
 }
@@ -92,11 +114,11 @@ foreach vfile [lsort [glob -nocomplain [file join $gen_dir *.v]]] {
 # Write summary
 set sum_file [file join $out_dir "summary.txt"]
 set fp [open $sum_file w]
-puts $fp [format "%-30s %-20s %6s %6s %6s %5s %4s" "File" "Top" "LUTs" "FFs" "LUTRAM" "BRAM" "DSP"]
+puts $fp [format "%-30s %-20s %6s %6s %6s %5s %4s %9s" "File" "Top" "LUTs" "FFs" "LUTRAM" "BRAM" "DSP" "FmaxMHz"]
 puts $fp [string repeat "-" 100]
 foreach row $results {
-    lassign $row fname top luts ffs lutram bram dsps
-    puts $fp [format "%-30s %-20s %6d %6d %6d %5d %4d" $fname $top $luts $ffs $lutram $bram $dsps]
+    lassign $row fname top luts ffs lutram bram dsps fmax
+    puts $fp [format "%-30s %-20s %6d %6d %6d %5d %4d %9s" $fname $top $luts $ffs $lutram $bram $dsps $fmax]
 }
 close $fp
 

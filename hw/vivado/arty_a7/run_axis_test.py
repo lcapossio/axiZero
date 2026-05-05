@@ -4,6 +4,7 @@
 """Build, program, and run the AXI4-Stream smoke HW test on Arty A7-100T."""
 
 import os
+import argparse
 import pathlib
 import shutil
 import subprocess
@@ -102,17 +103,17 @@ def step_generate_rtl():
     )
 
 
-def step_vivado():
-    if BIT_FILE.exists():
+def step_vivado(force_build: bool):
+    if BIT_FILE.exists() and not force_build:
         print(f"[skip] Bitstream already exists: {BIT_FILE}")
         return
     env = dict(os.environ)
-    if sys.platform == "win32":
-        for name in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP"):
-            env[name] = ".vivado_user"
-    elif "HOME" in env and env["HOME"].startswith("/"):
+    if "HOME" in env and env["HOME"].startswith("/"):
         env["HOME"] = str(pathlib.Path.home())
-    (REPO_ROOT / ".vivado_user").mkdir(exist_ok=True)
+    if sys.platform == "win32":
+        vivado_user = REPO_ROOT / ".vivado_user"
+        vivado_user.mkdir(exist_ok=True)
+        env["APPDATA"] = str(vivado_user.resolve())
     run(
         [VIVADO_BIN, "-mode", "batch", "-source", str(CREATE_TCL)],
         cwd=REPO_ROOT,
@@ -174,7 +175,7 @@ def find_symbols():
     return addrs
 
 
-def step_run(addrs):
+def step_run(addrs, wait_seconds: int):
     xsdb_tcl = SCRIPT_DIR / "_axis_xsdb_temp.tcl"
     xsdb_tcl.write_text(
         f"""\
@@ -195,8 +196,8 @@ dow {str(ELF_FILE).replace(chr(92), '/')}
 after 200
 con
 
-puts "\\nWaiting 12s for AXIS smoke test completion..."
-after 12000
+puts "\\nWaiting {wait_seconds}s for AXIS smoke test completion..."
+after {wait_seconds * 1000}
 
 rst -processor
 after 500
@@ -245,7 +246,24 @@ exit
         sys.exit(1)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--force-build",
+        action="store_true",
+        help="Run Vivado even when the AXIS bitstream already exists.",
+    )
+    parser.add_argument(
+        "--wait-seconds",
+        type=int,
+        default=12,
+        help="Seconds to let the MicroBlaze AXIS smoke firmware run before reading status.",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     print("axiZero AXI4-Stream hardware smoke test -- Arty A7-100T")
     print(f"  Vivado: {VIVADO_BIN}")
     print(f"  mb-gcc: {MBGCC_BIN}")
@@ -253,9 +271,9 @@ def main():
     print()
 
     step_generate_rtl()
-    step_vivado()
+    step_vivado(args.force_build)
     step_compile()
-    step_run(find_symbols())
+    step_run(find_symbols(), args.wait_seconds)
 
 
 if __name__ == "__main__":

@@ -44,12 +44,27 @@ class AxiStreamArtySmoke extends Component {
   private val src1Beat = RegInit(False)
   private val src2Beat = RegInit(False)
 
-  src0.valid := !src0Sent
-  src0.payload.data := Mux(
-    src0Beat,
-    B(BigInt("17161514", 16), 32 bits),
-    B(BigInt("13121110", 16), 32 bits)
-  )
+  private val src0Words = Seq(0x13121110, 0x17161514)
+  private val src1Words = Seq(0x23222120, 0x27262524)
+  private val src2Words = Seq(0x33323130, 0x37363534)
+
+  private def wordBits(words: Seq[Int], secondBeat: Bool): Bits =
+    Mux(secondBeat, B(BigInt(words(1)), 32 bits), B(BigInt(words(0)), 32 bits))
+
+  private def byteSum(words: Seq[Int]): Int =
+    words.flatMap(word => (0 until 4).map(i => (word >> (8 * i)) & 0xff)).sum
+
+  private val bytesPerPacket           = src0Words.length * 4
+  private val expectedDemux0Bytes      = bytesPerPacket * 2
+  private val expectedDemux1Bytes      = bytesPerPacket
+  private val expectedBroadcastBeats   = src1Words.length
+  private val expectedDemux0Sum        = byteSum(src0Words) + byteSum(src2Words)
+  private val expectedDemux1Sum        = byteSum(src1Words)
+  private val expectedPacketCount      = 3
+  private val backpressureReleaseEvery = 4
+
+  src0.valid        := !src0Sent
+  src0.payload.data := wordBits(src0Words, src0Beat)
   src0.payload.strb := B"4'b1111"
   src0.payload.keep := B"4'b1111"
   src0.payload.last := src0Beat
@@ -61,12 +76,8 @@ class AxiStreamArtySmoke extends Component {
     }
   }
 
-  src1.valid := !src1Sent
-  src1.payload.data := Mux(
-    src1Beat,
-    B(BigInt("27262524", 16), 32 bits),
-    B(BigInt("23222120", 16), 32 bits)
-  )
+  src1.valid        := !src1Sent
+  src1.payload.data := wordBits(src1Words, src1Beat)
   src1.payload.strb := B"4'b1111"
   src1.payload.keep := B"4'b1111"
   src1.payload.last := src1Beat
@@ -78,12 +89,8 @@ class AxiStreamArtySmoke extends Component {
     }
   }
 
-  src2.valid := !src2Sent
-  src2.payload.data := Mux(
-    src2Beat,
-    B(BigInt("37363534", 16), 32 bits),
-    B(BigInt("33323130", 16), 32 bits)
-  )
+  src2.valid        := !src2Sent
+  src2.payload.data := wordBits(src2Words, src2Beat)
   src2.payload.strb := B"4'b1111"
   src2.payload.keep := B"4'b1111"
   src2.payload.last := src2Beat
@@ -124,7 +131,7 @@ class AxiStreamArtySmoke extends Component {
   private val stallCounter = RegInit(U(0, 2 bits))
   stallCounter                  := stallCounter + 1
   broadcast.io.outputs(0).ready := True
-  broadcast.io.outputs(1).ready := stallCounter =/= 0
+  broadcast.io.outputs(1).ready := stallCounter =/= U(0, log2Up(backpressureReleaseEvery) bits)
 
   private def sumWideBytes(data: Bits): UInt =
     data(7 downto 0).asUInt.resize(12) +
@@ -187,17 +194,17 @@ class AxiStreamArtySmoke extends Component {
     timeout := timeout + 1
   }
 
-  private val demux0BytesOk = demux0Bytes === 16
-  private val demux1BytesOk = demux1Bytes === 8
-  private val bcast0BeatsOk = bcast0Beats === 2
-  private val bcast1BeatsOk = bcast1Beats === 2
+  private val demux0BytesOk = demux0Bytes === expectedDemux0Bytes
+  private val demux1BytesOk = demux1Bytes === expectedDemux1Bytes
+  private val bcast0BeatsOk = bcast0Beats === expectedBroadcastBeats
+  private val bcast1BeatsOk = bcast1Beats === expectedBroadcastBeats
   private val sumsOk =
-    demux0Sum === U(0x238, 12 bits) &&
-      demux1Sum === U(0x11c, 12 bits) &&
-      bcast0Sum === U(0x11c, 12 bits) &&
-      bcast1Sum === U(0x11c, 12 bits)
+    demux0Sum === U(expectedDemux0Sum, 12 bits) &&
+      demux1Sum === U(expectedDemux1Sum, 12 bits) &&
+      bcast0Sum === U(expectedDemux1Sum, 12 bits) &&
+      bcast1Sum === U(expectedDemux1Sum, 12 bits)
   private val framesOk =
-    packetIndex === 3 &&
+    packetIndex === expectedPacketCount &&
       demux0Frames === 2 &&
       demux1Frames === 1 &&
       bcast0Frames === 1 &&
