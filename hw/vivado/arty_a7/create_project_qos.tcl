@@ -16,6 +16,7 @@
 
 set script_dir [file dirname [file normalize [info script]]]
 set repo_root  [file normalize "$script_dir/../../.."]
+source "$script_dir/fcapz_debug.tcl"
 
 ## â”€â”€â”€ 1. Project creation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 set proj_dir "$script_dir/axizero_arty_qos"
@@ -29,6 +30,7 @@ add_files -norecurse "$script_dir/ip/rtl/axi_id_echo.v"
 set_property file_type {Verilog} [get_files AxiZeroArtyQosDUT.v]
 set_property file_type {Verilog} [get_files axi_traffic_gen.v]
 set_property file_type {Verilog} [get_files axi_id_echo.v]
+add_fcapz_debug_sources $script_dir
 update_compile_order -fileset sources_1
 
 ## â”€â”€â”€ 3. Block Design â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -133,10 +135,12 @@ connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins tg
 
 ## â”€â”€ ID Echo modules (BRAM ctrls have ID_WIDTH=0, crossbar needs ID echo) â”€â”€
 create_bd_cell -type module -reference axi_id_echo id_echo_0
+set_property -dict { CONFIG.ID_WIDTH {3} } [get_bd_cells id_echo_0]
 connect_bd_net [get_bd_ports sys_clk] [get_bd_pins id_echo_0/aclk]
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins id_echo_0/aresetn]
 
 create_bd_cell -type module -reference axi_id_echo id_echo_1
+set_property -dict { CONFIG.ID_WIDTH {3} } [get_bd_cells id_echo_1]
 connect_bd_net [get_bd_ports sys_clk] [get_bd_pins id_echo_1/aclk]
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins id_echo_1/aresetn]
 
@@ -220,6 +224,8 @@ connect_bd_net [get_bd_pins tgen_0/rready]   [get_bd_pins axizero_0/s1_axi_rread
 connect_bd_net [get_bd_pins axizero_0/s1_axi_rdata]   [get_bd_pins tgen_0/rdata]
 connect_bd_net [get_bd_pins axizero_0/s1_axi_rresp]   [get_bd_pins tgen_0/rresp]
 
+connect_fcapz_arty_debug
+
 ## â”€â”€ GPIO trigger: bit 3 of gpio_io_o â†’ tgen_0/trigger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 create_bd_cell -type ip -vlnv xilinx.com:ip:xlslice:1.0 tgen_trigger_slice
 set_property -dict {CONFIG.DIN_WIDTH {4} CONFIG.DIN_FROM {3} CONFIG.DIN_TO {3}} [get_bd_cells tgen_trigger_slice]
@@ -230,7 +236,7 @@ set_property -dict {
     CONFIG.DATA_WIDTH      {32}
     CONFIG.SINGLE_PORT_BRAM {0}
     CONFIG.MEM_DEPTH       {65536}
-    CONFIG.ID_WIDTH        {2}
+    CONFIG.ID_WIDTH        {3}
 } [get_bd_cells axi_bram_ctrl_0]
 create_bd_cell -type ip -vlnv xilinx.com:ip:blk_mem_gen:8.4 bram0
 set_property -dict {
@@ -309,7 +315,7 @@ set_property -dict {
     CONFIG.DATA_WIDTH      {32}
     CONFIG.SINGLE_PORT_BRAM {0}
     CONFIG.MEM_DEPTH       {65536}
-    CONFIG.ID_WIDTH        {2}
+    CONFIG.ID_WIDTH        {3}
 } [get_bd_cells axi_bram_ctrl_1]
 create_bd_cell -type ip -vlnv xilinx.com:ip:blk_mem_gen:8.4 bram1
 set_property -dict {
@@ -484,5 +490,3 @@ wait_on_run impl_1
 
 puts "\n\[axiZero-QoS\] Project: $proj_dir"
 puts "\[axiZero-QoS\] Bitstream: $proj_dir/axizero_arty_qos.runs/impl_1/system_wrapper.bit"
-
-

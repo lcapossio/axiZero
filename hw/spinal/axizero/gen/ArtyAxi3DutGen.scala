@@ -28,7 +28,7 @@ object ArtyAxi3DutGen extends App {
   // The crossbar config (1M×4S, same as base design)
   val axi4MasterCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
 
-  val fullSlaveCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
+  val fullSlaveCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 2)
 
   val liteSlaveCfg = Axi4Config(
     addressWidth = 32,
@@ -47,9 +47,12 @@ object ArtyAxi3DutGen extends App {
     useStrb = true
   )
 
+  val debugMasterCfg = liteSlaveCfg
+
   val crossbarCfg = AxiZeroConfig(
     masters = Seq(
-      MasterPort(axi4MasterCfg, FullAxi4)
+      MasterPort(axi4MasterCfg, FullAxi4),
+      MasterPort(debugMasterCfg, LiteAxi4)
     ),
     slaves = Seq(
       SlavePort(fullSlaveCfg, FullAxi4, BigInt("C0000000", 16), BigInt("00010000", 16)),
@@ -68,6 +71,7 @@ object ArtyAxi3DutGen extends App {
     val io = new Bundle {
       // AXI4 slave port (MicroBlaze connects here)
       val s0 = slave(Axi4(axi4MasterCfg))
+      val s1 = slave(Axi4(debugMasterCfg))
       // Slave-side ports (same as normal crossbar)
       val m0 = master(Axi4(fullSlaveCfg))
       val m1 = master(Axi4(fullSlaveCfg))
@@ -126,6 +130,7 @@ object ArtyAxi3DutGen extends App {
     // ── Crossbar ──
     val crossbar = new AxiZeroMixedTop(crossbarCfg)
     crossbar.io.masters(0) <> adapter.io.axi4
+    crossbar.io.masters(1) <> io.s1
 
     // ── Slave ports ──
     io.m0 <> crossbar.io.slaves(0)

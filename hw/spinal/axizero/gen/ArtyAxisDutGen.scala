@@ -19,7 +19,23 @@ import spinal.lib.bus.amba4.axi.Axi4Config
 object ArtyAxisDutGen extends App {
 
   private val masterCfg    = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
-  private val fullSlaveCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
+  private val fullSlaveCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 2)
+  private val debugMasterCfg = Axi4Config(
+    addressWidth = 32,
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
+  )
   private val liteSlaveCfg = Axi4Config(
     addressWidth = 32,
     dataWidth = 32,
@@ -38,7 +54,10 @@ object ArtyAxisDutGen extends App {
   )
 
   private val cfg = AxiZeroConfig(
-    masters = Seq(MasterPort(masterCfg, FullAxi4)),
+    masters = Seq(
+      MasterPort(masterCfg, FullAxi4),
+      MasterPort(debugMasterCfg, LiteAxi4)
+    ),
     slaves = Seq(
       SlavePort(fullSlaveCfg, FullAxi4, BigInt("C0000000", 16), BigInt("00010000", 16)),
       SlavePort(fullSlaveCfg, FullAxi4, BigInt("C0010000", 16), BigInt("00010000", 16)),

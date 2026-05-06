@@ -54,7 +54,7 @@ object ArtyWrrDutGen extends App {
   )
 
   // ── Full AXI4 slave config (BRAM controllers, slaveIdW=2) ───────────────
-  val fullSlaveCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 2)
+  val fullSlaveCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 3)
 
   // ── AXI4-Lite slave config (GPIO, UART) ──────────────────────────────────
   val liteSlaveCfg = Axi4Config(
@@ -77,7 +77,8 @@ object ArtyWrrDutGen extends App {
   val cfg = AxiZeroConfig(
     masters = Seq(
       MasterPort(masterCfg, FullAxi4), // M0: MicroBlaze (weight 3)
-      MasterPort(tgenCfg, LiteAxi4)    // M1: Traffic Gen (weight 1)
+      MasterPort(tgenCfg, LiteAxi4),   // M1: Traffic Gen (weight 1)
+      MasterPort(tgenCfg, LiteAxi4)    // M2: fcapz EJTAG-AXI (weight 1)
     ),
     slaves = Seq(
       SlavePort(
@@ -105,7 +106,7 @@ object ArtyWrrDutGen extends App {
         BigInt("00001000", 16)
       ) // UART Lite 4 KB
     ),
-    arbitration = WeightedRoundRobin(Seq(3, 1)),
+    arbitration = WeightedRoundRobin(Seq(3, 1, 1)),
     maxOutstanding = 4
   )
 

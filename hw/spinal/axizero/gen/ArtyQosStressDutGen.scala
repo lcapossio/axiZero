@@ -17,9 +17,26 @@ object ArtyQosStressDutGen extends App {
 
   val fullMasterCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
   val fullSlaveCfg =
-    Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 3) // 4 masters -> +2 bits
+    Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 4) // 5 masters -> +3 bits
 
   val liteSlaveCfg = Axi4Config(
+    addressWidth = 32,
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
+  )
+
+  val debugMasterCfg = Axi4Config(
     addressWidth = 32,
     dataWidth = 32,
     useId = false,
@@ -41,7 +58,8 @@ object ArtyQosStressDutGen extends App {
       MasterPort(fullMasterCfg, FullAxi4),
       MasterPort(fullMasterCfg, FullAxi4),
       MasterPort(fullMasterCfg, FullAxi4),
-      MasterPort(fullMasterCfg, FullAxi4)
+      MasterPort(fullMasterCfg, FullAxi4),
+      MasterPort(debugMasterCfg, LiteAxi4)
     ),
     slaves = Seq(
       SlavePort(fullSlaveCfg, FullAxi4, BigInt("C0000000", 16), BigInt("00010000", 16)),

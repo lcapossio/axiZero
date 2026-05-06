@@ -499,13 +499,24 @@ All 5 tests pass (g\_fail=0, g\_pass=5).
 
 ### AXI4-Stream smoke test
 
-Topology: MicroBlaze -> axiZero 1M x 5S -> the normal base-test slaves plus a 32-bit AXI GPIO input at `0xC004_0000`.
+Topology: MicroBlaze plus the dedicated fcapz EJTAG-AXI debug ingress -> axiZero 2M x 5S -> the normal base-test slaves plus a 32-bit AXI GPIO input at `0xC004_0000`.
 
 The GPIO samples a self-running `AxiStreamArtySmoke` datapath:
 
 `3 sources` -> `AxiStreamArbMux` -> `AxiStreamFifo` -> `AxiStreamRegSlice` -> `AxiStreamWidthAdapter` 32-to-8 -> `AxiStreamDemux` -> direct byte sink or `AxiStreamWidthAdapter` 8-to-32 -> `AxiStreamBroadcaster`.
 
 The smoke engine sends three two-beat 32-bit frames, arbitrates between all three sources, unpacks to bytes, routes frame 1 through the repack/broadcast path and frames 0/2 through the direct byte path, deliberately stalls one broadcast sink, then reports done/pass/fail, byte counts, frame counts, checksum matches, route checks, and backpressure observation. The MicroBlaze firmware polls that status through axiZero and passes only when the board-observed status has `done=1`, `pass=1`, `fail=0`, the expected counts/checksums/frame boundaries match, and backpressure was actually seen.
+
+### Arty fcapz debug
+
+All Arty Vivado builds source `hw/vivado/arty_a7/fcapz_debug.tcl`, which adds the project-local `axizero_fcapz_debug` wrapper. The AXIS build inherits this through `create_project_axis.tcl` because it derives from the base Arty script. Builds with an appended debug ingress connect USER4 to the highest-numbered free `s*_axi` port, so existing MicroBlaze and traffic-generator ports keep their original wiring.
+
+Debug chains:
+
+| Chain | Function | Wiring |
+|---|---|---|
+| USER1 | fcapz ELA | Captures USER4 EJTAG-AXI requests plus the main-fabric `BRESP`/`RRESP` returned to that master. The default trigger fires on AXI `BRESP[1]` or `RRESP[1]`. |
+| USER4 | fcapz EJTAG-AXI | Enters the main axiZero fabric through a dedicated appended AXI4-Lite ingress (`s1_axi` on base/AXIS, `s2_axi` on WRR/QoS, `s4_axi` on QoS stress), then reaches the normal axiZero slave map. |
 
 ### Running HW tests
 
