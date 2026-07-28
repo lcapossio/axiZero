@@ -58,6 +58,11 @@ hw/vivado/arty_a7/_create_project_axis_gen.tcl
 /.vivado_user/
 /2025.2/
 /tclapp/
+# JVM crash artifacts from forked SpinalSim test JVMs
+hs_err_pid*.log
+replay_pid*.log
+core.*
+hw/vivado/arty_a7/axis_hier_util.rpt
 hw/vivado/arty_a7/.vivado_user/
 hw/vivado/arty_a7/2025.2/
 hw/vivado/arty_a7/tclapp/

@@ -14,6 +14,7 @@ Usage:
     python scripts/run_sim.py axis         # AXI Stream focused regression
 """
 
+import os
 import pathlib
 import re
 import subprocess
@@ -28,6 +29,10 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # so the scalac instrumentation plugin is evaluated at load time.
 _SBT_COVERAGE_FLAG = "-Dcoverage=true"
 _COVERAGE_CMD = "clean; coverageTest"
+
+# Wall-clock ceiling for any single sbt invocation, in seconds. Generous enough
+# for a cold coverage run (dependency resolution + full Verilator rebuild).
+_SBT_TIMEOUT_DEFAULT = 3600
 
 # Mapping of friendly names to sbt commands
 _CMDS = {
@@ -59,7 +64,21 @@ def _run(sbt_args: list[str]) -> "subprocess.CompletedProcess[bytes]":
             sys.exit(1)
         cmd = ["sbt"] + sbt_args
 
-    return subprocess.run(cmd, cwd=REPO_ROOT)
+    # A forked test JVM that dies (e.g. a native segfault in the Verilator
+    # backend) leaves sbt blocked forever in ScalaTestRunner.done(), waiting on
+    # a socket the dead JVM will never open. Without a deadline that hang is
+    # indistinguishable from a slow run. Override with AXIZERO_SBT_TIMEOUT.
+    timeout_s = int(os.environ.get("AXIZERO_SBT_TIMEOUT", _SBT_TIMEOUT_DEFAULT))
+    try:
+        return subprocess.run(cmd, cwd=REPO_ROOT, timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        print(
+            f"\nERROR: sbt exceeded {timeout_s}s and was killed.\n"
+            "  A forked test JVM most likely crashed; check for hs_err_pid*.log\n"
+            "  in the repo root. Raise the limit with AXIZERO_SBT_TIMEOUT=<seconds>.",
+            file=sys.stderr,
+        )
+        return subprocess.CompletedProcess(cmd, returncode=124)
 
 
 def _run_python_lint() -> int:
