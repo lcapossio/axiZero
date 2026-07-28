@@ -329,7 +329,7 @@ Measured xc7a100t datapoint for the Arty AXIS smoke datapath, which instantiates
 
 | Design | LUTs | FFs | LUTRAM | BRAM | DSP | Clock | Fmax note |
 |---|---:|---:|---:|---:|---:|---:|---|
-| `AxiStreamArtySmoke` submodule | 185 | 208 | 20 | 0 | 0 | 100 MHz | Routed Arty AXIS build WNS 1.199 ns, equivalent single-clock margin to about 114 MHz |
+| `AxiStreamArtySmoke` submodule | 175 | 208 | 20 | 0 | 0 | 100 MHz | Routed Arty AXIS build (Vivado 2025.2, SpinalHDL 1.14.2) WNS 0.465 ns, equivalent single-clock margin to about 105 MHz |
 
 Example:
 

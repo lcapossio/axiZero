@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
 // SPDX-License-Identifier: MIT
-// Generator : SpinalHDL v1.10.1    git head : 2527c7c6b0fb0f95e5e1a5722a0be732b364ce43
+// Generator : SpinalHDL v1.14.2    git head : 78f29dc66110fc099a777992b6daa2f803ab445e
 // Component : Axi3BridgeTestTop
-// Git hash  : a247c8e6093e42031e2bcde57f9e5c07ec8b5455
+// Git hash  : 9bbb5f0756c6d95e20bf1673c50b250e3b197455
 
 `timescale 1ns/1ps
 
@@ -1753,13 +1753,10 @@ module Axi3ToAxi4Adapter (
 
   wire                awCmdFifo_io_pushlocked;
   reg                 awCmdFifo_io_pop_ready;
-  wire                awCmdFifo_io_flush;
   wire                wSlots_0_io_push_valid;
   reg                 wSlots_0_io_pop_ready;
-  wire                wSlots_0_io_flush;
   wire                wSlots_1_io_push_valid;
   reg                 wSlots_1_io_pop_ready;
-  wire                wSlots_1_io_flush;
   wire                awCmdFifo_io_push_ready;
   wire                awCmdFifo_io_pop_valid;
   wire       [0:0]    awCmdFifo_io_popid;
@@ -1841,7 +1838,7 @@ module Axi3ToAxi4Adapter (
     .io_popcache   (awCmdFifo_io_popcache[3:0]), //o
     .io_popprot    (awCmdFifo_io_popprot[2:0] ), //o
     .io_poplocked  (awCmdFifo_io_poplocked    ), //o
-    .io_flush               (awCmdFifo_io_flush                 ), //i
+    .io_flush               (1'b0                               ), //i
     .io_occupancy           (awCmdFifo_io_occupancy[2:0]        ), //o
     .io_availability        (awCmdFifo_io_availability[2:0]     ), //o
     .clk                    (clk                                ), //i
@@ -1858,7 +1855,7 @@ module Axi3ToAxi4Adapter (
     .io_popdata  (wSlots_0_io_popdata[31:0]), //o
     .io_popstrb  (wSlots_0_io_popstrb[3:0] ), //o
     .io_poplast  (wSlots_0_io_poplast      ), //o
-    .io_flush             (wSlots_0_io_flush                 ), //i
+    .io_flush             (1'b0                              ), //i
     .io_occupancy         (wSlots_0_io_occupancy[4:0]        ), //o
     .io_availability      (wSlots_0_io_availability[4:0]     ), //o
     .clk                  (clk                               ), //i
@@ -1875,7 +1872,7 @@ module Axi3ToAxi4Adapter (
     .io_popdata  (wSlots_1_io_popdata[31:0]), //o
     .io_popstrb  (wSlots_1_io_popstrb[3:0] ), //o
     .io_poplast  (wSlots_1_io_poplast      ), //o
-    .io_flush             (wSlots_1_io_flush                 ), //i
+    .io_flush             (1'b0                              ), //i
     .io_occupancy         (wSlots_1_io_occupancy[4:0]        ), //o
     .io_availability      (wSlots_1_io_availability[4:0]     ), //o
     .clk                  (clk                               ), //i
@@ -1895,7 +1892,7 @@ module Axi3ToAxi4Adapter (
 
   assign io_axi4_arvalid = io_axi3_arvalid;
   assign io_axi3_arready = io_axi4_arready;
-  assign _zz_io_axi4_araddr = 62'h0000000000000000;
+  assign _zz_io_axi4_araddr = 62'h0;
   always @(*) begin
     io_axi4_araddr = _zz_io_axi4_araddr[31 : 0];
     io_axi4_araddr = io_axi3_araddr;
@@ -2000,7 +1997,7 @@ module Axi3ToAxi4Adapter (
     endcase
   end
 
-  assign _zz_io_axi4_awaddr = 62'h0000000000000000;
+  assign _zz_io_axi4_awaddr = 62'h0;
   always @(*) begin
     io_axi4_awaddr = _zz_io_axi4_awaddr[31 : 0];
     case(state)
@@ -2167,7 +2164,7 @@ module Axi3ToAxi4Adapter (
     endcase
   end
 
-  assign _zz_io_axi4_wdata = 37'h0000000000;
+  assign _zz_io_axi4_wdata = 37'h0;
   always @(*) begin
     io_axi4_wdata = _zz_io_axi4_wdata[31 : 0];
     case(state)
@@ -2217,7 +2214,7 @@ module Axi3ToAxi4Adapter (
   end
 
   always @(*) begin
-    drainBeat_data = 32'h00000000;
+    drainBeat_data = 32'h0;
     if(when_Axi3ToAxi4Adapter_l253) begin
       drainBeat_data = wSlots_0_io_popdata;
     end
@@ -2296,9 +2293,6 @@ module Axi3ToAxi4Adapter (
   assign io_axi4_bready = (io_axi3_bready && (state == FsmState_WAIT_B));
   assign io_axi3_bid = io_axi4_bid;
   assign io_axi3_bresp = (curCmd_locked ? 2'b10 : io_axi4_bresp);
-  assign awCmdFifo_io_flush = 1'b0;
-  assign wSlots_0_io_flush = 1'b0;
-  assign wSlots_1_io_flush = 1'b0;
   always @(posedge clk) begin
     if(!resetn) begin
       state <= FsmState_IDLE;
@@ -2440,7 +2434,7 @@ module Axi4FullToLiteAdapter (
   wire       [36:0]   _zz_io_full_rdata;
 
   assign io_lite_awvalid = io_full_awvalid;
-  assign _zz_io_lite_awaddr = 35'h000000000;
+  assign _zz_io_lite_awaddr = 35'h0;
   always @(*) begin
     io_lite_awaddr = _zz_io_lite_awaddr[31 : 0];
     io_lite_awaddr = io_full_awaddr;
@@ -2468,7 +2462,7 @@ module Axi4FullToLiteAdapter (
 
   assign io_lite_bready = io_full_bready;
   assign io_lite_wvalid = io_full_wvalid;
-  assign _zz_io_lite_wdata = 36'h000000000;
+  assign _zz_io_lite_wdata = 36'h0;
   always @(*) begin
     io_lite_wdata = _zz_io_lite_wdata[31 : 0];
     io_lite_wdata = io_full_wdata;
@@ -2481,7 +2475,7 @@ module Axi4FullToLiteAdapter (
 
   assign io_full_wready = io_lite_wready;
   assign io_lite_arvalid = io_full_arvalid;
-  assign _zz_io_lite_araddr = 35'h000000000;
+  assign _zz_io_lite_araddr = 35'h0;
   always @(*) begin
     io_lite_araddr = _zz_io_lite_araddr[31 : 0];
     io_lite_araddr = io_full_araddr;
@@ -2497,7 +2491,7 @@ module Axi4FullToLiteAdapter (
   assign io_full_r_fire = (io_full_rvalid && io_full_rready);
   assign when_Axi4FullToLiteAdapter_l89 = (io_full_r_fire && io_full_rlast);
   assign io_full_rvalid = io_lite_rvalid;
-  assign _zz_io_full_rdata = 37'h0000000000;
+  assign _zz_io_full_rdata = 37'h0;
   always @(*) begin
     io_full_rdata = _zz_io_full_rdata[31 : 0];
     io_full_rdata = io_lite_rdata;
@@ -2635,7 +2629,7 @@ module Axi4LiteToFullAdapter (
 
   assign _zz_io_lite_bresp = 2'b00;
   assign io_full_awvalid = io_lite_awvalid;
-  assign _zz_io_full_awaddr = 62'h0000000000000000;
+  assign _zz_io_full_awaddr = 62'h0;
   always @(*) begin
     io_full_awaddr = _zz_io_full_awaddr[31 : 0];
     io_full_awaddr = io_lite_awaddr;
@@ -2649,7 +2643,7 @@ module Axi4LiteToFullAdapter (
   assign io_full_awregion = _zz_io_full_awaddr[36 : 33];
   always @(*) begin
     io_full_awlen = _zz_io_full_awaddr[44 : 37];
-    io_full_awlen = 8'h00;
+    io_full_awlen = 8'h0;
   end
 
   always @(*) begin
@@ -2672,7 +2666,7 @@ module Axi4LiteToFullAdapter (
 
   assign io_lite_awready = io_full_awready;
   assign io_full_wvalid = io_lite_wvalid;
-  assign _zz_io_full_wdata = 37'h0000000000;
+  assign _zz_io_full_wdata = 37'h0;
   always @(*) begin
     io_full_wdata = _zz_io_full_wdata[31 : 0];
     io_full_wdata = io_lite_wdata;
@@ -2697,7 +2691,7 @@ module Axi4LiteToFullAdapter (
 
   assign io_full_bready = io_lite_bready;
   assign io_full_arvalid = io_lite_arvalid;
-  assign _zz_io_full_araddr = 62'h0000000000000000;
+  assign _zz_io_full_araddr = 62'h0;
   always @(*) begin
     io_full_araddr = _zz_io_full_araddr[31 : 0];
     io_full_araddr = io_lite_araddr;
@@ -2711,7 +2705,7 @@ module Axi4LiteToFullAdapter (
   assign io_full_arregion = _zz_io_full_araddr[36 : 33];
   always @(*) begin
     io_full_arlen = _zz_io_full_araddr[44 : 37];
-    io_full_arlen = 8'h00;
+    io_full_arlen = 8'h0;
   end
 
   always @(*) begin
@@ -2734,7 +2728,7 @@ module Axi4LiteToFullAdapter (
 
   assign io_lite_arready = io_full_arready;
   assign io_lite_rvalid = io_full_rvalid;
-  assign _zz_io_lite_rdata = 34'h000000000;
+  assign _zz_io_lite_rdata = 34'h0;
   always @(*) begin
     io_lite_rdata = _zz_io_lite_rdata[31 : 0];
     io_lite_rdata = io_full_rdata;
@@ -2988,10 +2982,10 @@ module Axi4Crossbar (
   input  wire          resetn
 );
 
-  wire       [0:0]    _zz__zz_5_port0;
-  wire       [0:0]    _zz__zz_6_port0;
-  wire       [0:0]    _zz__zz_7_port0;
-  wire       [0:0]    _zz__zz_8_port0;
+  wire       [0:0]    _zz_5_spinal_port0;
+  wire       [0:0]    _zz_6_spinal_port0;
+  wire       [0:0]    _zz_7_spinal_port0;
+  wire       [0:0]    _zz_8_spinal_port0;
   wire       [1:0]    _zz__zz_when_Axi4Crossbar_l167_4;
   wire       [1:0]    _zz__zz_when_Axi4Crossbar_l167_4_1;
   wire       [1:0]    _zz__zz_9;
@@ -3353,28 +3347,28 @@ module Axi4Crossbar (
   assign _zz__zz_6_port = _zz_io_slaves_1_awid;
   assign _zz__zz_7_port = _zz_io_slaves_2_awid;
   assign _zz__zz_8_port = _zz_io_slaves_3_awid;
-  assign _zz__zz_5_port0 = _zz_5[_zz_when_Axi4Crossbar_l496];
+  assign _zz_5_spinal_port0 = _zz_5[_zz_when_Axi4Crossbar_l496];
   always @(posedge clk) begin
     if(_zz_4) begin
       _zz_5[_zz_9] <= _zz__zz_5_port;
     end
   end
 
-  assign _zz__zz_6_port0 = _zz_6[_zz_when_Axi4Crossbar_l496_1];
+  assign _zz_6_spinal_port0 = _zz_6[_zz_when_Axi4Crossbar_l496_1];
   always @(posedge clk) begin
     if(_zz_3) begin
       _zz_6[_zz_10] <= _zz__zz_6_port;
     end
   end
 
-  assign _zz__zz_7_port0 = _zz_7[_zz_when_Axi4Crossbar_l496_2];
+  assign _zz_7_spinal_port0 = _zz_7[_zz_when_Axi4Crossbar_l496_2];
   always @(posedge clk) begin
     if(_zz_2) begin
       _zz_7[_zz_11] <= _zz__zz_7_port;
     end
   end
 
-  assign _zz__zz_8_port0 = _zz_8[_zz_when_Axi4Crossbar_l496_3];
+  assign _zz_8_spinal_port0 = _zz_8[_zz_when_Axi4Crossbar_l496_3];
   always @(posedge clk) begin
     if(_zz_1) begin
       _zz_8[_zz_12] <= _zz__zz_8_port;
@@ -3574,7 +3568,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_masters_0_rdata = 36'h000000000;
+  assign _zz_io_masters_0_rdata = 36'h0;
   always @(*) begin
     io_masters_0_rdata = _zz_io_masters_0_rdata[31 : 0];
     if(when_Axi4Crossbar_l620) begin
@@ -3804,7 +3798,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_masters_1_rdata = 36'h000000000;
+  assign _zz_io_masters_1_rdata = 36'h0;
   always @(*) begin
     io_masters_1_rdata = _zz_io_masters_1_rdata[31 : 0];
     if(when_Axi4Crossbar_l620_4) begin
@@ -3876,7 +3870,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_slaves_0_awaddr = 63'h0000000000000000;
+  assign _zz_io_slaves_0_awaddr = 63'h0;
   always @(*) begin
     io_slaves_0_awaddr = _zz_io_slaves_0_awaddr[31 : 0];
     if(when_Axi4Crossbar_l464) begin
@@ -4010,7 +4004,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_slaves_0_wdata = 37'h0000000000;
+  assign _zz_io_slaves_0_wdata = 37'h0;
   always @(*) begin
     io_slaves_0_wdata = _zz_io_slaves_0_wdata[31 : 0];
     if(when_Axi4Crossbar_l464) begin
@@ -4100,7 +4094,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_slaves_0_araddr = 63'h0000000000000000;
+  assign _zz_io_slaves_0_araddr = 63'h0;
   always @(*) begin
     io_slaves_0_araddr = _zz_io_slaves_0_araddr[31 : 0];
     if(when_Axi4Crossbar_l579) begin
@@ -4227,7 +4221,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_slaves_1_awaddr = 63'h0000000000000000;
+  assign _zz_io_slaves_1_awaddr = 63'h0;
   always @(*) begin
     io_slaves_1_awaddr = _zz_io_slaves_1_awaddr[31 : 0];
     if(when_Axi4Crossbar_l464_1) begin
@@ -4361,7 +4355,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_slaves_1_wdata = 37'h0000000000;
+  assign _zz_io_slaves_1_wdata = 37'h0;
   always @(*) begin
     io_slaves_1_wdata = _zz_io_slaves_1_wdata[31 : 0];
     if(when_Axi4Crossbar_l464_1) begin
@@ -4451,7 +4445,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_slaves_1_araddr = 63'h0000000000000000;
+  assign _zz_io_slaves_1_araddr = 63'h0;
   always @(*) begin
     io_slaves_1_araddr = _zz_io_slaves_1_araddr[31 : 0];
     if(when_Axi4Crossbar_l579_1) begin
@@ -4578,7 +4572,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_slaves_2_awaddr = 63'h0000000000000000;
+  assign _zz_io_slaves_2_awaddr = 63'h0;
   always @(*) begin
     io_slaves_2_awaddr = _zz_io_slaves_2_awaddr[31 : 0];
     if(when_Axi4Crossbar_l464_2) begin
@@ -4712,7 +4706,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_slaves_2_wdata = 37'h0000000000;
+  assign _zz_io_slaves_2_wdata = 37'h0;
   always @(*) begin
     io_slaves_2_wdata = _zz_io_slaves_2_wdata[31 : 0];
     if(when_Axi4Crossbar_l464_2) begin
@@ -4802,7 +4796,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_slaves_2_araddr = 63'h0000000000000000;
+  assign _zz_io_slaves_2_araddr = 63'h0;
   always @(*) begin
     io_slaves_2_araddr = _zz_io_slaves_2_araddr[31 : 0];
     if(when_Axi4Crossbar_l579_2) begin
@@ -4929,7 +4923,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_slaves_3_awaddr = 63'h0000000000000000;
+  assign _zz_io_slaves_3_awaddr = 63'h0;
   always @(*) begin
     io_slaves_3_awaddr = _zz_io_slaves_3_awaddr[31 : 0];
     if(when_Axi4Crossbar_l464_3) begin
@@ -5063,7 +5057,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_slaves_3_wdata = 37'h0000000000;
+  assign _zz_io_slaves_3_wdata = 37'h0;
   always @(*) begin
     io_slaves_3_wdata = _zz_io_slaves_3_wdata[31 : 0];
     if(when_Axi4Crossbar_l464_3) begin
@@ -5153,7 +5147,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_io_slaves_3_araddr = 63'h0000000000000000;
+  assign _zz_io_slaves_3_araddr = 63'h0;
   always @(*) begin
     io_slaves_3_araddr = _zz_io_slaves_3_araddr[31 : 0];
     if(when_Axi4Crossbar_l579_3) begin
@@ -5314,7 +5308,7 @@ module Axi4Crossbar (
   assign when_Axi4Crossbar_l167 = _zz_when_Axi4Crossbar_l167_4[0];
   assign when_Axi4Crossbar_l167_1 = _zz_when_Axi4Crossbar_l167_4[1];
   assign when_Axi4Crossbar_l473 = (_zz_when_Axi4Crossbar_l473 == 3'b000);
-  assign _zz_when_Axi4Crossbar_l496_4 = _zz__zz_5_port0;
+  assign _zz_when_Axi4Crossbar_l496_4 = _zz_5_spinal_port0;
   assign when_Axi4Crossbar_l464 = ((_zz_when_Axi4Crossbar_l464 < 3'b100) && (|_zz_when_Axi4Crossbar_l464_4));
   assign when_Axi4Crossbar_l467 = (_zz_io_slaves_0_awid == 1'b0);
   assign when_Axi4Crossbar_l467_1 = (_zz_io_slaves_0_awid == 1'b1);
@@ -5370,7 +5364,7 @@ module Axi4Crossbar (
   assign when_Axi4Crossbar_l167_2 = _zz_when_Axi4Crossbar_l167_9[0];
   assign when_Axi4Crossbar_l167_3 = _zz_when_Axi4Crossbar_l167_9[1];
   assign when_Axi4Crossbar_l473_1 = (_zz_when_Axi4Crossbar_l473_1 == 3'b000);
-  assign _zz_when_Axi4Crossbar_l496_5 = _zz__zz_6_port0;
+  assign _zz_when_Axi4Crossbar_l496_5 = _zz_6_spinal_port0;
   assign when_Axi4Crossbar_l464_1 = ((_zz_when_Axi4Crossbar_l464_1 < 3'b100) && (|_zz_when_Axi4Crossbar_l464_7));
   assign when_Axi4Crossbar_l467_2 = (_zz_io_slaves_1_awid == 1'b0);
   assign when_Axi4Crossbar_l467_3 = (_zz_io_slaves_1_awid == 1'b1);
@@ -5426,7 +5420,7 @@ module Axi4Crossbar (
   assign when_Axi4Crossbar_l167_4 = _zz_when_Axi4Crossbar_l167_14[0];
   assign when_Axi4Crossbar_l167_5 = _zz_when_Axi4Crossbar_l167_14[1];
   assign when_Axi4Crossbar_l473_2 = (_zz_when_Axi4Crossbar_l473_2 == 3'b000);
-  assign _zz_when_Axi4Crossbar_l496_6 = _zz__zz_7_port0;
+  assign _zz_when_Axi4Crossbar_l496_6 = _zz_7_spinal_port0;
   assign when_Axi4Crossbar_l464_2 = ((_zz_when_Axi4Crossbar_l464_2 < 3'b100) && (|_zz_when_Axi4Crossbar_l464_10));
   assign when_Axi4Crossbar_l467_4 = (_zz_io_slaves_2_awid == 1'b0);
   assign when_Axi4Crossbar_l467_5 = (_zz_io_slaves_2_awid == 1'b1);
@@ -5482,7 +5476,7 @@ module Axi4Crossbar (
   assign when_Axi4Crossbar_l167_6 = _zz_when_Axi4Crossbar_l167_19[0];
   assign when_Axi4Crossbar_l167_7 = _zz_when_Axi4Crossbar_l167_19[1];
   assign when_Axi4Crossbar_l473_3 = (_zz_when_Axi4Crossbar_l473_3 == 3'b000);
-  assign _zz_when_Axi4Crossbar_l496_7 = _zz__zz_8_port0;
+  assign _zz_when_Axi4Crossbar_l496_7 = _zz_8_spinal_port0;
   assign when_Axi4Crossbar_l464_3 = ((_zz_when_Axi4Crossbar_l464_3 < 3'b100) && (|_zz_when_Axi4Crossbar_l464_13));
   assign when_Axi4Crossbar_l467_6 = (_zz_io_slaves_3_awid == 1'b0);
   assign when_Axi4Crossbar_l467_7 = (_zz_io_slaves_3_awid == 1'b1);
@@ -5922,7 +5916,7 @@ module StreamFifo_1 (
   input  wire          resetn
 );
 
-  reg        [36:0]   _zz_logic_ram_port1;
+  reg        [36:0]   logic_ram_spinal_port1;
   wire       [36:0]   _zz_logic_ram_port;
   reg                 _zz_1;
   wire                logic_ptr_doPush;
@@ -5933,7 +5927,7 @@ module StreamFifo_1 (
   reg        [4:0]    logic_ptr_pop;
   wire       [4:0]    logic_ptr_occupancy;
   wire       [4:0]    logic_ptr_popOnIo;
-  wire                when_Stream_l1205;
+  wire                when_Stream_l1557;
   reg                 logic_ptr_wentUp;
   wire                io_push_fire;
   wire                logic_push_onRam_write_valid;
@@ -5945,24 +5939,26 @@ module StreamFifo_1 (
   reg                 logic_pop_addressGen_ready;
   wire       [3:0]    logic_pop_addressGen_payload;
   wire                logic_pop_addressGen_fire;
-  wire                logic_pop_sync_readArbitation_valid;
-  wire                logic_pop_sync_readArbitation_ready;
-  wire       [3:0]    logic_pop_sync_readArbitation_payload;
+  wire                logic_pop_sync_readArbitration_valid;
+  wire                logic_pop_sync_readArbitration_ready;
+  wire       [3:0]    logic_pop_sync_readArbitration_payload;
   reg                 logic_pop_addressGen_rValid;
   reg        [3:0]    logic_pop_addressGen_rData;
-  wire                when_Stream_l369;
+  wire                when_Stream_l477;
   wire                logic_pop_sync_readPort_cmd_valid;
   wire       [3:0]    logic_pop_sync_readPort_cmd_payload;
   wire       [31:0]   logic_pop_sync_readPort_rsp_data;
   wire       [3:0]    logic_pop_sync_readPort_rsp_strb;
   wire                logic_pop_sync_readPort_rsp_last;
   wire       [36:0]   _zz_logic_pop_sync_readPort_rsp_data;
-  wire                logic_pop_sync_readArbitation_translated_valid;
-  wire                logic_pop_sync_readArbitation_translated_ready;
-  wire       [31:0]   logic_pop_sync_readArbitation_translateddata;
-  wire       [3:0]    logic_pop_sync_readArbitation_translatedstrb;
-  wire                logic_pop_sync_readArbitation_translatedlast;
-  wire                logic_pop_sync_readArbitation_fire;
+  wire                logic_pop_addressGen_toFlowFire_valid;
+  wire       [3:0]    logic_pop_addressGen_toFlowFire_payload;
+  wire                logic_pop_sync_readArbitration_translated_valid;
+  wire                logic_pop_sync_readArbitration_translated_ready;
+  wire       [31:0]   logic_pop_sync_readArbitration_translateddata;
+  wire       [3:0]    logic_pop_sync_readArbitration_translatedstrb;
+  wire                logic_pop_sync_readArbitration_translatedlast;
+  wire                logic_pop_sync_readArbitration_fire;
   reg        [4:0]    logic_pop_sync_popReg;
   reg [36:0] logic_ram [0:15];
 
@@ -5975,7 +5971,7 @@ module StreamFifo_1 (
 
   always @(posedge clk) begin
     if(logic_pop_sync_readPort_cmd_valid) begin
-      _zz_logic_ram_port1 <= logic_ram[logic_pop_sync_readPort_cmd_payload];
+      logic_ram_spinal_port1 <= logic_ram[logic_pop_sync_readPort_cmd_payload];
     end
   end
 
@@ -5986,8 +5982,8 @@ module StreamFifo_1 (
     end
   end
 
-  assign when_Stream_l1205 = (logic_ptr_doPush != logic_ptr_doPop);
-  assign logic_ptr_full = (((logic_ptr_push ^ logic_ptr_popOnIo) ^ 5'h10) == 5'h00);
+  assign when_Stream_l1557 = (logic_ptr_doPush != logic_ptr_doPop);
+  assign logic_ptr_full = (((logic_ptr_push ^ logic_ptr_popOnIo) ^ 5'h10) == 5'h0);
   assign logic_ptr_empty = (logic_ptr_push == logic_ptr_pop);
   assign logic_ptr_occupancy = (logic_ptr_push - logic_ptr_popOnIo);
   assign io_push_ready = (! logic_ptr_full);
@@ -6003,44 +5999,46 @@ module StreamFifo_1 (
   assign logic_pop_addressGen_fire = (logic_pop_addressGen_valid && logic_pop_addressGen_ready);
   assign logic_ptr_doPop = logic_pop_addressGen_fire;
   always @(*) begin
-    logic_pop_addressGen_ready = logic_pop_sync_readArbitation_ready;
-    if(when_Stream_l369) begin
+    logic_pop_addressGen_ready = logic_pop_sync_readArbitration_ready;
+    if(when_Stream_l477) begin
       logic_pop_addressGen_ready = 1'b1;
     end
   end
 
-  assign when_Stream_l369 = (! logic_pop_sync_readArbitation_valid);
-  assign logic_pop_sync_readArbitation_valid = logic_pop_addressGen_rValid;
-  assign logic_pop_sync_readArbitation_payload = logic_pop_addressGen_rData;
-  assign _zz_logic_pop_sync_readPort_rsp_data = _zz_logic_ram_port1;
+  assign when_Stream_l477 = (! logic_pop_sync_readArbitration_valid);
+  assign logic_pop_sync_readArbitration_valid = logic_pop_addressGen_rValid;
+  assign logic_pop_sync_readArbitration_payload = logic_pop_addressGen_rData;
+  assign _zz_logic_pop_sync_readPort_rsp_data = logic_ram_spinal_port1;
   assign logic_pop_sync_readPort_rsp_data = _zz_logic_pop_sync_readPort_rsp_data[31 : 0];
   assign logic_pop_sync_readPort_rsp_strb = _zz_logic_pop_sync_readPort_rsp_data[35 : 32];
   assign logic_pop_sync_readPort_rsp_last = _zz_logic_pop_sync_readPort_rsp_data[36];
-  assign logic_pop_sync_readPort_cmd_valid = logic_pop_addressGen_fire;
-  assign logic_pop_sync_readPort_cmd_payload = logic_pop_addressGen_payload;
-  assign logic_pop_sync_readArbitation_translated_valid = logic_pop_sync_readArbitation_valid;
-  assign logic_pop_sync_readArbitation_ready = logic_pop_sync_readArbitation_translated_ready;
-  assign logic_pop_sync_readArbitation_translateddata = logic_pop_sync_readPort_rsp_data;
-  assign logic_pop_sync_readArbitation_translatedstrb = logic_pop_sync_readPort_rsp_strb;
-  assign logic_pop_sync_readArbitation_translatedlast = logic_pop_sync_readPort_rsp_last;
-  assign io_pop_valid = logic_pop_sync_readArbitation_translated_valid;
-  assign logic_pop_sync_readArbitation_translated_ready = io_pop_ready;
-  assign io_popdata = logic_pop_sync_readArbitation_translateddata;
-  assign io_popstrb = logic_pop_sync_readArbitation_translatedstrb;
-  assign io_poplast = logic_pop_sync_readArbitation_translatedlast;
-  assign logic_pop_sync_readArbitation_fire = (logic_pop_sync_readArbitation_valid && logic_pop_sync_readArbitation_ready);
+  assign logic_pop_addressGen_toFlowFire_valid = logic_pop_addressGen_fire;
+  assign logic_pop_addressGen_toFlowFire_payload = logic_pop_addressGen_payload;
+  assign logic_pop_sync_readPort_cmd_valid = logic_pop_addressGen_toFlowFire_valid;
+  assign logic_pop_sync_readPort_cmd_payload = logic_pop_addressGen_toFlowFire_payload;
+  assign logic_pop_sync_readArbitration_translated_valid = logic_pop_sync_readArbitration_valid;
+  assign logic_pop_sync_readArbitration_ready = logic_pop_sync_readArbitration_translated_ready;
+  assign logic_pop_sync_readArbitration_translateddata = logic_pop_sync_readPort_rsp_data;
+  assign logic_pop_sync_readArbitration_translatedstrb = logic_pop_sync_readPort_rsp_strb;
+  assign logic_pop_sync_readArbitration_translatedlast = logic_pop_sync_readPort_rsp_last;
+  assign io_pop_valid = logic_pop_sync_readArbitration_translated_valid;
+  assign logic_pop_sync_readArbitration_translated_ready = io_pop_ready;
+  assign io_popdata = logic_pop_sync_readArbitration_translateddata;
+  assign io_popstrb = logic_pop_sync_readArbitration_translatedstrb;
+  assign io_poplast = logic_pop_sync_readArbitration_translatedlast;
+  assign logic_pop_sync_readArbitration_fire = (logic_pop_sync_readArbitration_valid && logic_pop_sync_readArbitration_ready);
   assign logic_ptr_popOnIo = logic_pop_sync_popReg;
   assign io_occupancy = logic_ptr_occupancy;
   assign io_availability = (5'h10 - logic_ptr_occupancy);
   always @(posedge clk) begin
     if(!resetn) begin
-      logic_ptr_push <= 5'h00;
-      logic_ptr_pop <= 5'h00;
+      logic_ptr_push <= 5'h0;
+      logic_ptr_pop <= 5'h0;
       logic_ptr_wentUp <= 1'b0;
       logic_pop_addressGen_rValid <= 1'b0;
-      logic_pop_sync_popReg <= 5'h00;
+      logic_pop_sync_popReg <= 5'h0;
     end else begin
-      if(when_Stream_l1205) begin
+      if(when_Stream_l1557) begin
         logic_ptr_wentUp <= logic_ptr_doPush;
       end
       if(io_flush) begin
@@ -6053,8 +6051,8 @@ module StreamFifo_1 (
         logic_ptr_pop <= (logic_ptr_pop + 5'h01);
       end
       if(io_flush) begin
-        logic_ptr_push <= 5'h00;
-        logic_ptr_pop <= 5'h00;
+        logic_ptr_push <= 5'h0;
+        logic_ptr_pop <= 5'h0;
       end
       if(logic_pop_addressGen_ready) begin
         logic_pop_addressGen_rValid <= logic_pop_addressGen_valid;
@@ -6062,11 +6060,11 @@ module StreamFifo_1 (
       if(io_flush) begin
         logic_pop_addressGen_rValid <= 1'b0;
       end
-      if(logic_pop_sync_readArbitation_fire) begin
+      if(logic_pop_sync_readArbitration_fire) begin
         logic_pop_sync_popReg <= logic_ptr_pop;
       end
       if(io_flush) begin
-        logic_pop_sync_popReg <= 5'h00;
+        logic_pop_sync_popReg <= 5'h0;
       end
     end
   end
@@ -6110,7 +6108,7 @@ module StreamFifo (
   input  wire          resetn
 );
 
-  reg        [51:0]   _zz_logic_ram_port1;
+  reg        [51:0]   logic_ram_spinal_port1;
   wire       [51:0]   _zz_logic_ram_port;
   reg                 _zz_1;
   wire                logic_ptr_doPush;
@@ -6121,7 +6119,7 @@ module StreamFifo (
   reg        [2:0]    logic_ptr_pop;
   wire       [2:0]    logic_ptr_occupancy;
   wire       [2:0]    logic_ptr_popOnIo;
-  wire                when_Stream_l1205;
+  wire                when_Stream_l1557;
   reg                 logic_ptr_wentUp;
   wire                io_push_fire;
   wire                logic_push_onRam_write_valid;
@@ -6139,12 +6137,12 @@ module StreamFifo (
   reg                 logic_pop_addressGen_ready;
   wire       [1:0]    logic_pop_addressGen_payload;
   wire                logic_pop_addressGen_fire;
-  wire                logic_pop_sync_readArbitation_valid;
-  wire                logic_pop_sync_readArbitation_ready;
-  wire       [1:0]    logic_pop_sync_readArbitation_payload;
+  wire                logic_pop_sync_readArbitration_valid;
+  wire                logic_pop_sync_readArbitration_ready;
+  wire       [1:0]    logic_pop_sync_readArbitration_payload;
   reg                 logic_pop_addressGen_rValid;
   reg        [1:0]    logic_pop_addressGen_rData;
-  wire                when_Stream_l369;
+  wire                when_Stream_l477;
   wire                logic_pop_sync_readPort_cmd_valid;
   wire       [1:0]    logic_pop_sync_readPort_cmd_payload;
   wire       [0:0]    logic_pop_sync_readPort_rsp_id;
@@ -6157,18 +6155,20 @@ module StreamFifo (
   wire       [2:0]    logic_pop_sync_readPort_rsp_prot;
   wire                logic_pop_sync_readPort_rsp_locked;
   wire       [51:0]   _zz_logic_pop_sync_readPort_rsp_id;
-  wire                logic_pop_sync_readArbitation_translated_valid;
-  wire                logic_pop_sync_readArbitation_translated_ready;
-  wire       [0:0]    logic_pop_sync_readArbitation_translatedid;
-  wire       [31:0]   logic_pop_sync_readArbitation_translatedaddr;
-  wire       [3:0]    logic_pop_sync_readArbitation_translatedlen;
-  wire       [2:0]    logic_pop_sync_readArbitation_translatedsize;
-  wire       [1:0]    logic_pop_sync_readArbitation_translatedburst;
-  wire       [1:0]    logic_pop_sync_readArbitation_translatedlock;
-  wire       [3:0]    logic_pop_sync_readArbitation_translatedcache;
-  wire       [2:0]    logic_pop_sync_readArbitation_translatedprot;
-  wire                logic_pop_sync_readArbitation_translatedlocked;
-  wire                logic_pop_sync_readArbitation_fire;
+  wire                logic_pop_addressGen_toFlowFire_valid;
+  wire       [1:0]    logic_pop_addressGen_toFlowFire_payload;
+  wire                logic_pop_sync_readArbitration_translated_valid;
+  wire                logic_pop_sync_readArbitration_translated_ready;
+  wire       [0:0]    logic_pop_sync_readArbitration_translatedid;
+  wire       [31:0]   logic_pop_sync_readArbitration_translatedaddr;
+  wire       [3:0]    logic_pop_sync_readArbitration_translatedlen;
+  wire       [2:0]    logic_pop_sync_readArbitration_translatedsize;
+  wire       [1:0]    logic_pop_sync_readArbitration_translatedburst;
+  wire       [1:0]    logic_pop_sync_readArbitration_translatedlock;
+  wire       [3:0]    logic_pop_sync_readArbitration_translatedcache;
+  wire       [2:0]    logic_pop_sync_readArbitration_translatedprot;
+  wire                logic_pop_sync_readArbitration_translatedlocked;
+  wire                logic_pop_sync_readArbitration_fire;
   reg        [2:0]    logic_pop_sync_popReg;
   reg [51:0] logic_ram [0:3];
 
@@ -6181,7 +6181,7 @@ module StreamFifo (
 
   always @(posedge clk) begin
     if(logic_pop_sync_readPort_cmd_valid) begin
-      _zz_logic_ram_port1 <= logic_ram[logic_pop_sync_readPort_cmd_payload];
+      logic_ram_spinal_port1 <= logic_ram[logic_pop_sync_readPort_cmd_payload];
     end
   end
 
@@ -6192,7 +6192,7 @@ module StreamFifo (
     end
   end
 
-  assign when_Stream_l1205 = (logic_ptr_doPush != logic_ptr_doPop);
+  assign when_Stream_l1557 = (logic_ptr_doPush != logic_ptr_doPop);
   assign logic_ptr_full = (((logic_ptr_push ^ logic_ptr_popOnIo) ^ 3'b100) == 3'b000);
   assign logic_ptr_empty = (logic_ptr_push == logic_ptr_pop);
   assign logic_ptr_occupancy = (logic_ptr_push - logic_ptr_popOnIo);
@@ -6215,16 +6215,16 @@ module StreamFifo (
   assign logic_pop_addressGen_fire = (logic_pop_addressGen_valid && logic_pop_addressGen_ready);
   assign logic_ptr_doPop = logic_pop_addressGen_fire;
   always @(*) begin
-    logic_pop_addressGen_ready = logic_pop_sync_readArbitation_ready;
-    if(when_Stream_l369) begin
+    logic_pop_addressGen_ready = logic_pop_sync_readArbitration_ready;
+    if(when_Stream_l477) begin
       logic_pop_addressGen_ready = 1'b1;
     end
   end
 
-  assign when_Stream_l369 = (! logic_pop_sync_readArbitation_valid);
-  assign logic_pop_sync_readArbitation_valid = logic_pop_addressGen_rValid;
-  assign logic_pop_sync_readArbitation_payload = logic_pop_addressGen_rData;
-  assign _zz_logic_pop_sync_readPort_rsp_id = _zz_logic_ram_port1;
+  assign when_Stream_l477 = (! logic_pop_sync_readArbitration_valid);
+  assign logic_pop_sync_readArbitration_valid = logic_pop_addressGen_rValid;
+  assign logic_pop_sync_readArbitration_payload = logic_pop_addressGen_rData;
+  assign _zz_logic_pop_sync_readPort_rsp_id = logic_ram_spinal_port1;
   assign logic_pop_sync_readPort_rsp_id = _zz_logic_pop_sync_readPort_rsp_id[0 : 0];
   assign logic_pop_sync_readPort_rsp_addr = _zz_logic_pop_sync_readPort_rsp_id[32 : 1];
   assign logic_pop_sync_readPort_rsp_len = _zz_logic_pop_sync_readPort_rsp_id[36 : 33];
@@ -6234,31 +6234,33 @@ module StreamFifo (
   assign logic_pop_sync_readPort_rsp_cache = _zz_logic_pop_sync_readPort_rsp_id[47 : 44];
   assign logic_pop_sync_readPort_rsp_prot = _zz_logic_pop_sync_readPort_rsp_id[50 : 48];
   assign logic_pop_sync_readPort_rsp_locked = _zz_logic_pop_sync_readPort_rsp_id[51];
-  assign logic_pop_sync_readPort_cmd_valid = logic_pop_addressGen_fire;
-  assign logic_pop_sync_readPort_cmd_payload = logic_pop_addressGen_payload;
-  assign logic_pop_sync_readArbitation_translated_valid = logic_pop_sync_readArbitation_valid;
-  assign logic_pop_sync_readArbitation_ready = logic_pop_sync_readArbitation_translated_ready;
-  assign logic_pop_sync_readArbitation_translatedid = logic_pop_sync_readPort_rsp_id;
-  assign logic_pop_sync_readArbitation_translatedaddr = logic_pop_sync_readPort_rsp_addr;
-  assign logic_pop_sync_readArbitation_translatedlen = logic_pop_sync_readPort_rsp_len;
-  assign logic_pop_sync_readArbitation_translatedsize = logic_pop_sync_readPort_rsp_size;
-  assign logic_pop_sync_readArbitation_translatedburst = logic_pop_sync_readPort_rsp_burst;
-  assign logic_pop_sync_readArbitation_translatedlock = logic_pop_sync_readPort_rsp_lock;
-  assign logic_pop_sync_readArbitation_translatedcache = logic_pop_sync_readPort_rsp_cache;
-  assign logic_pop_sync_readArbitation_translatedprot = logic_pop_sync_readPort_rsp_prot;
-  assign logic_pop_sync_readArbitation_translatedlocked = logic_pop_sync_readPort_rsp_locked;
-  assign io_pop_valid = logic_pop_sync_readArbitation_translated_valid;
-  assign logic_pop_sync_readArbitation_translated_ready = io_pop_ready;
-  assign io_popid = logic_pop_sync_readArbitation_translatedid;
-  assign io_popaddr = logic_pop_sync_readArbitation_translatedaddr;
-  assign io_poplen = logic_pop_sync_readArbitation_translatedlen;
-  assign io_popsize = logic_pop_sync_readArbitation_translatedsize;
-  assign io_popburst = logic_pop_sync_readArbitation_translatedburst;
-  assign io_poplock = logic_pop_sync_readArbitation_translatedlock;
-  assign io_popcache = logic_pop_sync_readArbitation_translatedcache;
-  assign io_popprot = logic_pop_sync_readArbitation_translatedprot;
-  assign io_poplocked = logic_pop_sync_readArbitation_translatedlocked;
-  assign logic_pop_sync_readArbitation_fire = (logic_pop_sync_readArbitation_valid && logic_pop_sync_readArbitation_ready);
+  assign logic_pop_addressGen_toFlowFire_valid = logic_pop_addressGen_fire;
+  assign logic_pop_addressGen_toFlowFire_payload = logic_pop_addressGen_payload;
+  assign logic_pop_sync_readPort_cmd_valid = logic_pop_addressGen_toFlowFire_valid;
+  assign logic_pop_sync_readPort_cmd_payload = logic_pop_addressGen_toFlowFire_payload;
+  assign logic_pop_sync_readArbitration_translated_valid = logic_pop_sync_readArbitration_valid;
+  assign logic_pop_sync_readArbitration_ready = logic_pop_sync_readArbitration_translated_ready;
+  assign logic_pop_sync_readArbitration_translatedid = logic_pop_sync_readPort_rsp_id;
+  assign logic_pop_sync_readArbitration_translatedaddr = logic_pop_sync_readPort_rsp_addr;
+  assign logic_pop_sync_readArbitration_translatedlen = logic_pop_sync_readPort_rsp_len;
+  assign logic_pop_sync_readArbitration_translatedsize = logic_pop_sync_readPort_rsp_size;
+  assign logic_pop_sync_readArbitration_translatedburst = logic_pop_sync_readPort_rsp_burst;
+  assign logic_pop_sync_readArbitration_translatedlock = logic_pop_sync_readPort_rsp_lock;
+  assign logic_pop_sync_readArbitration_translatedcache = logic_pop_sync_readPort_rsp_cache;
+  assign logic_pop_sync_readArbitration_translatedprot = logic_pop_sync_readPort_rsp_prot;
+  assign logic_pop_sync_readArbitration_translatedlocked = logic_pop_sync_readPort_rsp_locked;
+  assign io_pop_valid = logic_pop_sync_readArbitration_translated_valid;
+  assign logic_pop_sync_readArbitration_translated_ready = io_pop_ready;
+  assign io_popid = logic_pop_sync_readArbitration_translatedid;
+  assign io_popaddr = logic_pop_sync_readArbitration_translatedaddr;
+  assign io_poplen = logic_pop_sync_readArbitration_translatedlen;
+  assign io_popsize = logic_pop_sync_readArbitration_translatedsize;
+  assign io_popburst = logic_pop_sync_readArbitration_translatedburst;
+  assign io_poplock = logic_pop_sync_readArbitration_translatedlock;
+  assign io_popcache = logic_pop_sync_readArbitration_translatedcache;
+  assign io_popprot = logic_pop_sync_readArbitration_translatedprot;
+  assign io_poplocked = logic_pop_sync_readArbitration_translatedlocked;
+  assign logic_pop_sync_readArbitration_fire = (logic_pop_sync_readArbitration_valid && logic_pop_sync_readArbitration_ready);
   assign logic_ptr_popOnIo = logic_pop_sync_popReg;
   assign io_occupancy = logic_ptr_occupancy;
   assign io_availability = (3'b100 - logic_ptr_occupancy);
@@ -6270,7 +6272,7 @@ module StreamFifo (
       logic_pop_addressGen_rValid <= 1'b0;
       logic_pop_sync_popReg <= 3'b000;
     end else begin
-      if(when_Stream_l1205) begin
+      if(when_Stream_l1557) begin
         logic_ptr_wentUp <= logic_ptr_doPush;
       end
       if(io_flush) begin
@@ -6292,7 +6294,7 @@ module StreamFifo (
       if(io_flush) begin
         logic_pop_addressGen_rValid <= 1'b0;
       end
-      if(logic_pop_sync_readArbitation_fire) begin
+      if(logic_pop_sync_readArbitration_fire) begin
         logic_pop_sync_popReg <= logic_ptr_pop;
       end
       if(io_flush) begin

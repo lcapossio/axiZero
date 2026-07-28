@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
 // SPDX-License-Identifier: MIT
-// Generator : SpinalHDL v1.10.1    git head : 2527c7c6b0fb0f95e5e1a5722a0be732b364ce43
+// Generator : SpinalHDL v1.14.2    git head : 78f29dc66110fc099a777992b6daa2f803ab445e
 // Component : AxiZeroMixedTop
-// Git hash  : a247c8e6093e42031e2bcde57f9e5c07ec8b5455
+// Git hash  : 9bbb5f0756c6d95e20bf1673c50b250e3b197455
 
 `timescale 1ns/1ps
 
@@ -1003,7 +1003,7 @@ module Axi4FullToLiteAdapter (
   wire       [36:0]   _zz_io_full_r_payload_data;
 
   assign io_lite_aw_valid = io_full_aw_valid;
-  assign _zz_io_lite_aw_payload_addr = 35'h000000000;
+  assign _zz_io_lite_aw_payload_addr = 35'h0;
   always @(*) begin
     io_lite_aw_payload_addr = _zz_io_lite_aw_payload_addr[31 : 0];
     io_lite_aw_payload_addr = io_full_aw_payload_addr;
@@ -1031,7 +1031,7 @@ module Axi4FullToLiteAdapter (
 
   assign io_lite_b_ready = io_full_b_ready;
   assign io_lite_w_valid = io_full_w_valid;
-  assign _zz_io_lite_w_payload_data = 36'h000000000;
+  assign _zz_io_lite_w_payload_data = 36'h0;
   always @(*) begin
     io_lite_w_payload_data = _zz_io_lite_w_payload_data[31 : 0];
     io_lite_w_payload_data = io_full_w_payload_data;
@@ -1044,7 +1044,7 @@ module Axi4FullToLiteAdapter (
 
   assign io_full_w_ready = io_lite_w_ready;
   assign io_lite_ar_valid = io_full_ar_valid;
-  assign _zz_io_lite_ar_payload_addr = 35'h000000000;
+  assign _zz_io_lite_ar_payload_addr = 35'h0;
   always @(*) begin
     io_lite_ar_payload_addr = _zz_io_lite_ar_payload_addr[31 : 0];
     io_lite_ar_payload_addr = io_full_ar_payload_addr;
@@ -1060,7 +1060,7 @@ module Axi4FullToLiteAdapter (
   assign io_full_r_fire = (io_full_r_valid && io_full_r_ready);
   assign when_Axi4FullToLiteAdapter_l89 = (io_full_r_fire && io_full_r_payload_last);
   assign io_full_r_valid = io_lite_r_valid;
-  assign _zz_io_full_r_payload_data = 37'h0000000000;
+  assign _zz_io_full_r_payload_data = 37'h0;
   always @(*) begin
     io_full_r_payload_data = _zz_io_full_r_payload_data[31 : 0];
     io_full_r_payload_data = io_lite_r_payload_data;
@@ -1198,7 +1198,7 @@ module Axi4LiteToFullAdapter (
 
   assign _zz_io_lite_b_payload_resp = 2'b00;
   assign io_full_aw_valid = io_lite_aw_valid;
-  assign _zz_io_full_aw_payload_addr = 62'h0000000000000000;
+  assign _zz_io_full_aw_payload_addr = 62'h0;
   always @(*) begin
     io_full_aw_payload_addr = _zz_io_full_aw_payload_addr[31 : 0];
     io_full_aw_payload_addr = io_lite_aw_payload_addr;
@@ -1212,7 +1212,7 @@ module Axi4LiteToFullAdapter (
   assign io_full_aw_payload_region = _zz_io_full_aw_payload_addr[36 : 33];
   always @(*) begin
     io_full_aw_payload_len = _zz_io_full_aw_payload_addr[44 : 37];
-    io_full_aw_payload_len = 8'h00;
+    io_full_aw_payload_len = 8'h0;
   end
 
   always @(*) begin
@@ -1235,7 +1235,7 @@ module Axi4LiteToFullAdapter (
 
   assign io_lite_aw_ready = io_full_aw_ready;
   assign io_full_w_valid = io_lite_w_valid;
-  assign _zz_io_full_w_payload_data = 37'h0000000000;
+  assign _zz_io_full_w_payload_data = 37'h0;
   always @(*) begin
     io_full_w_payload_data = _zz_io_full_w_payload_data[31 : 0];
     io_full_w_payload_data = io_lite_w_payload_data;
@@ -1260,7 +1260,7 @@ module Axi4LiteToFullAdapter (
 
   assign io_full_b_ready = io_lite_b_ready;
   assign io_full_ar_valid = io_lite_ar_valid;
-  assign _zz_io_full_ar_payload_addr = 62'h0000000000000000;
+  assign _zz_io_full_ar_payload_addr = 62'h0;
   always @(*) begin
     io_full_ar_payload_addr = _zz_io_full_ar_payload_addr[31 : 0];
     io_full_ar_payload_addr = io_lite_ar_payload_addr;
@@ -1274,7 +1274,7 @@ module Axi4LiteToFullAdapter (
   assign io_full_ar_payload_region = _zz_io_full_ar_payload_addr[36 : 33];
   always @(*) begin
     io_full_ar_payload_len = _zz_io_full_ar_payload_addr[44 : 37];
-    io_full_ar_payload_len = 8'h00;
+    io_full_ar_payload_len = 8'h0;
   end
 
   always @(*) begin
@@ -1297,7 +1297,7 @@ module Axi4LiteToFullAdapter (
 
   assign io_lite_ar_ready = io_full_ar_ready;
   assign io_lite_r_valid = io_full_r_valid;
-  assign _zz_io_lite_r_payload_data = 34'h000000000;
+  assign _zz_io_lite_r_payload_data = 34'h0;
   always @(*) begin
     io_lite_r_payload_data = _zz_io_lite_r_payload_data[31 : 0];
     io_lite_r_payload_data = io_full_r_payload_data;
@@ -1551,10 +1551,10 @@ module Axi4Crossbar (
   input  wire          aresetn
 );
 
-  wire       [0:0]    _zz__zz_5_port0;
-  wire       [0:0]    _zz__zz_6_port0;
-  wire       [0:0]    _zz__zz_7_port0;
-  wire       [0:0]    _zz__zz_8_port0;
+  wire       [0:0]    _zz_5_spinal_port0;
+  wire       [0:0]    _zz_6_spinal_port0;
+  wire       [0:0]    _zz_7_spinal_port0;
+  wire       [0:0]    _zz_8_spinal_port0;
   wire       [1:0]    _zz__zz_when_Axi4Crossbar_l167_4;
   wire       [1:0]    _zz__zz_when_Axi4Crossbar_l167_4_1;
   wire       [1:0]    _zz__zz_9;
@@ -1916,28 +1916,28 @@ module Axi4Crossbar (
   assign _zz__zz_6_port = _zz_m1_axi_awid;
   assign _zz__zz_7_port = _zz_m2_axi_awid;
   assign _zz__zz_8_port = _zz_m3_axi_awid;
-  assign _zz__zz_5_port0 = _zz_5[_zz_when_Axi4Crossbar_l496];
+  assign _zz_5_spinal_port0 = _zz_5[_zz_when_Axi4Crossbar_l496];
   always @(posedge aclk) begin
     if(_zz_4) begin
       _zz_5[_zz_9] <= _zz__zz_5_port;
     end
   end
 
-  assign _zz__zz_6_port0 = _zz_6[_zz_when_Axi4Crossbar_l496_1];
+  assign _zz_6_spinal_port0 = _zz_6[_zz_when_Axi4Crossbar_l496_1];
   always @(posedge aclk) begin
     if(_zz_3) begin
       _zz_6[_zz_10] <= _zz__zz_6_port;
     end
   end
 
-  assign _zz__zz_7_port0 = _zz_7[_zz_when_Axi4Crossbar_l496_2];
+  assign _zz_7_spinal_port0 = _zz_7[_zz_when_Axi4Crossbar_l496_2];
   always @(posedge aclk) begin
     if(_zz_2) begin
       _zz_7[_zz_11] <= _zz__zz_7_port;
     end
   end
 
-  assign _zz__zz_8_port0 = _zz_8[_zz_when_Axi4Crossbar_l496_3];
+  assign _zz_8_spinal_port0 = _zz_8[_zz_when_Axi4Crossbar_l496_3];
   always @(posedge aclk) begin
     if(_zz_1) begin
       _zz_8[_zz_12] <= _zz__zz_8_port;
@@ -2137,7 +2137,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_s0_axi_rdata = 36'h000000000;
+  assign _zz_s0_axi_rdata = 36'h0;
   always @(*) begin
     s0_axi_rdata = _zz_s0_axi_rdata[31 : 0];
     if(when_Axi4Crossbar_l620) begin
@@ -2367,7 +2367,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_s1_axi_rdata = 36'h000000000;
+  assign _zz_s1_axi_rdata = 36'h0;
   always @(*) begin
     s1_axi_rdata = _zz_s1_axi_rdata[31 : 0];
     if(when_Axi4Crossbar_l620_4) begin
@@ -2439,7 +2439,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_m0_axi_awaddr = 63'h0000000000000000;
+  assign _zz_m0_axi_awaddr = 63'h0;
   always @(*) begin
     m0_axi_awaddr = _zz_m0_axi_awaddr[31 : 0];
     if(when_Axi4Crossbar_l464) begin
@@ -2573,7 +2573,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_m0_axi_wdata = 37'h0000000000;
+  assign _zz_m0_axi_wdata = 37'h0;
   always @(*) begin
     m0_axi_wdata = _zz_m0_axi_wdata[31 : 0];
     if(when_Axi4Crossbar_l464) begin
@@ -2663,7 +2663,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_m0_axi_araddr = 63'h0000000000000000;
+  assign _zz_m0_axi_araddr = 63'h0;
   always @(*) begin
     m0_axi_araddr = _zz_m0_axi_araddr[31 : 0];
     if(when_Axi4Crossbar_l579) begin
@@ -2790,7 +2790,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_m1_axi_awaddr = 63'h0000000000000000;
+  assign _zz_m1_axi_awaddr = 63'h0;
   always @(*) begin
     m1_axi_awaddr = _zz_m1_axi_awaddr[31 : 0];
     if(when_Axi4Crossbar_l464_1) begin
@@ -2924,7 +2924,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_m1_axi_wdata = 37'h0000000000;
+  assign _zz_m1_axi_wdata = 37'h0;
   always @(*) begin
     m1_axi_wdata = _zz_m1_axi_wdata[31 : 0];
     if(when_Axi4Crossbar_l464_1) begin
@@ -3014,7 +3014,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_m1_axi_araddr = 63'h0000000000000000;
+  assign _zz_m1_axi_araddr = 63'h0;
   always @(*) begin
     m1_axi_araddr = _zz_m1_axi_araddr[31 : 0];
     if(when_Axi4Crossbar_l579_1) begin
@@ -3141,7 +3141,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_m2_axi_awaddr = 63'h0000000000000000;
+  assign _zz_m2_axi_awaddr = 63'h0;
   always @(*) begin
     m2_axi_awaddr = _zz_m2_axi_awaddr[31 : 0];
     if(when_Axi4Crossbar_l464_2) begin
@@ -3275,7 +3275,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_m2_axi_wdata = 37'h0000000000;
+  assign _zz_m2_axi_wdata = 37'h0;
   always @(*) begin
     m2_axi_wdata = _zz_m2_axi_wdata[31 : 0];
     if(when_Axi4Crossbar_l464_2) begin
@@ -3365,7 +3365,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_m2_axi_araddr = 63'h0000000000000000;
+  assign _zz_m2_axi_araddr = 63'h0;
   always @(*) begin
     m2_axi_araddr = _zz_m2_axi_araddr[31 : 0];
     if(when_Axi4Crossbar_l579_2) begin
@@ -3492,7 +3492,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_m3_axi_awaddr = 63'h0000000000000000;
+  assign _zz_m3_axi_awaddr = 63'h0;
   always @(*) begin
     m3_axi_awaddr = _zz_m3_axi_awaddr[31 : 0];
     if(when_Axi4Crossbar_l464_3) begin
@@ -3626,7 +3626,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_m3_axi_wdata = 37'h0000000000;
+  assign _zz_m3_axi_wdata = 37'h0;
   always @(*) begin
     m3_axi_wdata = _zz_m3_axi_wdata[31 : 0];
     if(when_Axi4Crossbar_l464_3) begin
@@ -3716,7 +3716,7 @@ module Axi4Crossbar (
     end
   end
 
-  assign _zz_m3_axi_araddr = 63'h0000000000000000;
+  assign _zz_m3_axi_araddr = 63'h0;
   always @(*) begin
     m3_axi_araddr = _zz_m3_axi_araddr[31 : 0];
     if(when_Axi4Crossbar_l579_3) begin
@@ -3877,7 +3877,7 @@ module Axi4Crossbar (
   assign when_Axi4Crossbar_l167 = _zz_when_Axi4Crossbar_l167_4[0];
   assign when_Axi4Crossbar_l167_1 = _zz_when_Axi4Crossbar_l167_4[1];
   assign when_Axi4Crossbar_l473 = (_zz_when_Axi4Crossbar_l473 == 3'b000);
-  assign _zz_when_Axi4Crossbar_l496_4 = _zz__zz_5_port0;
+  assign _zz_when_Axi4Crossbar_l496_4 = _zz_5_spinal_port0;
   assign when_Axi4Crossbar_l464 = ((_zz_when_Axi4Crossbar_l464 < 3'b100) && (|_zz_when_Axi4Crossbar_l464_4));
   assign when_Axi4Crossbar_l467 = (_zz_m0_axi_awid == 1'b0);
   assign when_Axi4Crossbar_l467_1 = (_zz_m0_axi_awid == 1'b1);
@@ -3933,7 +3933,7 @@ module Axi4Crossbar (
   assign when_Axi4Crossbar_l167_2 = _zz_when_Axi4Crossbar_l167_9[0];
   assign when_Axi4Crossbar_l167_3 = _zz_when_Axi4Crossbar_l167_9[1];
   assign when_Axi4Crossbar_l473_1 = (_zz_when_Axi4Crossbar_l473_1 == 3'b000);
-  assign _zz_when_Axi4Crossbar_l496_5 = _zz__zz_6_port0;
+  assign _zz_when_Axi4Crossbar_l496_5 = _zz_6_spinal_port0;
   assign when_Axi4Crossbar_l464_1 = ((_zz_when_Axi4Crossbar_l464_1 < 3'b100) && (|_zz_when_Axi4Crossbar_l464_7));
   assign when_Axi4Crossbar_l467_2 = (_zz_m1_axi_awid == 1'b0);
   assign when_Axi4Crossbar_l467_3 = (_zz_m1_axi_awid == 1'b1);
@@ -3989,7 +3989,7 @@ module Axi4Crossbar (
   assign when_Axi4Crossbar_l167_4 = _zz_when_Axi4Crossbar_l167_14[0];
   assign when_Axi4Crossbar_l167_5 = _zz_when_Axi4Crossbar_l167_14[1];
   assign when_Axi4Crossbar_l473_2 = (_zz_when_Axi4Crossbar_l473_2 == 3'b000);
-  assign _zz_when_Axi4Crossbar_l496_6 = _zz__zz_7_port0;
+  assign _zz_when_Axi4Crossbar_l496_6 = _zz_7_spinal_port0;
   assign when_Axi4Crossbar_l464_2 = ((_zz_when_Axi4Crossbar_l464_2 < 3'b100) && (|_zz_when_Axi4Crossbar_l464_10));
   assign when_Axi4Crossbar_l467_4 = (_zz_m2_axi_awid == 1'b0);
   assign when_Axi4Crossbar_l467_5 = (_zz_m2_axi_awid == 1'b1);
@@ -4045,7 +4045,7 @@ module Axi4Crossbar (
   assign when_Axi4Crossbar_l167_6 = _zz_when_Axi4Crossbar_l167_19[0];
   assign when_Axi4Crossbar_l167_7 = _zz_when_Axi4Crossbar_l167_19[1];
   assign when_Axi4Crossbar_l473_3 = (_zz_when_Axi4Crossbar_l473_3 == 3'b000);
-  assign _zz_when_Axi4Crossbar_l496_7 = _zz__zz_8_port0;
+  assign _zz_when_Axi4Crossbar_l496_7 = _zz_8_spinal_port0;
   assign when_Axi4Crossbar_l464_3 = ((_zz_when_Axi4Crossbar_l464_3 < 3'b100) && (|_zz_when_Axi4Crossbar_l464_13));
   assign when_Axi4Crossbar_l467_6 = (_zz_m3_axi_awid == 1'b0);
   assign when_Axi4Crossbar_l467_7 = (_zz_m3_axi_awid == 1'b1);
