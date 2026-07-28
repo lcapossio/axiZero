@@ -11,7 +11,10 @@ Requires: cocotb, cocotbext-axi, verilator
 
 import pathlib
 import sys
-from cocotb.runner import get_runner
+try:
+    from cocotb_tools.runner import get_runner  # cocotb >= 2.0
+except ImportError:  # pragma: no cover - cocotb 1.x fallback
+    from cocotb.runner import get_runner
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 RTL_FILE  = REPO_ROOT / "generated" / "MyLite_1M4S.v"
