@@ -89,7 +89,10 @@ def _run_python_lint() -> int:
         return 1
 
     files = ["scripts/axizero.py", "scripts/run_sim.py"]
-    rc = subprocess.run([ruff, "check", *files], cwd=REPO_ROOT).returncode
+    # Lint every tracked Python tree, not just the two entry points: the Arty
+    # runners under hw/ went unlinted for a long time and accumulated findings.
+    lint_targets = ["scripts", "sim", "hw"]
+    rc = subprocess.run([ruff, "check", *lint_targets], cwd=REPO_ROOT).returncode
     if rc != 0:
         return rc
 

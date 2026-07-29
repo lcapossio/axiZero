@@ -13,7 +13,6 @@ Steps:
 import pathlib
 import subprocess
 import sys
-import time
 
 from find_xilinx_tools import require_tools, vivado_env
 
@@ -109,7 +108,7 @@ def find_symbols():
             if name in ("g_fail", "g_pass"):
                 addrs[name] = int(parts[0], 16)
     if "g_fail" not in addrs or "g_pass" not in addrs:
-        print(f"*** Could not find g_fail/g_pass in ELF symbols")
+        print("*** Could not find g_fail/g_pass in ELF symbols")
         for line in result.stdout.splitlines()[-20:]:
             print(f"    {line}")
         sys.exit(1)

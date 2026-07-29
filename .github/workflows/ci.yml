@@ -8,6 +8,13 @@ on:
     branches: [main, master]
   pull_request:
 
+env:
+  # Verilator versions this project is validated against. SpinalHDL 1.10.1
+  # segfaulted on 5.048 (see no_commit/BUGS.md #3), so an unpinned runner
+  # image can silently reintroduce that class of failure. Assert the version
+  # instead of trusting whatever apt serves.
+  VERILATOR_EXPECTED: '5.0'
+
 jobs:
   # ── SpinalHDL compilation + SpinalSim unit tests ──────────────────────────
   spinal-sim:
@@ -20,7 +27,13 @@ jobs:
       - uses: ./.github/actions/setup-sbt
 
       - name: Install Verilator
-        run: sudo apt-get install -y --no-install-recommends verilator
+        run: |
+          sudo apt-get install -y --no-install-recommends verilator
+          verilator --version
+          verilator --version | grep -q "Verilator ${VERILATOR_EXPECTED}" || {
+            echo "::error::Verilator drifted from ${VERILATOR_EXPECTED}.x - see no_commit/BUGS.md #3"
+            exit 1
+          }
 
       - name: Compile (SpinalHDL)
         run: sbt compile
@@ -61,15 +74,21 @@ jobs:
       - uses: ./.github/actions/setup-sbt
 
       - name: Install Verilator
-        run: sudo apt-get install -y --no-install-recommends verilator
+        run: |
+          sudo apt-get install -y --no-install-recommends verilator
+          verilator --version
+          verilator --version | grep -q "Verilator ${VERILATOR_EXPECTED}" || {
+            echo "::error::Verilator drifted from ${VERILATOR_EXPECTED}.x - see no_commit/BUGS.md #3"
+            exit 1
+          }
 
       - name: Install Python dependencies
-        run: pip install "cocotb==1.9.2" cocotbext-axi pyyaml
+        run: pip install "cocotb==1.9.2" "cocotbext-axi @ git+https://github.com/alexforencich/cocotbext-axi@b2d126c4bc0f4cafa6e2fd3cdcfafc333e716a9a" pyyaml
 
       - name: Lint Python (ruff)
         run: |
           pip install ruff
-          ruff check scripts/ sim/
+          ruff check scripts/ sim/ hw/
 
       - name: Run cocotb tests (lite + full + wrr + qos + ipif + axis)
         run: python3 sim/cocotb_gen/run_all.py
