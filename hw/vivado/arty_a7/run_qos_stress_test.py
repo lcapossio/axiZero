@@ -14,7 +14,7 @@ import pathlib
 import subprocess
 import sys
 
-from find_xilinx_tools import require_tools
+from find_xilinx_tools import require_tools, vivado_env
 
 # Paths
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
@@ -34,7 +34,7 @@ POLL_SECONDS = 5
 STUCK_SECONDS = 30
 
 
-def run(cmd, cwd=None, timeout=None, desc=""):
+def run(cmd, cwd=None, timeout=None, desc="", env=None):
     """Run a command, streaming output."""
     print(f"\n{'='*60}")
     print(f"  {desc}")
@@ -44,6 +44,7 @@ def run(cmd, cwd=None, timeout=None, desc=""):
         [str(c) for c in cmd],
         cwd=str(cwd) if cwd else None,
         timeout=timeout,
+        env=env,
     )
     if result.returncode != 0:
         print(f"\n*** FAILED (rc={result.returncode}): {desc}")
@@ -61,6 +62,7 @@ def step_vivado():
         cwd=REPO_ROOT,
         timeout=3600,
         desc="Vivado: create project + synth + impl + bitstream",
+        env=vivado_env(),
     )
     if not BIT_FILE.exists():
         print(f"*** ERROR: bitstream not found at {BIT_FILE}")

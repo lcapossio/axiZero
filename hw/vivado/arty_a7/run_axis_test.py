@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 
-from find_xilinx_tools import require_tools
+from find_xilinx_tools import require_tools, vivado_env
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR / ".." / ".." / ".."
@@ -107,13 +107,7 @@ def step_vivado(force_build: bool):
     if BIT_FILE.exists() and not force_build:
         print(f"[skip] Bitstream already exists: {BIT_FILE}")
         return
-    env = dict(os.environ)
-    if "HOME" in env and env["HOME"].startswith("/"):
-        env["HOME"] = str(pathlib.Path.home())
-    if sys.platform == "win32":
-        vivado_user = REPO_ROOT / ".vivado_user"
-        vivado_user.mkdir(exist_ok=True)
-        env["APPDATA"] = str(vivado_user.resolve())
+    env = vivado_env()
     run(
         [VIVADO_BIN, "-mode", "batch", "-source", str(CREATE_TCL)],
         cwd=REPO_ROOT,
