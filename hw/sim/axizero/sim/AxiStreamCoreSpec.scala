@@ -257,9 +257,12 @@ class AxiStreamCoreSpec extends AnyFunSuite {
       cd.forkStimulus(10)
       cd.waitSampling(5)
 
-      fork { got1 = slave1.recv() }
+      val recv1 = fork { got1 = slave1.recv() }
       master.send(frame)
-
+      // Join the sink rather than relying on a fixed cycle count: on a slow
+      // host it has not appended the frame yet and got1 is still empty. The
+      // settle afterwards is for the level check below, not for the data.
+      recv1.join()
       cd.waitSampling(5)
 
       assert(unsigned(got1) == unsigned(frame))
@@ -285,13 +288,13 @@ class AxiStreamCoreSpec extends AnyFunSuite {
       cd.forkStimulus(10)
       cd.waitSampling(5)
 
-      fork { got1 = slave1.recv() }
+      val recv1 = fork { got1 = slave1.recv() }
       fork {
         cd.waitSamplingWhere(dut.io.input.valid.toBoolean && dut.io.input.ready.toBoolean)
         dut.io.select #= 0
       }
       master.send(frame)
-
+      recv1.join()
       cd.waitSampling(5)
 
       assert(unsigned(got1) == unsigned(frame))
