@@ -24,6 +24,10 @@ module write_response_props (
     input wire rst
 );
 
+    // Maximum consecutive cycles a response channel may stall before its
+    // ready must be asserted.  Matches the original `##[1:5]` bound.
+    localparam [3:0] STALL_MAX = 4'd5;
+
     // =========================================================================
     // Free inputs — let the solver explore all legal stimulus
     // =========================================================================
@@ -287,14 +291,36 @@ module write_response_props (
             assume(aw_valid && aw_id == $past(aw_id) && aw_addr == $past(aw_addr));
     end
 
-    // b_ready is eventually asserted (no backpressure deadlock in proof)
-    assume property (@(posedge clk) disable iff (rst) b_valid |-> ##[1:5] b_ready);
+    // b_ready is eventually asserted (no backpressure deadlock in proof).
+    // Written as a stall counter rather than `b_valid |-> ##[1:5] b_ready`:
+    // yosys's built-in SVA subset accepts implication but not a ranged delay,
+    // so that form fails to parse.  Bounding consecutive stalled cycles states
+    // the same thing.  b_ready is a free wire, so the solver can always satisfy
+    // this by raising it; the assumption cannot make the proof vacuous.
+    reg [3:0] b_stall;
+    always @(posedge clk) begin
+        if (rst)
+            b_stall <= 4'd0;
+        else if (b_valid && !b_ready)
+            b_stall <= b_stall + 4'd1;
+        else
+            b_stall <= 4'd0;
+    end
+
+    always @(posedge clk) begin
+        if (!rst)
+            assume(b_stall <= STALL_MAX);
+    end
 
     // Slave always accepts AW and W (simplify proof: slaves are always ready)
-    assume property (@(posedge clk) disable iff (rst) m0_aw_ready);
-    assume property (@(posedge clk) disable iff (rst) m0_w_ready);
-    assume property (@(posedge clk) disable iff (rst) m1_aw_ready);
-    assume property (@(posedge clk) disable iff (rst) m1_w_ready);
+    always @(posedge clk) begin
+        if (!rst) begin
+            assume(m0_aw_ready);
+            assume(m0_w_ready);
+            assume(m1_aw_ready);
+            assume(m1_w_ready);
+        end
+    end
 
     // =========================================================================
     // Track one outstanding write from master 0 (single-outstanding assume)
@@ -318,28 +344,28 @@ module write_response_props (
     end
 
     // Only one outstanding write at a time from master 0
-    assume property (
-        @(posedge clk) disable iff (rst)
-        (outstanding && aw_valid) |-> (aw_id == outstanding_id)
-    );
+    always @(posedge clk) begin
+        if (!rst && outstanding && aw_valid)
+            assume(aw_id == outstanding_id);
+    end
 
     // =========================================================================
     // Property 1: B.id[3:0] always matches the outstanding AW.id
     // The upper bit (masterIndexBits) encodes which master issued the write.
     // For master 0 the index bit is 0; the lower bits carry the transaction ID.
     // =========================================================================
-    prop_b_routes_to_issuer: assert property (
-        @(posedge clk) disable iff (rst)
-        (b_valid && outstanding) |-> (b_id[3:0] == outstanding_id)
-    );
+    always @(posedge clk) begin
+        if (!rst && b_valid && outstanding)
+            prop_b_routes_to_issuer: assert(b_id[3:0] == outstanding_id);
+    end
 
     // =========================================================================
     // Property 2: No spurious B on master 0's channel
     // =========================================================================
-    prop_no_spurious_b: assert property (
-        @(posedge clk) disable iff (rst)
-        b_valid |-> outstanding
-    );
+    always @(posedge clk) begin
+        if (!rst && b_valid)
+            prop_no_spurious_b: assert(outstanding);
+    end
 
     // =========================================================================
     // Read path — assumptions and properties for master 0
@@ -351,12 +377,29 @@ module write_response_props (
             assume(ar_valid && ar_id == $past(ar_id) && ar_addr == $past(ar_addr));
     end
 
-    // r_ready is eventually asserted
-    assume property (@(posedge clk) disable iff (rst) r_valid |-> ##[1:5] r_ready);
+    // r_ready is eventually asserted — same stall-counter form as b_stall above
+    reg [3:0] r_stall;
+    always @(posedge clk) begin
+        if (rst)
+            r_stall <= 4'd0;
+        else if (r_valid && !r_ready)
+            r_stall <= r_stall + 4'd1;
+        else
+            r_stall <= 4'd0;
+    end
+
+    always @(posedge clk) begin
+        if (!rst)
+            assume(r_stall <= STALL_MAX);
+    end
 
     // Slaves always accept AR
-    assume property (@(posedge clk) disable iff (rst) m0_ar_ready);
-    assume property (@(posedge clk) disable iff (rst) m1_ar_ready);
+    always @(posedge clk) begin
+        if (!rst) begin
+            assume(m0_ar_ready);
+            assume(m1_ar_ready);
+        end
+    end
 
     // Track one outstanding read from master 0 (single-outstanding)
     reg         rd_outstanding;
@@ -378,25 +421,25 @@ module write_response_props (
     end
 
     // Only one outstanding read at a time from master 0
-    assume property (
-        @(posedge clk) disable iff (rst)
-        (rd_outstanding && ar_valid) |-> (ar_id == rd_outstanding_id)
-    );
+    always @(posedge clk) begin
+        if (!rst && rd_outstanding && ar_valid)
+            assume(ar_id == rd_outstanding_id);
+    end
 
     // =========================================================================
     // Property 3: R.id[3:0] matches outstanding AR.id for master 0
     // =========================================================================
-    prop_r_routes_to_issuer: assert property (
-        @(posedge clk) disable iff (rst)
-        (r_valid && rd_outstanding) |-> (r_id[3:0] == rd_outstanding_id)
-    );
+    always @(posedge clk) begin
+        if (!rst && r_valid && rd_outstanding)
+            prop_r_routes_to_issuer: assert(r_id[3:0] == rd_outstanding_id);
+    end
 
     // =========================================================================
     // Property 4: No spurious R on master 0's channel
     // =========================================================================
-    prop_no_spurious_r: assert property (
-        @(posedge clk) disable iff (rst)
-        r_valid |-> rd_outstanding
-    );
+    always @(posedge clk) begin
+        if (!rst && r_valid)
+            prop_no_spurious_r: assert(rd_outstanding);
+    end
 
 endmodule

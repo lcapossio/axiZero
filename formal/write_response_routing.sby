@@ -3,6 +3,11 @@
 #
 # SymbiYosys configuration — write response routing proof
 #
+# NOT run in CI: this wrapper drives s1_axi_*, but MyFull_2M2S declares a
+# single master and exposes only s0_axi_/m0_axi_/m1_axi_, so it does not
+# elaborate.  The proof needs the two-master design its name implies.
+# See no_commit/BUGS.md #18.
+#
 # Verifies that B responses from AxiZeroMixedTop (MyFull_2M2S: 2M×2S, 64-bit)
 # always return to the master that issued the corresponding AW.
 #
@@ -25,7 +30,7 @@ smtbmc z3
 
 [script]
 read -formal write_response_props.sv
-read -formal ../generated/MyFull_2M2S.v
+read -formal MyFull_2M2S.v
 prep -top write_response_props
 
 [files]

@@ -11,7 +11,7 @@ smtbmc z3
 [script]
 read -formal axis_ready_valid_props.sv
 read -formal axis_ready_valid_regslice.sv
-read -formal ../tmp/axis_formal/rtl/SmokeAxisRegSlice.v
+read -formal SmokeAxisRegSlice.v
 prep -top axis_ready_valid_regslice
 
 [files]
