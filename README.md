@@ -436,7 +436,7 @@ python3 sim/cocotb_gen/run_all.py axis     # generated AXI4-Stream cocotb suite
 
 ## Hardware validation — Arty A7-100T
 
-Four test suites run on a Xilinx Arty A7-100T (xc7a100t) at 100 MHz. All four pass.
+Six test suites run on a Xilinx Arty A7-100T (xc7a100t) at 100 MHz. All six pass.
 
 ### Base test (1M×4S)
 
@@ -520,10 +520,11 @@ Debug chains:
 
 ### Running HW tests
 
-All four test runners auto-detect Vivado, xsdb, and mb-gcc by searching `PATH` and common AMD/Xilinx install locations (Windows and Linux). Override with environment variables if needed:
+All six test runners auto-detect Vivado, xsdb, and mb-gcc by searching `PATH` and common AMD/Xilinx install locations (Windows and Linux). Override with environment variables if needed:
 
 ```bash
 # Auto-detect (works on Windows and Linux)
+python hw/vivado/arty_a7/run_base_test.py
 python hw/vivado/arty_a7/run_wrr_test.py
 python hw/vivado/arty_a7/run_qos_test.py
 python hw/vivado/arty_a7/run_qos_stress_test.py
