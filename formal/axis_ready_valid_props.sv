@@ -46,7 +46,10 @@ module axis_ready_valid_props #(
             always @(posedge aclk) begin
                 past_valid <= 1'b1;
 
-                if (!aresetn) begin
+                // Reset is synchronous, so tvalid clears on the edge after
+                // aresetn is sampled low, not on the same edge.  Checking
+                // $past(aresetn) also covers the first cycle after release.
+                if (past_valid && !$past(aresetn)) begin
                     assume(!tvalid);
                 end
 
@@ -79,7 +82,8 @@ module axis_ready_valid_props #(
             always @(posedge aclk) begin
                 past_valid <= 1'b1;
 
-                if (!aresetn) begin
+                // Synchronous reset — see the matching note in assume_mode.
+                if (past_valid && !$past(aresetn)) begin
                     assert(!tvalid);
                 end
 
