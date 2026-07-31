@@ -281,6 +281,26 @@ module write_response_props (
     );
 
     // =========================================================================
+    // Constrain the trace to start in reset
+    //
+    // BMC begins from an arbitrary state: rst is a free input and neither the
+    // DUT registers nor the tracking registers below carry an initial value.
+    // Without this the solver simply starts mid-transaction -- `outstanding`
+    // already set, with a b_id unrelated to it -- and reports a counterexample
+    // at step 1 that no real trace can reach, because hardware always powers
+    // up through reset.  Assuming reset for the first cycle makes every
+    // register defined from step 1 onwards.
+    // =========================================================================
+    reg initialized = 1'b0;
+
+    always @(posedge clk) begin
+        initialized <= 1'b1;
+        if (!initialized) begin
+            assume(rst);
+        end
+    end
+
+    // =========================================================================
     // Assume well-formed AXI4 stimulus for master 0 only
     // (properties are checked on the master 0 B channel)
     // =========================================================================
