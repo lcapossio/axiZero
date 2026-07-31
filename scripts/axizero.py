@@ -851,6 +851,9 @@ EXAMPLE_YAML = textwrap.dedent("""\
           - addr_width: 32
             data_width: 64
             id_width: 4
+          - addr_width: 32
+            data_width: 64
+            id_width: 4
 
         slaves:
           - base: 0x00000000

@@ -160,23 +160,39 @@ python scripts/axizero.py generate my_design.yaml --output rtl/
 
 ### Option B — use a pre-built Verilog file
 
-Eleven configurations are pre-generated in [`generated/`](generated/). Copy the appropriate file into your project and instantiate it.
+Seventeen configurations are pre-generated in [`generated/`](generated/). Copy the appropriate file into your project and instantiate it.
 
-Resource usage is post-synthesis (Vivado 2025.2, xc7a100t, OOC mode). No BRAM or DSP used by any configuration.
+Resource usage is post-synthesis, out-of-context, Vivado 2025.2 targeting
+xc7a100tcsg324-1 with no timing constraint applied; Fmax is derived from the
+worst-case path Vivado reports under those conditions, so treat it as an upper
+bound rather than a closed-timing figure. `n/a` means the design had no
+internal path for Vivado to rank. Regenerate the whole table with
+`vivado -mode batch -source hw/vivado/synth_resource_usage.tcl`. No BRAM or DSP
+is used by any configuration.
 
-| File | Description | LUTs | FFs |
-|---|---|---:|---:|
-| `MyLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin | 237 | 8 |
-| `AxiZeroLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin (wider addr) | 245 | 8 |
-| `MyLite_2M2S_WRR.v` | 2M×2S AXI4-Lite, weighted round-robin (3:1) | 352 | 286 |
-| `MyLite_2M4S_FP.v` | 2M×4S AXI4-Lite, fixed priority | 527 | 16 |
-| `AxiZeroLite_2M4S_RS.v` | 2M×4S AXI4-Lite, register slices on all ports | 563 | 784 |
-| `AxiZeroLite_4M4S_FP.v` | 4M×4S AXI4-Lite, fixed priority | 1047 | 24 |
-| `MyFull_2M2S.v` | 2M×2S AXI4 Full, 64-bit, round-robin | 379 | 4 |
-| `MyFull_2M2S_QoS.v` | 2M×2S AXI4 Full, 64-bit, QoS arbitration | 626 | 62 |
-| `MyMixed_2M3S.v` | 2M×3S mixed (Full + Lite), auto adapters | 421 | 34 |
-| `ArtyDC_1M3S.v` | 1M×3S mixed, Arty A7 don't-care default config | 258 | 8 |
-| `ArtyDC_2M4S.v` | 2M×4S mixed, Arty A7 don't-care default config | 591 | 28 |
+| File | Description | LUTs | FFs | LUTRAM | Fmax (MHz) |
+|---|---|---:|---:|---:|---:|
+| `MyLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin | 237 | 8 | 0 | 400.0 |
+| `AxiZeroLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin (wider addr) | 237 | 8 | 0 | n/a |
+| `MyLite_2M2S_WRR.v` | 2M×2S AXI4-Lite, weighted round-robin (3:1) | 352 | 286 | 0 | 208.3 |
+| `MyLite_2M4S_FP.v` | 2M×4S AXI4-Lite, fixed priority | 527 | 16 | 0 | 400.0 |
+| `AxiZeroLite_2M4S_RS.v` | 2M×4S AXI4-Lite, register slices on all ports | 656 | 784 | 0 | n/a |
+| `AxiZeroLite_4M4S_FP.v` | 4M×4S AXI4-Lite, fixed priority | 1292 | 24 | 0 | n/a |
+| `MyFull_2M2S.v` | 2M×2S AXI4 Full, 64-bit, round-robin | 582 | 12 | 0 | 384.6 |
+| `MyFull_2M2S_QoS.v` | 2M×2S AXI4 Full, 64-bit, QoS arbitration | 626 | 62 | 4 | 117.6 |
+| `MyMixed_2M3S.v` | 2M×3S mixed (Full + Lite), auto adapters | 421 | 34 | 0 | 312.5 |
+| `ArtyDC_1M3S.v` | 1M×3S mixed, Arty A7 don't-care default config | 258 | 8 | 0 | 400.0 |
+| `ArtyDC_2M4S.v` | 2M×4S mixed, Arty A7 don't-care default config | 591 | 28 | 0 | n/a |
+| `MyAxisRegSlice.v` | AXI4-Stream register slice, 32-bit | 2 | 42 | 0 | 500.0 |
+| `MyAxisWidth_8To32.v` | AXI4-Stream width adapter, 8→32-bit | 10 | 44 | 0 | 333.3 |
+| `MyAxisFifo.v` | AXI4-Stream FIFO, 32-bit | 42 | 57 | 28 | 294.1 |
+| `MyAxisMux_2To1.v` | AXI4-Stream arb-mux, 2→1, round-robin | 49 | 3 | 0 | 434.8 |
+| `MyAxisDemux_1To2.v` | AXI4-Stream demux, 1→2 | 6 | 3 | 0 | 434.8 |
+| `MyAxisBroadcaster_1To2.v` | AXI4-Stream broadcaster, 1→2 | 2 | 0 | 0 | n/a |
+
+`ArtyDC_1M3S.v` and `ArtyDC_2M4S.v` are the two exceptions to the regeneration
+flow: no generator in the tree produces them, so they still carry
+`SpinalHDL v1.10.1` headers and are excluded from the CI freshness check.
 
 If none of these match your topology, generate a custom one with Option A.
 

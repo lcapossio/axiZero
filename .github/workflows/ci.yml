@@ -97,6 +97,31 @@ jobs:
       - name: Run cocotb tests (lite + full + wrr + qos + ipif + axis)
         run: python3 sim/cocotb_gen/run_all.py
 
+  generated-rtl:
+    name: Generated RTL up to date
+    runs-on: ubuntu-24.04
+    # The netlists under generated/ are tracked, and the cocotb suites run
+    # against them. Nothing previously noticed when they drifted from the
+    # generators: the SpinalHDL 1.10.1 -> 1.14.2 move regenerated the Arty
+    # netlists but left these behind, and the suites kept passing against
+    # output from a generator version the project no longer used.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-sbt
+
+      - name: Install Python dependencies
+        run: pip install pyyaml
+
+      - name: Regenerate tracked netlists
+        run: |
+          python3 scripts/axizero.py generate scripts/example.yaml --output generated
+          sbt "runMain axizero.gen.AxiZeroGen"
+
+      - name: Compare against the committed netlists
+        run: python3 scripts/check_generated.py
+
   formal:
     name: Formal checks
     runs-on: ubuntu-24.04
@@ -131,13 +156,11 @@ jobs:
       # One step per proof, so a failure in one cannot hide the result of
       # another. Run as a single block, the first failure aborted the step and
       # the AXIS proof below never ran at all.
-      #
-      # write_response_routing.sby is deliberately not run here. Its wrapper
-      # connects s1_axi_*, but the MyFull_2M2S design declares a single master
-      # and exposes no such port, so it cannot elaborate. Fixing that means
-      # adding a second master and regenerating a netlist the cocotb full suite
-      # and the README resource table both depend on. Tracked as BUGS.md #18;
-      # re-enable this step with that fix, not before.
+      - name: Formal proof - write response routing
+        working-directory: formal
+        run: sby -f write_response_routing.sby
+
       - name: Formal proof - AXIS ready/valid reg slice
+        if: ${{ !cancelled() }}
         working-directory: formal
         run: sby -f axis_ready_valid_regslice.sby
