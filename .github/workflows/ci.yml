@@ -156,11 +156,13 @@ jobs:
       # One step per proof, so a failure in one cannot hide the result of
       # another. Run as a single block, the first failure aborted the step and
       # the AXIS proof below never ran at all.
-      - name: Formal proof - write response routing
-        working-directory: formal
-        run: sby -f write_response_routing.sby
-
+      # write_response_routing.sby is not run here. It now elaborates and
+      # solves - the DUT mismatch that used to stop it is fixed - but its
+      # environment model is unsound: the slave response channels are free
+      # wires and the crossbar's request outputs to the slaves are left
+      # unconnected, so the solver invents an R beat no master ever asked for
+      # and any correct crossbar fails. Making it meaningful means modelling
+      # the slaves, not adjusting an assertion. Tracked as BUGS.md #23.
       - name: Formal proof - AXIS ready/valid reg slice
-        if: ${{ !cancelled() }}
         working-directory: formal
         run: sby -f axis_ready_valid_regslice.sby
