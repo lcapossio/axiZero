@@ -36,6 +36,10 @@ simWorkspace/
 # Formal outputs
 formal/**/*.smv
 formal/**/*.sby.bak
+# sby creates a working directory named after the task, alongside the .sby.
+# All proof sources are files directly in formal/, so any subdirectory is
+# generated output (models, engine logs, counterexample traces).
+formal/*/
 
 # Compiled firmware — source is in sw/arty_a7/src/
 sw/arty_a7/build/
