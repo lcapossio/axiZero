@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 96 SpinalSim + 34 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 103 SpinalSim + 36 cocotb tests pass.
 
 ---
 
@@ -417,7 +417,7 @@ python3 scripts/run_sim.py axis
 | `QosStressShortSpec` | 1 | Short 4-master QoS stress: distinct patterns (sequential, reverse, sparse, random short bursts), concurrent traffic, end-state validation |
 | `Axi3ToAxi4Spec` | 5 | AXI3→AXI4 bridge: single-beat, INCR burst, write interleaving (WID reorder), locked→SLVERR, multiple outstanding |
 | `Axi3MixedCrossbarSpec` | 5 | Axi3Mode auto-adapter: single-beat to full slave, single-beat to Lite slave, routing to both, 4-beat INCR burst, register-sliced path |
-| `AxiStreamCoreSpec` | 10 | AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster, sparse TKEEP/TSTRB/TLAST edge cases |
+| `AxiStreamCoreSpec` | 17 | AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster, sparse TKEEP/TSTRB/TLAST edge cases, TID/TDEST/TUSER propagation |
 
 ### cocotb (integration tests against pre-built Verilog, run with Python)
 

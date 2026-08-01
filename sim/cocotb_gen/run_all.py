@@ -81,6 +81,16 @@ AXIS_SMOKE_YAML = textwrap.dedent("""\
         outputs: 2
         use_keep: true
         use_last: true
+
+      - name: SmokeAxisSideband
+        kind: axis
+        core: reg_slice
+        data_width: 32
+        id_width: 4
+        dest_width: 3
+        user_width: 2
+        use_keep: true
+        use_last: true
 """)
 
 AXIS_RUNS = {
@@ -114,6 +124,11 @@ AXIS_RUNS = {
         "toplevel": "AxisBroadcastWrapper",
         "module": "test_axis_broadcast",
         "extra_sources": [HERE / "axis" / "axis_broadcast_wrapper.v"],
+    },
+    "axis_sideband": {
+        "rtl_name": "SmokeAxisSideband",
+        "toplevel": "AxiStreamRegSlice",
+        "module": "test_axis_sideband",
     },
 }
 
