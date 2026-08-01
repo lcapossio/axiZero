@@ -82,6 +82,15 @@ module write_response_props (
     wire [1:0]   m1_r_resp;
     wire [63:0]  m1_r_data;
 
+    // Request side of each slave port, driven by the DUT.  These were left
+    // unconnected, which is what made the proof unsound: with no visibility of
+    // what the crossbar actually asked a slave for, nothing tied a response to
+    // a request and the solver was free to invent one.
+    wire         m0_aw_valid_o, m0_ar_valid_o, m0_b_ready_o, m0_r_ready_o;
+    wire [4:0]   m0_aw_id_o,    m0_ar_id_o;
+    wire         m1_aw_valid_o, m1_ar_valid_o, m1_b_ready_o, m1_r_ready_o;
+    wire [4:0]   m1_aw_id_o,    m1_ar_id_o;
+
     // Master 0 AR/R — free wires for read-path properties
     wire         ar_valid;
     wire         ar_ready;
@@ -197,10 +206,10 @@ module write_response_props (
         .s1_axi_rresp    (),
         .s1_axi_rlast    (),
         // slave 0 (m0_axi_*)
-        .m0_axi_awvalid  (),
+        .m0_axi_awvalid  (m0_aw_valid_o),
         .m0_axi_awready  (m0_aw_ready),
         .m0_axi_awaddr   (),
-        .m0_axi_awid     (),
+        .m0_axi_awid     (m0_aw_id_o),
         .m0_axi_awregion (),
         .m0_axi_awlen    (),
         .m0_axi_awsize   (),
@@ -215,13 +224,13 @@ module write_response_props (
         .m0_axi_wstrb    (),
         .m0_axi_wlast    (),
         .m0_axi_bvalid   (m0_b_valid),
-        .m0_axi_bready   (),
+        .m0_axi_bready   (m0_b_ready_o),
         .m0_axi_bid      (m0_b_id),
         .m0_axi_bresp    (m0_b_resp),
-        .m0_axi_arvalid  (),
+        .m0_axi_arvalid  (m0_ar_valid_o),
         .m0_axi_arready  (m0_ar_ready),
         .m0_axi_araddr   (),
-        .m0_axi_arid     (),
+        .m0_axi_arid     (m0_ar_id_o),
         .m0_axi_arregion (),
         .m0_axi_arlen    (),
         .m0_axi_arsize   (),
@@ -231,16 +240,16 @@ module write_response_props (
         .m0_axi_arqos    (),
         .m0_axi_arprot   (),
         .m0_axi_rvalid   (m0_r_valid),
-        .m0_axi_rready   (),
+        .m0_axi_rready   (m0_r_ready_o),
         .m0_axi_rdata    (m0_r_data),
         .m0_axi_rid      (m0_r_id),
         .m0_axi_rresp    (m0_r_resp),
         .m0_axi_rlast    (m0_r_last),
         // slave 1 (m1_axi_*)
-        .m1_axi_awvalid  (),
+        .m1_axi_awvalid  (m1_aw_valid_o),
         .m1_axi_awready  (m1_aw_ready),
         .m1_axi_awaddr   (),
-        .m1_axi_awid     (),
+        .m1_axi_awid     (m1_aw_id_o),
         .m1_axi_awregion (),
         .m1_axi_awlen    (),
         .m1_axi_awsize   (),
@@ -255,13 +264,13 @@ module write_response_props (
         .m1_axi_wstrb    (),
         .m1_axi_wlast    (),
         .m1_axi_bvalid   (m1_b_valid),
-        .m1_axi_bready   (),
+        .m1_axi_bready   (m1_b_ready_o),
         .m1_axi_bid      (m1_b_id),
         .m1_axi_bresp    (m1_b_resp),
-        .m1_axi_arvalid  (),
+        .m1_axi_arvalid  (m1_ar_valid_o),
         .m1_axi_arready  (m1_ar_ready),
         .m1_axi_araddr   (),
-        .m1_axi_arid     (),
+        .m1_axi_arid     (m1_ar_id_o),
         .m1_axi_arregion (),
         .m1_axi_arlen    (),
         .m1_axi_arsize   (),
@@ -271,7 +280,7 @@ module write_response_props (
         .m1_axi_arqos    (),
         .m1_axi_arprot   (),
         .m1_axi_rvalid   (m1_r_valid),
-        .m1_axi_rready   (),
+        .m1_axi_rready   (m1_r_ready_o),
         .m1_axi_rdata    (m1_r_data),
         .m1_axi_rid      (m1_r_id),
         .m1_axi_rresp    (m1_r_resp),
@@ -343,6 +352,74 @@ module write_response_props (
     end
 
     // =========================================================================
+    // Slave response model
+    //
+    // Without this the slave B/R channels are free wires, so the solver simply
+    // produces a response for a transaction no master ever issued.  The
+    // crossbar forwards it correctly and the routing properties then "fail"
+    // against a DUT that is behaving -- the proof was measuring nothing.
+    //
+    // The design is generated with the default max_outstanding = 1, so each
+    // slave port carries at most one read and one write at a time (there is no
+    // W-route FIFO in the netlist).  Modelling one of each per slave is
+    // therefore faithful rather than a convenient restriction.
+    //
+    // A slave may only answer a request it was given, and must answer with the
+    // ID it was given.  Everything else about the response stays free.
+    // =========================================================================
+    reg        s0_rd_busy, s0_wr_busy;
+    reg [4:0]  s0_rd_id,   s0_wr_id;
+    reg        s1_rd_busy, s1_wr_busy;
+    reg [4:0]  s1_rd_id,   s1_wr_id;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            s0_rd_busy <= 1'b0;  s0_rd_id <= 5'b0;
+            s0_wr_busy <= 1'b0;  s0_wr_id <= 5'b0;
+            s1_rd_busy <= 1'b0;  s1_rd_id <= 5'b0;
+            s1_wr_busy <= 1'b0;  s1_wr_id <= 5'b0;
+        end else begin
+            if (m0_ar_valid_o && m0_ar_ready) begin
+                s0_rd_busy <= 1'b1;  s0_rd_id <= m0_ar_id_o;
+            end else if (m0_r_valid && m0_r_ready_o && m0_r_last) begin
+                s0_rd_busy <= 1'b0;
+            end
+
+            if (m0_aw_valid_o && m0_aw_ready) begin
+                s0_wr_busy <= 1'b1;  s0_wr_id <= m0_aw_id_o;
+            end else if (m0_b_valid && m0_b_ready_o) begin
+                s0_wr_busy <= 1'b0;
+            end
+
+            if (m1_ar_valid_o && m1_ar_ready) begin
+                s1_rd_busy <= 1'b1;  s1_rd_id <= m1_ar_id_o;
+            end else if (m1_r_valid && m1_r_ready_o && m1_r_last) begin
+                s1_rd_busy <= 1'b0;
+            end
+
+            if (m1_aw_valid_o && m1_aw_ready) begin
+                s1_wr_busy <= 1'b1;  s1_wr_id <= m1_aw_id_o;
+            end else if (m1_b_valid && m1_b_ready_o) begin
+                s1_wr_busy <= 1'b0;
+            end
+        end
+    end
+
+    always @(posedge clk) begin
+        if (!rst) begin
+            if (!s0_rd_busy) assume(!m0_r_valid);
+            if (m0_r_valid)  assume(m0_r_id == s0_rd_id);
+            if (!s0_wr_busy) assume(!m0_b_valid);
+            if (m0_b_valid)  assume(m0_b_id == s0_wr_id);
+
+            if (!s1_rd_busy) assume(!m1_r_valid);
+            if (m1_r_valid)  assume(m1_r_id == s1_rd_id);
+            if (!s1_wr_busy) assume(!m1_b_valid);
+            if (m1_b_valid)  assume(m1_b_id == s1_wr_id);
+        end
+    end
+
+    // =========================================================================
     // Track one outstanding write from master 0 (single-outstanding assume)
     // =========================================================================
     reg         outstanding;
@@ -353,20 +430,31 @@ module write_response_props (
             outstanding    <= 1'b0;
             outstanding_id <= 4'b0;
         end else begin
+            // Order matters: a write accepted in the same cycle the previous
+            // one retires must leave the tracker set. With the clear last it
+            // won, the new write was forgotten, and its perfectly legitimate
+            // B response then looked spurious.
+            if (b_valid && b_ready) begin
+                outstanding <= 1'b0;
+            end
             if (aw_valid && aw_ready) begin
                 outstanding    <= 1'b1;
                 outstanding_id <= aw_id;
             end
-            if (b_valid && b_ready) begin
-                outstanding <= 1'b0;
-            end
         end
     end
 
-    // Only one outstanding write at a time from master 0
+    // Only one outstanding write at a time from master 0.
+    //
+    // This previously only forced a second AW to carry the same ID, which does
+    // not enforce what the comment claims: the solver could issue a second AW
+    // while the first was still in flight, and the single-bit tracker above
+    // cleared on the first B, so the second, entirely legitimate B looked
+    // spurious.  Hold AW off until the outstanding write retires, allowing a
+    // new one in the same cycle the response completes.
     always @(posedge clk) begin
-        if (!rst && outstanding && aw_valid)
-            assume(aw_id == outstanding_id);
+        if (!rst && outstanding && !(b_valid && b_ready))
+            assume(!aw_valid);
     end
 
     // =========================================================================
@@ -430,20 +518,22 @@ module write_response_props (
             rd_outstanding    <= 1'b0;
             rd_outstanding_id <= 4'b0;
         end else begin
+            // Acceptance wins over completion — see the write tracker above.
+            if (r_valid && r_ready && r_last) begin
+                rd_outstanding <= 1'b0;
+            end
             if (ar_valid && ar_ready) begin
                 rd_outstanding    <= 1'b1;
                 rd_outstanding_id <= ar_id;
             end
-            if (r_valid && r_ready && r_last) begin
-                rd_outstanding <= 1'b0;
-            end
         end
     end
 
-    // Only one outstanding read at a time from master 0
+    // Only one outstanding read at a time from master 0 — same correction as
+    // the write side above.
     always @(posedge clk) begin
-        if (!rst && rd_outstanding && ar_valid)
-            assume(ar_id == rd_outstanding_id);
+        if (!rst && rd_outstanding && !(r_valid && r_ready && r_last))
+            assume(!ar_valid);
     end
 
     // =========================================================================

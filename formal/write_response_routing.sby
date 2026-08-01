@@ -3,14 +3,6 @@
 #
 # SymbiYosys configuration — write response routing proof
 #
-# NOT run in CI.  The proof elaborates and z3 solves it, but the environment
-# model is unsound: the slave B/R channels are free wires and the crossbar's
-# request outputs to the slaves (m*_axi_arvalid/arid/awvalid/awid) are left
-# unconnected in the wrapper, so nothing ties a response to a request.  The
-# solver simply produces an R beat for a read no master issued and the
-# crossbar correctly forwards it, which trips prop_r_routes_to_issuer.
-# Any correct crossbar fails this as written.  See no_commit/BUGS.md #23.
-#
 # Verifies that B responses from AxiZeroMixedTop (MyFull_2M2S: 2M×2S, 64-bit)
 # always return to the master that issued the corresponding AW.
 #
@@ -25,8 +17,17 @@
 # explores all legal stimulus up to the proof depth.
 
 [options]
-mode prove
-depth 30
+# Bounded, not unbounded.  These properties are not inductive on their own:
+# induction fails at step 0 because nothing relates the wrapper's transaction
+# trackers to the crossbar's internal state, and supplying those strengthening
+# invariants is a separate exercise.  Rather than claim a proof we do not have,
+# check all behaviours exhaustively to a stated depth.
+#
+# Depth 20 is chosen for cost: solver time grows sharply past it (about 2
+# minutes to reach step 20, then over a minute per step), and this runs on
+# every CI job.
+mode bmc
+depth 20
 
 [engines]
 smtbmc z3
