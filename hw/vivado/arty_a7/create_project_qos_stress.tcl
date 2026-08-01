@@ -16,6 +16,7 @@
 
 set script_dir [file dirname [file normalize [info script]]]
 set repo_root  [file normalize "$script_dir/../../.."]
+source "$script_dir/fcapz_debug.tcl"
 
 ## Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ 1. Project creation Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 set proj_dir "$script_dir/axizero_arty_qos_stress"
@@ -31,6 +32,7 @@ set_property file_type {Verilog} [get_files AxiZeroArtyQosStressDUT.v]
 set_property file_type {Verilog} [get_files axi_qos_traffic_gen.v]
 set_property file_type {Verilog} [get_files axi_qos_rand_burst_gen.v]
 set_property file_type {Verilog} [get_files axi_id_echo.v]
+add_fcapz_debug_sources $script_dir
 update_compile_order -fileset sources_1
 
 ## Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ 3. Block Design Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -171,12 +173,12 @@ connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins tg
 
 ## Ã¢â€â‚¬Ã¢â€â‚¬ ID Echo modules (BRAM ctrls have ID_WIDTH=0, crossbar needs ID echo) Ã¢â€â‚¬Ã¢â€â‚¬
 create_bd_cell -type module -reference axi_id_echo id_echo_0
-set_property -dict { CONFIG.ID_WIDTH {3} } [get_bd_cells id_echo_0]
+set_property -dict { CONFIG.ID_WIDTH {4} } [get_bd_cells id_echo_0]
 connect_bd_net [get_bd_ports sys_clk] [get_bd_pins id_echo_0/aclk]
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins id_echo_0/aresetn]
 
 create_bd_cell -type module -reference axi_id_echo id_echo_1
-set_property -dict { CONFIG.ID_WIDTH {3} } [get_bd_cells id_echo_1]
+set_property -dict { CONFIG.ID_WIDTH {4} } [get_bd_cells id_echo_1]
 connect_bd_net [get_bd_ports sys_clk] [get_bd_pins id_echo_1/aclk]
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins id_echo_1/aresetn]
 
@@ -291,6 +293,8 @@ connect_qos_tgen tgen_0 1
 connect_qos_tgen tgen_1 2
 connect_qos_tgen tgen_2 3
 
+connect_fcapz_arty_debug
+
 ## Ã¢â€â‚¬Ã¢â€â‚¬ GPIO trigger: bit 3 of gpio_io_o Ã¢â€ â€™ tgen_0/trigger Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 create_bd_cell -type ip -vlnv xilinx.com:ip:xlslice:1.0 tgen0_trigger_slice
 set_property -dict {CONFIG.DIN_WIDTH {4} CONFIG.DIN_FROM {1} CONFIG.DIN_TO {1}} [get_bd_cells tgen0_trigger_slice]
@@ -305,7 +309,7 @@ set_property -dict {
     CONFIG.DATA_WIDTH      {32}
     CONFIG.SINGLE_PORT_BRAM {0}
     CONFIG.MEM_DEPTH       {65536}
-    CONFIG.ID_WIDTH        {2}
+    CONFIG.ID_WIDTH        {4}
 } [get_bd_cells axi_bram_ctrl_0]
 create_bd_cell -type ip -vlnv xilinx.com:ip:blk_mem_gen:8.4 bram0
 set_property -dict {
@@ -384,7 +388,7 @@ set_property -dict {
     CONFIG.DATA_WIDTH      {32}
     CONFIG.SINGLE_PORT_BRAM {0}
     CONFIG.MEM_DEPTH       {65536}
-    CONFIG.ID_WIDTH        {2}
+    CONFIG.ID_WIDTH        {4}
 } [get_bd_cells axi_bram_ctrl_1]
 create_bd_cell -type ip -vlnv xilinx.com:ip:blk_mem_gen:8.4 bram1
 set_property -dict {
@@ -563,6 +567,3 @@ wait_on_run impl_1
 
 puts "\n\[axiZero-QoS\] Project: $proj_dir"
 puts "\[axiZero-QoS\] Bitstream: $proj_dir/axizero_arty_qos_stress.runs/impl_1/system_wrapper.bit"
-
-
-

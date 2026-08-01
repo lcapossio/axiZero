@@ -23,6 +23,7 @@
 #define BRAM1_BASEADDR    0xC0010000UL   /* AXI BRAM Controller 1 */
 #define GPIO_BASEADDR     0xC0020000UL   /* AXI GPIO (channel 1 = 4 LEDs) */
 #define UART_BASEADDR     0xC0030000UL   /* AXI UART Lite */
+#define AXIS_STATUS_BASEADDR 0xC0040000UL /* AXIS smoke status GPIO */
 
 /* ── Region sizes ──────────────────────────────────────────────────────── */
 

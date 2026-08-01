@@ -29,6 +29,9 @@ _SEARCH_ROOTS = [
 ]
 
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
 def _exe_names(base: str) -> list[str]:
     """Return candidate executable names for *base* (e.g. 'vivado')."""
     if _IS_WIN:
@@ -116,6 +119,37 @@ def _env_override(env_var: str, finder):
         if p.is_file():
             return p
     return finder()
+
+
+def vivado_env(base: dict | None = None) -> dict:
+    """Environment for Vivado child processes.
+
+    Fixes two independent causes of spurious build failures:
+
+    ``HOME``
+        Git Bash and MSYS export a Unix-style ``HOME`` (``/c/Users/...``)
+        that Vivado's ``tclapp::load_apps`` cannot resolve.
+
+    ``APPDATA``
+        Every out-of-context IP synthesis run loads tclapp independently
+        from the shared per-user store. Concurrent runs contend over it and
+        an arbitrary subset dies with ``Could not open 'C' for writing``,
+        so the build appears to fail at random in unrelated Xilinx IP.
+        Pointing ``APPDATA`` at a repo-local directory gives each build a
+        private store, which also stops Vivado depositing ``tclapp/`` and
+        ``<version>/`` into whatever directory it was launched from.
+
+    Returns a copy of *base* (default ``os.environ``).
+    """
+    env = dict(os.environ if base is None else base)
+    home = env.get("HOME")
+    if home and home.startswith("/"):
+        env["HOME"] = str(Path.home())
+    if os.name == "nt":
+        user_dir = REPO_ROOT / ".vivado_user"
+        user_dir.mkdir(parents=True, exist_ok=True)
+        env["APPDATA"] = str(user_dir.resolve())
+    return env
 
 
 def require_tools() -> tuple[Path, Path, Path]:

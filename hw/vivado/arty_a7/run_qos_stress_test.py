@@ -14,7 +14,7 @@ import pathlib
 import subprocess
 import sys
 
-from find_xilinx_tools import require_tools
+from find_xilinx_tools import require_tools, vivado_env
 
 # Paths
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
@@ -34,7 +34,7 @@ POLL_SECONDS = 5
 STUCK_SECONDS = 30
 
 
-def run(cmd, cwd=None, timeout=None, desc=""):
+def run(cmd, cwd=None, timeout=None, desc="", env=None):
     """Run a command, streaming output."""
     print(f"\n{'='*60}")
     print(f"  {desc}")
@@ -44,6 +44,7 @@ def run(cmd, cwd=None, timeout=None, desc=""):
         [str(c) for c in cmd],
         cwd=str(cwd) if cwd else None,
         timeout=timeout,
+        env=env,
     )
     if result.returncode != 0:
         print(f"\n*** FAILED (rc={result.returncode}): {desc}")
@@ -61,6 +62,7 @@ def step_vivado():
         cwd=REPO_ROOT,
         timeout=3600,
         desc="Vivado: create project + synth + impl + bitstream",
+        env=vivado_env(),
     )
     if not BIT_FILE.exists():
         print(f"*** ERROR: bitstream not found at {BIT_FILE}")
@@ -188,19 +190,31 @@ set poll_ms     {poll_ms}
 set run_ms      {run_ms}
 set stuck_polls {stuck_polls}
 
+proc read_word {{addr}} {{
+    for {{set attempt 0}} {{$attempt < 3}} {{incr attempt}} {{
+        if {{[catch {{mrd -value $addr}} value] == 0}} {{
+            return $value
+        }}
+        after 200
+        catch {{targets -set -filter {{name =~ "MicroBlaze #0"}}}}
+        after 200
+    }}
+    return [mrd -value $addr]
+}}
+
 set status "PASS"
 set start_ms [clock milliseconds]
-set last_hb [mrd -value $heartbeat_addr]
+set last_hb [read_word $heartbeat_addr]
 set stuck_count 0
 
 puts "\nMonitoring stress run for {RUN_SECONDS}s (poll={POLL_SECONDS}s, stuck={STUCK_SECONDS}s)..."
 
 while {{([clock milliseconds] - $start_ms) < $run_ms}} {{
     after $poll_ms
-    set fail_val [mrd -value $fail_addr]
-    set pass_val [mrd -value $pass_addr]
-    set hb_val   [mrd -value $heartbeat_addr]
-    set it_val   [mrd -value $iter_addr]
+    set fail_val [read_word $fail_addr]
+    set pass_val [read_word $pass_addr]
+    set hb_val   [read_word $heartbeat_addr]
+    set it_val   [read_word $iter_addr]
     set elapsed  [expr {{([clock milliseconds] - $start_ms) / 1000}}]
 
     puts [format "  t=%4ds  iter=%d  hb=%d  pass=%d  fail=%d" $elapsed $it_val $hb_val $pass_val $fail_val]
@@ -226,10 +240,10 @@ while {{([clock milliseconds] - $start_ms) < $run_ms}} {{
 rst -processor
 after 300
 
-set fail_end [mrd -value $fail_addr]
-set pass_end [mrd -value $pass_addr]
-set hb_end   [mrd -value $heartbeat_addr]
-set it_end   [mrd -value $iter_addr]
+set fail_end [read_word $fail_addr]
+set pass_end [read_word $pass_addr]
+set hb_end   [read_word $heartbeat_addr]
+set it_end   [read_word $iter_addr]
 
 if {{$it_end == 0 && $status == "PASS"}} {{
     set status "FAIL_NO_PROGRESS"
@@ -244,16 +258,16 @@ puts "  g_heartbeat = $hb_end   (@ 0x{g_heartbeat_addr:08X})"
 puts "  g_pass      = $pass_end (@ 0x{g_pass_addr:08X})"
 puts "  g_fail      = $fail_end (@ 0x{g_fail_addr:08X})"
 
-set ftest_val [mrd -value $ftest_addr]
-set fgot_val  [mrd -value $fgot_addr]
-set fexp_val  [mrd -value $fexp_addr]
+set ftest_val [read_word $ftest_addr]
+set fgot_val  [read_word $fgot_addr]
+set fexp_val  [read_word $fexp_addr]
 puts "  fail_test   = $ftest_val (1=T1a 2=T1b 3=T2prog 4/5/6=sent 7=MB 8=G0 9=G1 10=GPIO 11=G2mix)"
 puts [format "  fail_got    = 0x%08X" $fgot_val]
 puts [format "  fail_exp    = 0x%08X" $fexp_val]
-set pgpio_val [mrd -value $pgpio_addr]
-set pg0_val   [mrd -value $pg0_addr]
-set pg1_val   [mrd -value $pg1_addr]
-set pg2_val   [mrd -value $pg2_addr]
+set pgpio_val [read_word $pgpio_addr]
+set pg0_val   [read_word $pg0_addr]
+set pg1_val   [read_word $pg1_addr]
+set pg2_val   [read_word $pg2_addr]
 puts "  --- generator probes (after 1M-cycle delay) ---"
 puts [format "  probe_gpio  = 0x%08X (expect trigger mask 0x0000000F)" $pgpio_val]
 puts [format "  probe_g0    = 0x%08X (expect 0xB1000000)" $pg0_val]

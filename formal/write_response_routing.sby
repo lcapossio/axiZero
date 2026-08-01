@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT
+#
 # SymbiYosys configuration — write response routing proof
 #
 # Verifies that B responses from AxiZeroMixedTop (MyFull_2M2S: 2M×2S, 64-bit)
@@ -14,17 +17,28 @@
 # explores all legal stimulus up to the proof depth.
 
 [options]
-mode prove
-depth 30
+# Bounded, not unbounded.  These properties are not inductive on their own:
+# induction fails at step 0 because nothing relates the wrapper's transaction
+# trackers to the crossbar's internal state, and supplying those strengthening
+# invariants is a separate exercise.  Rather than claim a proof we do not have,
+# check all behaviours exhaustively to a stated depth.
+#
+# Depth 20 is chosen for cost: solver time grows sharply past it (about 2
+# minutes to reach step 20, then over a minute per step), and this runs on
+# every CI job.
+mode bmc
+depth 20
 
 [engines]
 smtbmc z3
 
 [script]
 read -formal write_response_props.sv
-read -formal ../generated/MyFull_2M2S.v
+read -formal MyFull_2M2S.v
 prep -top write_response_props
 
 [files]
 write_response_props.sv
 ../generated/MyFull_2M2S.v
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT

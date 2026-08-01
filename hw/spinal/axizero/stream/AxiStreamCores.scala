@@ -1,0 +1,207 @@
+// Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+// SPDX-License-Identifier: MIT
+package axizero.stream
+
+import spinal.core._
+import spinal.lib._
+import spinal.lib.bus.amba4.axis._
+
+sealed trait AxiStreamArbitrationPolicy
+case object AxisRoundRobin    extends AxiStreamArbitrationPolicy
+case object AxisFixedPriority extends AxiStreamArbitrationPolicy
+
+/** One-stage AXI4-Stream register slice.
+  *
+  * This is a full one-beat stream pipeline stage: TVALID and all payload sideband fields are
+  * registered, while TREADY is driven from the downstream stage through SpinalHDL's stage helper.
+  */
+class AxiStreamRegSlice(config: Axi4StreamConfig) extends Component {
+  val io = new Bundle {
+    val input  = slave(Axi4Stream(config))
+    val output = master(Axi4Stream(config))
+  }
+
+  io.output << io.input.stage()
+}
+
+/** AXI4-Stream data-width adapter wrapper.
+  *
+  * Delegates packing/unpacking to SpinalHDL's native AXI4-Stream width adapter while keeping
+  * axiZero's stream cores under one package/API.
+  */
+class AxiStreamWidthAdapter(
+  inputConfig: Axi4StreamConfig,
+  outputConfig: Axi4StreamConfig
+) extends Component {
+  require(inputConfig.dataWidth > 0, "inputConfig.dataWidth must be positive")
+  require(outputConfig.dataWidth > 0, "outputConfig.dataWidth must be positive")
+
+  val io = new Bundle {
+    val input  = slave(Axi4Stream(inputConfig))
+    val output = master(Axi4Stream(outputConfig))
+  }
+
+  Axi4StreamSimpleWidthAdapter(io.input, io.output)
+}
+
+/** AXI4-Stream elastic FIFO.
+  *
+  * Stores complete stream beats, including all enabled sideband fields. TLAST is carried as part of
+  * the payload, so frame boundaries are preserved without special handling.
+  */
+class AxiStreamFifo(config: Axi4StreamConfig, depth: Int) extends Component {
+  require(depth >= 2, "AxiStreamFifo depth must be at least 2")
+
+  val io = new Bundle {
+    val input  = slave(Axi4Stream(config))
+    val output = master(Axi4Stream(config))
+  }
+
+  io.output << io.input.queue(depth)
+}
+
+/** N-to-1 AXI4-Stream packet arbiter/mux.
+  *
+  * Arbitration happens at frame boundaries. Once an input wins, it keeps ownership until the beat
+  * marked with TLAST transfers, preventing packets from different inputs from interleaving.
+  */
+class AxiStreamArbMux(
+  config: Axi4StreamConfig,
+  inputCount: Int,
+  arbitration: AxiStreamArbitrationPolicy = AxisRoundRobin
+) extends Component {
+  require(inputCount >= 1, "AxiStreamArbMux requires at least one input")
+  require(config.useLast, "AxiStreamArbMux requires TLAST so packet ownership can be locked")
+
+  private val ptrWidth = log2Up(inputCount max 2)
+
+  val io = new Bundle {
+    val inputs = Vec(slave(Axi4Stream(config)), inputCount)
+    val output = master(Axi4Stream(config))
+  }
+
+  private def firstOh(requests: Bits): Bits = OHMasking.first(requests)
+
+  private def roundRobinOh(requests: Bits, ptr: UInt): Bits =
+    if (inputCount == 1) requests
+    else OHMasking.roundRobin(requests, (U(1, inputCount bits) |<< ptr).asBits)
+
+  private def ohToIdx(oh: Bits): UInt =
+    if (inputCount == 1) U(0, ptrWidth bits) else OHToUInt(oh).resize(ptrWidth)
+
+  val rrPtr  = RegInit(U(0, ptrWidth bits))
+  val active = RegInit(False)
+  val owner  = RegInit(U(0, ptrWidth bits))
+
+  val requests = Bits(inputCount bits)
+  for (i <- 0 until inputCount) {
+    requests(i)        := io.inputs(i).valid
+    io.inputs(i).ready := False
+  }
+
+  val grantOh = arbitration match {
+    case AxisRoundRobin    => roundRobinOh(requests, rrPtr)
+    case AxisFixedPriority => firstOh(requests)
+  }
+  val grantIdx = ohToIdx(grantOh)
+  val selIdx   = UInt(ptrWidth bits)
+  selIdx := Mux(active, owner, grantIdx)
+
+  io.output.valid   := io.inputs(selIdx).valid
+  io.output.payload := io.inputs(selIdx).payload
+
+  for (i <- 0 until inputCount) {
+    when(selIdx === i) {
+      io.inputs(i).ready := io.output.ready
+    }
+  }
+
+  when(!active && io.output.fire) {
+    owner := grantIdx
+    when(!io.output.last) {
+      active := True
+    }
+    arbitration match {
+      case AxisRoundRobin =>
+        when(grantIdx === U(inputCount - 1, ptrWidth bits)) {
+          rrPtr := U(0, ptrWidth bits)
+        } otherwise {
+          rrPtr := (grantIdx + 1).resized
+        }
+      case AxisFixedPriority =>
+    }
+  } elsewhen (active && io.output.fire && io.output.last) {
+    active := False
+  }
+}
+
+/** 1-to-N AXI4-Stream packet demux.
+  *
+  * The select input is sampled on the first transferred beat of a packet and held until TLAST, so a
+  * packet always exits on one output even if select changes mid-frame.
+  */
+class AxiStreamDemux(config: Axi4StreamConfig, outputCount: Int) extends Component {
+  require(outputCount >= 1, "AxiStreamDemux requires at least one output")
+  require(config.useLast, "AxiStreamDemux requires TLAST so packet ownership can be locked")
+
+  private val selWidth = log2Up(outputCount max 2)
+
+  val io = new Bundle {
+    val input   = slave(Axi4Stream(config))
+    val select  = in UInt (selWidth bits)
+    val outputs = Vec(master(Axi4Stream(config)), outputCount)
+  }
+
+  val active     = RegInit(False)
+  val owner      = RegInit(U(0, selWidth bits))
+  val ownerValid = RegInit(False)
+  val selIdx     = UInt(selWidth bits)
+  selIdx := Mux(active || ownerValid, owner, io.select)
+
+  io.input.ready := False
+  for (i <- 0 until outputCount) {
+    io.outputs(i).valid   := False
+    io.outputs(i).payload := io.input.payload
+    when(selIdx === i) {
+      io.outputs(i).valid := io.input.valid
+      io.input.ready      := io.outputs(i).ready
+    }
+  }
+
+  when(!active && io.input.valid && !ownerValid) {
+    owner      := io.select
+    ownerValid := True
+  } elsewhen (!active && !io.input.valid) {
+    ownerValid := False
+  }
+
+  when(!active && io.input.fire) {
+    when(!io.input.last) {
+      active := True
+    } otherwise {
+      ownerValid := False
+    }
+  } elsewhen (active && io.input.fire && io.input.last) {
+    active     := False
+    ownerValid := False
+  }
+}
+
+/** 1-to-N AXI4-Stream broadcaster.
+  *
+  * Each input beat is accepted only when every output has accepted that beat, so all downstream
+  * consumers see identical packet contents and boundaries.
+  */
+class AxiStreamBroadcaster(config: Axi4StreamConfig, outputCount: Int) extends Component {
+  require(outputCount >= 1, "AxiStreamBroadcaster requires at least one output")
+
+  val io = new Bundle {
+    val input   = slave(Axi4Stream(config))
+    val outputs = Vec(master(Axi4Stream(config)), outputCount)
+  }
+
+  val forks = StreamFork(io.input, outputCount, synchronous = true)
+  for (i <- 0 until outputCount) {
+    io.outputs(i) << forks(i)
+  }
+}

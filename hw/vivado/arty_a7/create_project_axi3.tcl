@@ -14,6 +14,7 @@
 
 set script_dir [file dirname [file normalize [info script]]]
 set repo_root  [file normalize "$script_dir/../../.."]
+source "$script_dir/fcapz_debug.tcl"
 
 ## --- 1. Project creation ---
 set proj_dir "$script_dir/axizero_arty_axi3"
@@ -25,6 +26,7 @@ add_files -norecurse "$script_dir/ip/rtl/AxiZeroArtyAxi3DUT.v"
 add_files -norecurse "$script_dir/ip/rtl/axi_id_echo.v"
 set_property file_type {Verilog} [get_files AxiZeroArtyAxi3DUT.v]
 set_property file_type {Verilog} [get_files axi_id_echo.v]
+add_fcapz_debug_sources $script_dir
 update_compile_order -fileset sources_1
 
 ## --- 3. Block Design ---
@@ -178,15 +180,16 @@ connect_bd_net [get_bd_pins axizero_0/s0_axi_rvalid]       [get_bd_pins microbla
 connect_bd_net [get_bd_pins microblaze_0/M_AXI_DP_RREADY]  [get_bd_pins axizero_0/s0_axi_rready]
 connect_bd_net [get_bd_pins axizero_0/s0_axi_rdata]        [get_bd_pins microblaze_0/M_AXI_DP_RDATA]
 connect_bd_net [get_bd_pins axizero_0/s0_axi_rresp]        [get_bd_pins microblaze_0/M_AXI_DP_RRESP]
+connect_fcapz_arty_debug
 
 ## -- ID Echo modules (BRAM ctrls have no ID support; 1-bit IDs for 1-master) --
 create_bd_cell -type module -reference axi_id_echo id_echo_0
-set_property -dict {CONFIG.ID_WIDTH {1} CONFIG.MAX_OUTSTANDING {2}} [get_bd_cells id_echo_0]
+set_property -dict {CONFIG.ID_WIDTH {2} CONFIG.MAX_OUTSTANDING {2}} [get_bd_cells id_echo_0]
 connect_bd_net [get_bd_ports sys_clk] [get_bd_pins id_echo_0/aclk]
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins id_echo_0/aresetn]
 
 create_bd_cell -type module -reference axi_id_echo id_echo_1
-set_property -dict {CONFIG.ID_WIDTH {1} CONFIG.MAX_OUTSTANDING {2}} [get_bd_cells id_echo_1]
+set_property -dict {CONFIG.ID_WIDTH {2} CONFIG.MAX_OUTSTANDING {2}} [get_bd_cells id_echo_1]
 connect_bd_net [get_bd_ports sys_clk] [get_bd_pins id_echo_1/aclk]
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins id_echo_1/aresetn]
 
@@ -196,7 +199,7 @@ set_property -dict {
     CONFIG.DATA_WIDTH      {32}
     CONFIG.SINGLE_PORT_BRAM {0}
     CONFIG.MEM_DEPTH       {65536}
-    CONFIG.ID_WIDTH        {1}
+    CONFIG.ID_WIDTH        {2}
 } [get_bd_cells axi_bram_ctrl_0]
 create_bd_cell -type ip -vlnv xilinx.com:ip:blk_mem_gen:8.4 bram0
 set_property -dict {
@@ -271,7 +274,7 @@ set_property -dict {
     CONFIG.DATA_WIDTH      {32}
     CONFIG.SINGLE_PORT_BRAM {0}
     CONFIG.MEM_DEPTH       {65536}
-    CONFIG.ID_WIDTH        {1}
+    CONFIG.ID_WIDTH        {2}
 } [get_bd_cells axi_bram_ctrl_1]
 create_bd_cell -type ip -vlnv xilinx.com:ip:blk_mem_gen:8.4 bram1
 set_property -dict {

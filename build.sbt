@@ -6,7 +6,7 @@ ThisBuild / organization := "io.axizero"
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
-val spinalVersion = "1.10.1"
+val spinalVersion = "1.14.2"
 
 lazy val root = project
   .in(file("."))

@@ -35,7 +35,7 @@ object ArtyQosDutGen extends App {
   )
 
   // Full AXI4 slave config (BRAM controllers, slaveIdW=2)
-  val fullSlaveCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 2)
+  val fullSlaveCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 3)
 
   // AXI4-Lite slave config (GPIO, UART)
   val liteSlaveCfg = Axi4Config(
@@ -58,6 +58,7 @@ object ArtyQosDutGen extends App {
   val cfg = AxiZeroConfig(
     masters = Seq(
       MasterPort(masterCfg, FullAxi4),
+      MasterPort(tgenCfg, LiteAxi4),
       MasterPort(tgenCfg, LiteAxi4)
     ),
     slaves = Seq(

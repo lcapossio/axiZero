@@ -10,13 +10,11 @@ Steps:
   3. xsdb:   program bitstream + ELF, wait, read g_fail / g_pass
 """
 
-import os
 import pathlib
 import subprocess
 import sys
-import time
 
-from find_xilinx_tools import require_tools
+from find_xilinx_tools import require_tools, vivado_env
 
 # -- Paths --
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
@@ -54,9 +52,7 @@ def step_vivado():
     if BIT_FILE.exists():
         print(f"[skip] Bitstream already exists: {BIT_FILE}")
         return
-    env = dict(os.environ)
-    if "HOME" in env and env["HOME"].startswith("/"):
-        env["HOME"] = str(pathlib.Path.home())
+    env = vivado_env()
     run(
         [VIVADO_BIN, "-mode", "batch", "-source", str(CREATE_TCL)],
         cwd=REPO_ROOT,
@@ -105,7 +101,7 @@ def find_symbols():
             if name in ("g_fail", "g_pass"):
                 addrs[name] = int(parts[0], 16)
     if "g_fail" not in addrs or "g_pass" not in addrs:
-        print(f"*** Could not find g_fail/g_pass in ELF symbols")
+        print("*** Could not find g_fail/g_pass in ELF symbols")
         for line in result.stdout.splitlines()[-20:]:
             print(f"    {line}")
         sys.exit(1)

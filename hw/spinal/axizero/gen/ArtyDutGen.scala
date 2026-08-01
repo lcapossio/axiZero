@@ -35,9 +35,26 @@ object ArtyDutGen extends App {
   // C_M_AXI_DP_THREAD_ID_WIDTH defaults to 1 in Vivado.
   val masterCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
 
+  val debugMasterCfg = Axi4Config(
+    addressWidth = 32,
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
+  )
+
   // ── Full AXI4 slave config (BRAM controllers) ───────────────────────────
   // 1 master → masterIndexBits=0 → slaveIdW = masterIdW = 1
-  val fullSlaveCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
+  val fullSlaveCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 2)
 
   // ── AXI4-Lite slave config (GPIO, UART) ────────────────────────────────
   val liteSlaveCfg = Axi4Config(
@@ -59,7 +76,8 @@ object ArtyDutGen extends App {
 
   val cfg = AxiZeroConfig(
     masters = Seq(
-      MasterPort(masterCfg, FullAxi4)
+      MasterPort(masterCfg, FullAxi4),
+      MasterPort(debugMasterCfg, LiteAxi4)
     ),
     slaves = Seq(
       SlavePort(

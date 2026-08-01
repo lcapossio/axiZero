@@ -1,9 +1,22 @@
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT
+
 name: CI
 
 on:
   push:
     branches: [main, master]
   pull_request:
+
+env:
+  # Verilator versions this project is validated against. SpinalHDL 1.10.1
+  # segfaulted on 5.048 (see no_commit/BUGS.md #3), so an unpinned runner
+  # image can silently reintroduce that class of failure. Assert the version
+  # instead of trusting whatever apt serves.
+  VERILATOR_EXPECTED: '5.0'
+  # Unpinned ruff drifts its default rule set: 0.16.0 reports 114 findings
+  # on a tree that 0.14.2 passes clean. Pin it so lint is deterministic.
+  RUFF_VERSION: '0.14.2'
 
 jobs:
   # ── SpinalHDL compilation + SpinalSim unit tests ──────────────────────────
@@ -14,22 +27,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Java 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-          cache: sbt
-
-      - name: Install sbt
-        run: |
-          wget -qO /tmp/sbt.tgz \
-            https://github.com/sbt/sbt/releases/download/v1.9.9/sbt-1.9.9.tgz
-          sudo tar -xzf /tmp/sbt.tgz -C /usr/local
-          echo "/usr/local/sbt/bin" >> $GITHUB_PATH
+      - uses: ./.github/actions/setup-sbt
 
       - name: Install Verilator
-        run: sudo apt-get install -y --no-install-recommends verilator
+        run: |
+          sudo apt-get install -y --no-install-recommends verilator
+          verilator --version
+          verilator --version | grep -q "Verilator ${VERILATOR_EXPECTED}" || {
+            echo "::error::Verilator drifted from ${VERILATOR_EXPECTED}.x - see no_commit/BUGS.md #3"
+            exit 1
+          }
 
       - name: Compile (SpinalHDL)
         run: sbt compile
@@ -61,23 +68,100 @@ jobs:
   cocotb:
     name: cocotb (generated Verilog)
     runs-on: ubuntu-24.04
-    # TODO: migrate to cocotb 2.x once cocotbext-axi has a compatible release.
-    # Blocked on cocotbext-axi support for cocotb 2.0 runner API changes.
-    # Track: https://github.com/alexforencich/cocotbext-axi/issues
+    # Checked 2026-05-01: keep cocotb 1.9.2 until cocotbext-axi supports cocotb 2.x.
+    # Track: https://github.com/alexforencich/cocotbext-axi/issues/119
 
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/setup-sbt
+
       - name: Install Verilator
-        run: sudo apt-get install -y --no-install-recommends verilator
+        run: |
+          sudo apt-get install -y --no-install-recommends verilator
+          verilator --version
+          verilator --version | grep -q "Verilator ${VERILATOR_EXPECTED}" || {
+            echo "::error::Verilator drifted from ${VERILATOR_EXPECTED}.x - see no_commit/BUGS.md #3"
+            exit 1
+          }
 
       - name: Install Python dependencies
-        run: pip install "cocotb==1.9.2" cocotbext-axi
+        run: pip install "cocotb==1.9.2" "cocotbext-axi @ git+https://github.com/alexforencich/cocotbext-axi@b2d126c4bc0f4cafa6e2fd3cdcfafc333e716a9a" pyyaml
 
       - name: Lint Python (ruff)
         run: |
-          pip install ruff
-          ruff check scripts/ sim/
+          pip install "ruff==${RUFF_VERSION}"
+          ruff --version
+          ruff check scripts/ sim/ hw/
 
-      - name: Run cocotb tests (lite + full + wrr + qos + ipif)
+      - name: Run cocotb tests (lite + full + wrr + qos + ipif + axis)
         run: python3 sim/cocotb_gen/run_all.py
+
+  generated-rtl:
+    name: Generated RTL up to date
+    runs-on: ubuntu-24.04
+    # The netlists under generated/ are tracked, and the cocotb suites run
+    # against them. Nothing previously noticed when they drifted from the
+    # generators: the SpinalHDL 1.10.1 -> 1.14.2 move regenerated the Arty
+    # netlists but left these behind, and the suites kept passing against
+    # output from a generator version the project no longer used.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-sbt
+
+      - name: Install Python dependencies
+        run: pip install pyyaml
+
+      - name: Regenerate tracked netlists
+        run: |
+          python3 scripts/axizero.py generate scripts/example.yaml --output generated
+          sbt "runMain axizero.gen.AxiZeroGen"
+
+      - name: Compare against the committed netlists
+        run: python3 scripts/check_generated.py
+
+  formal:
+    name: Formal checks
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-sbt
+
+      - name: Set up OSS CAD Suite
+        uses: YosysHQ/setup-oss-cad-suite@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Python dependencies
+        run: pip install pyyaml
+
+      - name: Generate AXIS formal RTL
+        run: |
+          mkdir -p tmp/axis_formal
+          cat > tmp/axis_formal/config.yaml <<'EOF'
+          designs:
+            - name: SmokeAxisRegSlice
+              kind: axis
+              core: reg_slice
+              data_width: 32
+              use_keep: true
+              use_last: true
+          EOF
+          python3 scripts/axizero.py generate tmp/axis_formal/config.yaml --output tmp/axis_formal/rtl
+
+      # One step per proof, so a failure in one cannot hide the result of
+      # another. Run as a single block, the first failure aborted the step and
+      # the AXIS proof below never ran at all.
+      # Bounded to depth 20, not an unbounded proof - see the .sby for why.
+      - name: Formal proof - write response routing
+        working-directory: formal
+        run: sby -f write_response_routing.sby
+
+      - name: Formal proof - AXIS ready/valid reg slice
+        if: ${{ !cancelled() }}
+        working-directory: formal
+        run: sby -f axis_ready_valid_regslice.sby

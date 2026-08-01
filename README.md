@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 85 SpinalSim + 27 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 96 SpinalSim + 34 cocotb tests pass.
 
 ---
 
@@ -28,6 +28,7 @@ Hardware-validated on Xilinx Arty A7-100T. 85 SpinalSim + 27 cocotb tests pass.
   - [Arbitration modes](#arbitration-modes)
   - [Data-width conversion](#data-width-conversion)
   - [Pipelined vs blocking mode](#pipelined-vs-blocking-mode)
+  - [AXI4-Stream utility cores](#axi4-stream-utility-cores)
 - [Simulation](#simulation)
   - [SpinalSim (unit tests)](#spinalsim-unit-tests-run-with-sbt)
   - [cocotb (integration tests)](#cocotb-integration-tests-against-pre-built-verilog-run-with-python)
@@ -57,6 +58,8 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - IPIF compatibility — AW and W are presented simultaneously to slaves that require it
 - YAML → Verilog generator with port-name post-processing for Vivado AXI naming conventions
 - AXI3-to-AXI4 bridge adapter with WID reorder buffer (write interleaving → strict AW-order), locked access conversion, LEN/LOCK field adaptation
+
+- Standalone AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster
 
 **Not yet implemented:**
 
@@ -157,23 +160,36 @@ python scripts/axizero.py generate my_design.yaml --output rtl/
 
 ### Option B — use a pre-built Verilog file
 
-Eleven configurations are pre-generated in [`generated/`](generated/). Copy the appropriate file into your project and instantiate it.
+Fifteen configurations are pre-generated in [`generated/`](generated/). Copy the appropriate file into your project and instantiate it.
 
-Resource usage is post-synthesis (Vivado 2025.2, xc7a100t, OOC mode). No BRAM or DSP used by any configuration.
+Resource usage is post-synthesis, out-of-context, Vivado 2025.2 targeting
+xc7a100tcsg324-1 with no timing constraint applied; Fmax is derived from the
+worst-case path Vivado reports under those conditions, so treat it as an upper
+bound rather than a closed-timing figure. `n/a` means the design had no
+internal path for Vivado to rank. Regenerate the whole table with
+`vivado -mode batch -source hw/vivado/synth_resource_usage.tcl`. No BRAM or DSP
+is used by any configuration.
 
-| File | Description | LUTs | FFs |
-|---|---|---:|---:|
-| `MyLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin | 237 | 8 |
-| `AxiZeroLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin (wider addr) | 245 | 8 |
-| `MyLite_2M2S_WRR.v` | 2M×2S AXI4-Lite, weighted round-robin (3:1) | 352 | 286 |
-| `MyLite_2M4S_FP.v` | 2M×4S AXI4-Lite, fixed priority | 527 | 16 |
-| `AxiZeroLite_2M4S_RS.v` | 2M×4S AXI4-Lite, register slices on all ports | 563 | 784 |
-| `AxiZeroLite_4M4S_FP.v` | 4M×4S AXI4-Lite, fixed priority | 1047 | 24 |
-| `MyFull_2M2S.v` | 2M×2S AXI4 Full, 64-bit, round-robin | 379 | 4 |
-| `MyFull_2M2S_QoS.v` | 2M×2S AXI4 Full, 64-bit, QoS arbitration | 626 | 62 |
-| `MyMixed_2M3S.v` | 2M×3S mixed (Full + Lite), auto adapters | 421 | 34 |
-| `ArtyDC_1M3S.v` | 1M×3S mixed, Arty A7 don't-care default config | 258 | 8 |
-| `ArtyDC_2M4S.v` | 2M×4S mixed, Arty A7 don't-care default config | 591 | 28 |
+| File | Description | LUTs | FFs | LUTRAM | Fmax (MHz) |
+|---|---|---:|---:|---:|---:|
+| `MyLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin | 237 | 8 | 0 | 400.0 |
+| `AxiZeroLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin (wider addr) | 237 | 8 | 0 | n/a |
+| `MyLite_2M2S_WRR.v` | 2M×2S AXI4-Lite, weighted round-robin (3:1) | 352 | 286 | 0 | 208.3 |
+| `MyLite_2M4S_FP.v` | 2M×4S AXI4-Lite, fixed priority | 527 | 16 | 0 | 400.0 |
+| `AxiZeroLite_2M4S_RS.v` | 2M×4S AXI4-Lite, register slices on all ports | 656 | 784 | 0 | n/a |
+| `AxiZeroLite_4M4S_FP.v` | 4M×4S AXI4-Lite, fixed priority | 1292 | 24 | 0 | n/a |
+| `MyFull_2M2S.v` | 2M×2S AXI4 Full, 64-bit, round-robin | 582 | 12 | 0 | 384.6 |
+| `MyFull_2M2S_QoS.v` | 2M×2S AXI4 Full, 64-bit, QoS arbitration | 626 | 62 | 4 | 117.6 |
+| `MyMixed_2M3S.v` | 2M×3S mixed (Full + Lite), auto adapters | 421 | 34 | 0 | 312.5 |
+| `MyAxisRegSlice.v` | AXI4-Stream register slice, 32-bit | 2 | 42 | 0 | 500.0 |
+| `MyAxisWidth_8To32.v` | AXI4-Stream width adapter, 8→32-bit | 10 | 44 | 0 | 333.3 |
+| `MyAxisFifo.v` | AXI4-Stream FIFO, 32-bit | 42 | 57 | 28 | 294.1 |
+| `MyAxisMux_2To1.v` | AXI4-Stream arb-mux, 2→1, round-robin | 49 | 3 | 0 | 434.8 |
+| `MyAxisDemux_1To2.v` | AXI4-Stream demux, 1→2 | 6 | 3 | 0 | 434.8 |
+| `MyAxisBroadcaster_1To2.v` | AXI4-Stream broadcaster, 1→2 | 2 | 0 | 0 | n/a |
+
+Every file in the table is reproducible from the generators, and CI regenerates
+and compares them on each run, so the table cannot drift from the RTL unnoticed.
 
 If none of these match your topology, generate a custom one with Option A.
 
@@ -295,7 +311,74 @@ When a port's `data_width` differs from `fabric_data_width`, the generator inser
 
 Only affects the Full AXI4 crossbar. The Lite-only crossbar is always single-outstanding (blocking).
 
+### AXI4-Stream utility cores
+
+Standalone AXI4-Stream cores use `kind: axis` in the YAML generator. They do not use `masters`, `slaves`, address maps, or memory-mapped arbitration settings.
+
+Common keys:
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `kind` | string | *required* | Set to `axis`. |
+| `core` | string | *required* | `reg_slice`, `width_adapter`, `fifo`, `arb_mux`, `demux`, or `broadcaster`. |
+| `data_width` | int | *required except width adapter* | AXIS `TDATA` width in bits. Must be byte-aligned. |
+| `input_data_width` | int | *width adapter only* | Input `TDATA` width in bits. |
+| `output_data_width` | int | *width adapter only* | Output `TDATA` width in bits. |
+| `use_keep` / `use_strb` / `use_last` | bool | `true` | Enable `TKEEP`, `TSTRB`, and `TLAST`. Packet mux/demux require `use_last: true`. |
+| `id_width` / `dest_width` / `user_width` | int | `0` | Sideband widths. `use_id`, `use_dest`, and `use_user` default to true when the matching width is non-zero. |
+
+Core-specific keys:
+
+| Core | Extra keys | Behavior |
+|---|---|---|
+| `reg_slice` | none | One-stage ready/valid register slice for timing closure. |
+| `width_adapter` | `input_data_width`, `output_data_width` | Packs or unpacks byte streams between different `TDATA` widths. |
+| `fifo` | `depth` | Elastic FIFO storing full AXIS beats, including enabled sidebands. `depth` must be at least 2. |
+| `arb_mux` | `inputs`, `arbitration` | N-to-1 packet arbiter/mux. `arbitration` is `round_robin` or `fixed_priority`; ownership is held until `TLAST`. |
+| `demux` | `outputs` | 1-to-N packet demux. The explicit `select` input is sampled at packet start and held until `TLAST`. |
+| `broadcaster` | `outputs` | 1-to-N synchronous broadcaster. A beat is accepted only when every output accepts it. |
+
+Measured xc7a100t datapoint for the Arty AXIS smoke datapath, which instantiates all six utility cores (`AxiStreamArbMux`, FIFO, register slice, 32-to-8 and 8-to-32 width adapters, demux, broadcaster):
+
+| Design | LUTs | FFs | LUTRAM | BRAM | DSP | Clock | Fmax note |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `AxiStreamArtySmoke` submodule | 175 | 208 | 20 | 0 | 0 | 100 MHz | Routed Arty AXIS build (Vivado 2025.2, SpinalHDL 1.14.2) WNS 0.465 ns, equivalent single-clock margin to about 105 MHz |
+
+Example:
+
+```yaml
+designs:
+  - name: MyAxisFifo
+    kind: axis
+    core: fifo
+    data_width: 32
+    depth: 16
+    use_keep: true
+    use_last: true
+
+  - name: MyAxisMux_2To1
+    kind: axis
+    core: arb_mux
+    data_width: 32
+    inputs: 2
+    arbitration: round_robin
+    use_keep: true
+    use_last: true
+
+  - name: MyAxisDemux_1To2
+    kind: axis
+    core: demux
+    data_width: 32
+    outputs: 2
+    use_keep: true
+    use_last: true
+```
+
+Generated ports are renamed to AXI4-Stream style: `s_axis_t*` and `m_axis_t*` for single-input/single-output cores, `s0_axis_t*`/`s1_axis_t*` for vector inputs, and `m0_axis_t*`/`m1_axis_t*` for vector outputs. The demux selector is emitted as `select`.
+
 Full example with all options: [`scripts/example.yaml`](scripts/example.yaml).
+Packet-pipeline example: [`scripts/examples/axis_packet_pipeline.yaml`](scripts/examples/axis_packet_pipeline.yaml).
+Verification details: [`docs/axis-stream-verification.md`](docs/axis-stream-verification.md).
 
 ---
 
@@ -309,7 +392,13 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-85 tests pass across 15 suites:
+96 tests pass across 16 suites:
+
+For the focused AXI4-Stream loop, including lint, YAML generator smoke tests, and cocotbext-axi generated-RTL tests:
+
+```bash
+python3 scripts/run_sim.py axis
+```
 
 | Suite | Tests | Description |
 |---|---|---|
@@ -327,7 +416,8 @@ sbt test
 | `QosCrossbarSpec` | 5 | QoS arbitration: higher AWQOS/ARQOS wins (blocking + pipelined), equal-QoS round-robin tie-break, aging anti-starvation |
 | `QosStressShortSpec` | 1 | Short 4-master QoS stress: distinct patterns (sequential, reverse, sparse, random short bursts), concurrent traffic, end-state validation |
 | `Axi3ToAxi4Spec` | 5 | AXI3→AXI4 bridge: single-beat, INCR burst, write interleaving (WID reorder), locked→SLVERR, multiple outstanding |
-| `Axi3MixedCrossbarSpec` | 4 | Axi3Mode auto-adapter: single-beat to full slave, single-beat to Lite slave, routing to both, 4-beat INCR burst |
+| `Axi3MixedCrossbarSpec` | 5 | Axi3Mode auto-adapter: single-beat to full slave, single-beat to Lite slave, routing to both, 4-beat INCR burst, register-sliced path |
+| `AxiStreamCoreSpec` | 10 | AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster, sparse TKEEP/TSTRB/TLAST edge cases |
 
 ### cocotb (integration tests against pre-built Verilog, run with Python)
 
@@ -335,15 +425,16 @@ Tests the generated Verilog files directly using [cocotbext-axi](https://github.
 
 ```bash
 # requires: pip install cocotb cocotbext-axi
-python3 sim/cocotb_gen/run_all.py          # all suites
+python3 sim/cocotb_gen/run_all.py          # all cocotb suites
 python3 sim/cocotb_gen/run_all.py lite     # MyLite_1M4S.v only
 python3 sim/cocotb_gen/run_all.py full     # MyFull_2M2S.v only
 python3 sim/cocotb_gen/run_all.py wrr      # MyLite_2M2S_WRR.v only
 python3 sim/cocotb_gen/run_all.py qos      # MyFull_2M2S_QoS.v only
 python3 sim/cocotb_gen/run_all.py ipif     # MyLite_1M4S.v IPIF slave only
+python3 sim/cocotb_gen/run_all.py axis     # generated AXI4-Stream cocotb suite
 ```
 
-27 tests pass across 5 suites:
+34 tests pass across 6 suites:
 
 | Suite | DUT | Tests | Description |
 |---|---|---|---|
@@ -351,13 +442,14 @@ python3 sim/cocotb_gen/run_all.py ipif     # MyLite_1M4S.v IPIF slave only
 | `full` | `MyFull_2M2S.v` | 6 | AxiMaster → 2-slave crossbar: single R/W, address routing + isolation, 16-beat burst, 64-beat burst (AWLEN=63), alternating slaves, 40× random |
 | `wrr` | `MyLite_2M2S_WRR.v` | 6 | 2-master WRR crossbar: dual-master R/W, address routing, concurrent bandwidth, no starvation, concurrent different slaves, 80× random |
 | `qos` | `MyFull_2M2S_QoS.v` | 6 | 2-master QoS crossbar: dual-master R/W, address routing, higher QoS wins contention, equal-QoS round-robin, aging anti-starvation, QoS read priority |
-| `ipif` | `MyLite_1M4S.v` | 3 | IPIF slave compatibility: strict IpifRam model requires AWVALID+WVALID simultaneously, routing unaffected |
+| `ipif` | `MyLite_1M4S.v` | 4 | IPIF slave compatibility: strict IpifRam model requires AWVALID+WVALID simultaneously, routing unaffected |
+| `axis` | generated AXI4-Stream cores | 6 | cocotbext-axi stream BFM tests for reg slice, width adapter, FIFO, arb-mux, demux, broadcaster |
 
 ---
 
 ## Hardware validation — Arty A7-100T
 
-Four test suites run on a Xilinx Arty A7-100T (xc7a100t) at 100 MHz. All four pass.
+Six test suites run on a Xilinx Arty A7-100T (xc7a100t) at 100 MHz. All six pass.
 
 ### Base test (1M×4S)
 
@@ -418,16 +510,39 @@ All 5 tests pass (g\_fail=0, g\_pass=5).
 | T4 | GPIO LED sweep (AXI-Lite slave path through adapter) |
 | T5 | UART status read (second AXI-Lite slave path) |
 
+### AXI4-Stream smoke test
+
+Topology: MicroBlaze plus the dedicated fcapz EJTAG-AXI debug ingress -> axiZero 2M x 5S -> the normal base-test slaves plus a 32-bit AXI GPIO input at `0xC004_0000`.
+
+The GPIO samples a self-running `AxiStreamArtySmoke` datapath:
+
+`3 sources` -> `AxiStreamArbMux` -> `AxiStreamFifo` -> `AxiStreamRegSlice` -> `AxiStreamWidthAdapter` 32-to-8 -> `AxiStreamDemux` -> direct byte sink or `AxiStreamWidthAdapter` 8-to-32 -> `AxiStreamBroadcaster`.
+
+The smoke engine sends three two-beat 32-bit frames, arbitrates between all three sources, unpacks to bytes, routes frame 1 through the repack/broadcast path and frames 0/2 through the direct byte path, deliberately stalls one broadcast sink, then reports done/pass/fail, byte counts, frame counts, checksum matches, route checks, and backpressure observation. The MicroBlaze firmware polls that status through axiZero and passes only when the board-observed status has `done=1`, `pass=1`, `fail=0`, the expected counts/checksums/frame boundaries match, and backpressure was actually seen.
+
+### Arty fcapz debug
+
+All Arty Vivado builds source `hw/vivado/arty_a7/fcapz_debug.tcl`, which adds the project-local `axizero_fcapz_debug` wrapper. The AXIS build inherits this through `create_project_axis.tcl` because it derives from the base Arty script. Builds with an appended debug ingress connect USER4 to the highest-numbered free `s*_axi` port, so existing MicroBlaze and traffic-generator ports keep their original wiring.
+
+Debug chains:
+
+| Chain | Function | Wiring |
+|---|---|---|
+| USER1 | fcapz ELA | Captures USER4 EJTAG-AXI requests plus the main-fabric `BRESP`/`RRESP` returned to that master. The default trigger fires on AXI `BRESP[1]` or `RRESP[1]`. |
+| USER4 | fcapz EJTAG-AXI | Enters the main axiZero fabric through a dedicated appended AXI4-Lite ingress (`s1_axi` on base/AXIS, `s2_axi` on WRR/QoS, `s4_axi` on QoS stress), then reaches the normal axiZero slave map. |
+
 ### Running HW tests
 
-All four test runners auto-detect Vivado, xsdb, and mb-gcc by searching `PATH` and common AMD/Xilinx install locations (Windows and Linux). Override with environment variables if needed:
+All six test runners auto-detect Vivado, xsdb, and mb-gcc by searching `PATH` and common AMD/Xilinx install locations (Windows and Linux). Override with environment variables if needed:
 
 ```bash
 # Auto-detect (works on Windows and Linux)
+python hw/vivado/arty_a7/run_base_test.py
 python hw/vivado/arty_a7/run_wrr_test.py
 python hw/vivado/arty_a7/run_qos_test.py
 python hw/vivado/arty_a7/run_qos_stress_test.py
 python hw/vivado/arty_a7/run_axi3_test.py
+python hw/vivado/arty_a7/run_axis_test.py
 
 # Override tool paths via env vars
 VIVADO_BIN=/opt/Xilinx/2025.2/Vivado/bin/vivado \
@@ -535,6 +650,8 @@ hw/spinal/axizero/
     WidthConverter.scala       # Lite and Full AXI4 data-width conversion
     Axi4DownsizerExt.scala     # fork of SpinalHDL Axi4Downsizer; FIXED/WRAP flattened, INCR multi-beat
     Axi3ToAxi4Adapter.scala    # AXI3→AXI4 bridge: WID reorder buffer, locked access conversion
+  stream/
+    AxiStreamCores.scala       # AXI4-Stream reg slice, width adapter, FIFO, arb-mux, demux, broadcaster
   gen/
     AxiZeroGen.scala           # built-in generation entry point
     ArtyDutGen.scala           # Arty A7 DUT (1M×4S)
@@ -542,7 +659,7 @@ hw/spinal/axizero/
     ArtyAxi3DutGen.scala       # Arty A7 AXI3 adapter DUT (AXI4→AXI3→AXI4→crossbar)
 hw/sim/axizero/sim/            # SpinalSim testbenches (sbt test)
 sim/cocotb_gen/
-  run_all.py                   # Python runner (lite + full suites)
+  run_all.py                   # Python runner (lite + full + wrr + qos + ipif + axis suites)
   lite/test_lite.py            # AxiLiteMaster tests against MyLite_1M4S.v
   full/test_full.py            # AxiMaster tests against MyFull_2M2S.v
 scripts/

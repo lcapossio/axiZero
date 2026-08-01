@@ -36,6 +36,7 @@
 
 set script_dir [file dirname [file normalize [info script]]]
 set repo_root  [file normalize "$script_dir/../../.."]
+source "$script_dir/fcapz_debug.tcl"
 
 ## Optional: AMD AXI Protocol Checker integration.
 ## Set to 1 to instantiate the checker on the m0_axi interface (axiZero →
@@ -66,6 +67,7 @@ if {[string length $errmsg] > 0} {
 ## ─── 2. RTL sources: axiZero crossbar ───────────────────────────────────────
 add_files -norecurse "$script_dir/ip/rtl/AxiZeroArtyDUT.v"
 set_property file_type {Verilog} [get_files AxiZeroArtyDUT.v]
+add_fcapz_debug_sources $script_dir
 update_compile_order -fileset sources_1
 
 ## ─── 3. Generate required Xilinx IPs ────────────────────────────────────────
@@ -77,7 +79,7 @@ set_property -dict {
     CONFIG.DATA_WIDTH      {32}
     CONFIG.SINGLE_PORT_BRAM {0}
     CONFIG.ECC_TYPE        {0}
-    CONFIG.ID_WIDTH        {1}
+    CONFIG.ID_WIDTH        {2}
     CONFIG.SUPPORTS_NARROW_BURST {0}
 } [get_ips axi_bram_ctrl_0]
 generate_target {synthesis simulation} [get_ips axi_bram_ctrl_0]
@@ -110,7 +112,7 @@ set_property -dict {
     CONFIG.DATA_WIDTH      {32}
     CONFIG.SINGLE_PORT_BRAM {0}
     CONFIG.ECC_TYPE        {0}
-    CONFIG.ID_WIDTH        {1}
+    CONFIG.ID_WIDTH        {2}
     CONFIG.SUPPORTS_NARROW_BURST {0}
 } [get_ips axi_bram_ctrl_1]
 generate_target {synthesis simulation} [get_ips axi_bram_ctrl_1]
@@ -360,6 +362,7 @@ connect_bd_net [get_bd_pins axizero_0/s0_axi_rvalid]        [get_bd_pins microbl
 connect_bd_net [get_bd_pins microblaze_0/M_AXI_DP_RREADY]         [get_bd_pins axizero_0/s0_axi_rready]
 connect_bd_net [get_bd_pins axizero_0/s0_axi_rdata] [get_bd_pins microblaze_0/M_AXI_DP_RDATA]
 connect_bd_net [get_bd_pins axizero_0/s0_axi_rresp] [get_bd_pins microblaze_0/M_AXI_DP_RRESP]
+connect_fcapz_arty_debug
 # RID, RLAST not connected — MB doesn't have those pins
 
 ## ── axiZero S0 → AXI BRAM Controller 0 ─────────────────────────────────────

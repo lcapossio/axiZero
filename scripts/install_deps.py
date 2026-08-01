@@ -277,16 +277,33 @@ def install_windows(check_only):
     install_python_deps()
 
 
+# cocotbext-axi 0.1.29 is an unreleased upstream revision: PyPI stops at
+# 0.1.28, which predates cocotb 2.x support. Pin the exact upstream commit so a
+# clean checkout resolves the same BFMs instead of whatever happens to be
+# installed locally (see no_commit/BUGS.md #8).
+COCOTBEXT_AXI_REF = "b2d126c4bc0f4cafa6e2fd3cdcfafc333e716a9a"
+COCOTBEXT_AXI_SPEC = (
+    "cocotbext-axi @ git+https://github.com/alexforencich/cocotbext-axi"
+    f"@{COCOTBEXT_AXI_REF}"
+)
+
+_PIP_SPECS = {
+    "pyyaml": "pyyaml",
+    "cocotb": "cocotb",
+    "cocotbext-axi": COCOTBEXT_AXI_SPEC,
+}
+
+
 def install_python_deps():
     header("Installing Python dependencies")
-    pkgs = ["pyyaml", "cocotb", "cocotbext-axi"]
-    missing = [p for p in pkgs if not python_pkg_present(p)]
+    missing = [p for p in _PIP_SPECS if not python_pkg_present(p)]
     if not missing:
         skip("All Python packages already installed")
         return
-    info(f"pip install {' '.join(missing)}")
+    specs = [_PIP_SPECS[p] for p in missing]
+    info(f"pip install {' '.join(specs)}")
     try:
-        run(f"{sys.executable} -m pip install {' '.join(missing)}")
+        run(f"{sys.executable} -m pip install " + " ".join(f'"{s}"' for s in specs))
         ok("Python packages installed")
     except subprocess.CalledProcessError:
         err("pip install failed. Try running with --user or inside a venv.")
@@ -323,7 +340,7 @@ def main():
         info("  Java 21:   https://adoptium.net/")
         info("  sbt:       https://www.scala-sbt.org/download/")
         info("  Verilator: https://verilator.org/guide/latest/install.html")
-        info("  Python:    pip install pyyaml cocotb cocotbext-axi")
+        info(f'  Python:    pip install pyyaml cocotb "{COCOTBEXT_AXI_SPEC}"')
         sys.exit(1)
 
     header("Done")

@@ -3,12 +3,15 @@
 """
 test_full.py  —  cocotbext-axi tests for generated MyFull_2M2S.v
 
-Topology: 1 AXI4 master × 2 AXI4 slaves
-  s0_axi       : master port (AxiMaster connects here)
+Topology: 2 AXI4 masters × 2 AXI4 slaves
+  s0_axi       : master port 0 (AxiMaster drives the traffic)
+  s1_axi       : master port 1 (idle AxiMaster; present so the port is driven
+                 rather than left floating, which would corrupt arbitration)
   m0_axi       : slave 0 port (AxiRam), address 0x00000000 – 0x7FFFFFFF
   m1_axi       : slave 1 port (AxiRam), address 0x80000000 – 0x9FFFFFFF
 
-Data width: 64 bits  ID width: 4 bits (master), 4 bits (slave, 1 master so no expansion)
+Data width: 64 bits  ID width: 4 bits (master); slave-side IDs widen by the
+master-index bit, which the BFMs pick up from the bus automatically.
 Clock: aclk   Reset: aresetn (active-low)
 
 Address notes:
@@ -40,6 +43,11 @@ async def reset_dut(dut, cycles=8):
 def make_bfms(dut):
     master = AxiMaster(AxiBus.from_prefix(dut, "s0_axi"), dut.aclk, dut.aresetn,
                        reset_active_level=0)
+    # Master port 1 is not exercised, but it must still be driven: an
+    # undriven port sits at 'x' and the arbiter would sample that as a
+    # request. Attaching an idle master holds its valids low.
+    AxiMaster(AxiBus.from_prefix(dut, "s1_axi"), dut.aclk, dut.aresetn,
+              reset_active_level=0)
     ram0 = AxiRam(AxiBus.from_prefix(dut, "m0_axi"), dut.aclk, dut.aresetn,
                   reset_active_level=0, size=RAM_SIZE)
     ram1 = AxiRam(AxiBus.from_prefix(dut, "m1_axi"), dut.aclk, dut.aresetn,
