@@ -160,7 +160,7 @@ python scripts/axizero.py generate my_design.yaml --output rtl/
 
 ### Option B — use a pre-built Verilog file
 
-Seventeen configurations are pre-generated in [`generated/`](generated/). Copy the appropriate file into your project and instantiate it.
+Fifteen configurations are pre-generated in [`generated/`](generated/). Copy the appropriate file into your project and instantiate it.
 
 Resource usage is post-synthesis, out-of-context, Vivado 2025.2 targeting
 xc7a100tcsg324-1 with no timing constraint applied; Fmax is derived from the
@@ -181,8 +181,6 @@ is used by any configuration.
 | `MyFull_2M2S.v` | 2M×2S AXI4 Full, 64-bit, round-robin | 582 | 12 | 0 | 384.6 |
 | `MyFull_2M2S_QoS.v` | 2M×2S AXI4 Full, 64-bit, QoS arbitration | 626 | 62 | 4 | 117.6 |
 | `MyMixed_2M3S.v` | 2M×3S mixed (Full + Lite), auto adapters | 421 | 34 | 0 | 312.5 |
-| `ArtyDC_1M3S.v` | 1M×3S mixed, Arty A7 don't-care default config | 258 | 8 | 0 | 400.0 |
-| `ArtyDC_2M4S.v` | 2M×4S mixed, Arty A7 don't-care default config | 591 | 28 | 0 | n/a |
 | `MyAxisRegSlice.v` | AXI4-Stream register slice, 32-bit | 2 | 42 | 0 | 500.0 |
 | `MyAxisWidth_8To32.v` | AXI4-Stream width adapter, 8→32-bit | 10 | 44 | 0 | 333.3 |
 | `MyAxisFifo.v` | AXI4-Stream FIFO, 32-bit | 42 | 57 | 28 | 294.1 |
@@ -190,9 +188,8 @@ is used by any configuration.
 | `MyAxisDemux_1To2.v` | AXI4-Stream demux, 1→2 | 6 | 3 | 0 | 434.8 |
 | `MyAxisBroadcaster_1To2.v` | AXI4-Stream broadcaster, 1→2 | 2 | 0 | 0 | n/a |
 
-`ArtyDC_1M3S.v` and `ArtyDC_2M4S.v` are the two exceptions to the regeneration
-flow: no generator in the tree produces them, so they still carry
-`SpinalHDL v1.10.1` headers and are excluded from the CI freshness check.
+Every file in the table is reproducible from the generators, and CI regenerates
+and compares them on each run, so the table cannot drift from the RTL unnoticed.
 
 If none of these match your topology, generate a custom one with Option A.
 

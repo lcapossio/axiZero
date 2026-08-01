@@ -28,11 +28,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GENERATED = "generated"
 
-# Netlists with no generator in the tree.  They predate the current generator
-# entry points and nothing regenerates them, so they cannot be checked here.
-# See no_commit/BUGS.md #21.
-UNGENERATED = ("ArtyDC_1M3S.v", "ArtyDC_2M4S.v")
-
 VOLATILE_PREFIX = "// Git hash"
 
 
@@ -55,7 +50,7 @@ def tracked_netlists() -> list[str]:
     if out.returncode != 0:
         print(f"ERROR: git ls-files failed: {out.stderr.strip()}", file=sys.stderr)
         sys.exit(2)
-    return [p for p in out.stdout.split() if Path(p).name not in UNGENERATED]
+    return out.stdout.split()
 
 
 def main() -> int:
@@ -94,9 +89,7 @@ def main() -> int:
         )
         return 1
 
-    skipped = ", ".join(UNGENERATED)
     print(f"All {len(files)} tracked netlists match the generators.")
-    print(f"Not checked (no generator in tree): {skipped}")
     return 0
 
 

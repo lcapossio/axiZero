@@ -36,6 +36,9 @@ simWorkspace/
 # Formal outputs
 formal/**/*.smv
 formal/**/*.sby.bak
+# package_ip.tcl output: the packaged IP and its temporary Vivado project
+hw/vivado/axizero_ip/
+hw/vivado/axizero_ip_pkg_tmp/
 # sby creates a working directory named after the task, alongside the .sby.
 # All proof sources are files directly in formal/, so any subdirectory is
 # generated output (models, engine logs, counterexample traces).

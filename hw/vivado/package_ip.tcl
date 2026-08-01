@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: MIT
 ## package_ip.tcl
 ##
-## Packages the axiZero 2M×4S mixed crossbar (ArtyDC_2M4S.v) as a proper
-## Vivado IP.  Because ports already follow the Vivado/AMD AXI naming convention
-## (sN_axi_*, mN_axi_*, aclk, aresetn), Vivado's IP packager infers the AXI
-## bus interfaces automatically — no manual port mapping required.
+## Packages an axiZero crossbar as a proper Vivado IP.  Because ports already
+## follow the Vivado/AMD AXI naming convention (sN_axi_*, mN_axi_*, aclk,
+## aresetn), Vivado's IP packager infers the AXI bus interfaces automatically —
+## no manual port mapping required.
 ##
 ## Usage (from repo root):
 ##   vivado -mode batch -source hw/vivado/package_ip.tcl
+##   vivado -mode batch -source hw/vivado/package_ip.tcl -tclargs generated/MyFull_2M2S.v
 ##
 ## Output: hw/vivado/axizero_ip/  (contains component.xml and xgui/)
 ##
@@ -18,11 +19,40 @@
 ##   3. IP Integrator auto-connects aclk, aresetn, and the AXI interfaces
 ##
 ## Adapt for other configurations:
-##   - Change RTL_FILE to point to a different generated/ Verilog
-##   - Re-run; interface inference is driven by the sN/mN port names
+##   - Pass a different generated/ Verilog via -tclargs
+##   - Interface inference is driven by the sN/mN port names
 
 set script_dir [file dirname [file normalize [info script]]]
-set rtl_file   [file normalize "$script_dir/arty_a7/ip/rtl/ArtyDC_2M4S.v"]
+set repo_root  [file normalize "$script_dir/../.."]
+
+# Default to a tracked, regenerated netlist. The previous default pointed at
+# hw/vivado/arty_a7/ip/rtl/ArtyDC_2M4S.v, which nothing generates and which is
+# not present in a clean checkout, so this flow could not run as documented.
+if {$argc > 0} {
+    set rtl_arg [lindex $argv 0]
+} else {
+    set rtl_arg "generated/MyMixed_2M3S.v"
+}
+if {[file pathtype $rtl_arg] eq "absolute"} {
+    set rtl_file [file normalize $rtl_arg]
+} else {
+    set rtl_file [file normalize "$repo_root/$rtl_arg"]
+}
+if {![file exists $rtl_file]} {
+    puts "ERROR: RTL file not found: $rtl_file"
+    exit 1
+}
+
+# Top module is the first module declaration in the file.
+set fp [open $rtl_file r]
+set rtl_text [read $fp]
+close $fp
+if {![regexp {module\s+(\w+)\s*\(} $rtl_text -> top_module]} {
+    puts "ERROR: no module declaration found in $rtl_file"
+    exit 1
+}
+puts "Packaging $rtl_file (top: $top_module)"
+
 set ip_dir     [file normalize "$script_dir/axizero_ip"]
 set tmp_proj   [file normalize "$script_dir/axizero_ip_pkg_tmp"]
 
@@ -32,7 +62,7 @@ set tmp_proj   [file normalize "$script_dir/axizero_ip_pkg_tmp"]
 create_project axizero_pkg $tmp_proj -part xc7a100tcsg324-1 -force
 
 add_files -norecurse $rtl_file
-set_property top AxiZeroMixedTop [current_fileset]
+set_property top $top_module [current_fileset]
 update_compile_order -fileset sources_1
 
 # ---------------------------------------------------------------------------
