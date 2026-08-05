@@ -23,9 +23,14 @@ Current regression conditions:
 | Layer | Tool/version | Conditions |
 |---|---|---|
 | SpinalSim | SpinalHDL 1.14.2, sbt 1.9.7, Java 21.0.11 | `AxiStreamCoreSpec`, 10 ns clock period, synchronous active-low reset |
-| cocotb generated RTL | cocotb 2.0.1 runner (`cocotb_tools.runner`), cocotbext-axi BFMs, Verilator 5.048 | Generated smoke cores from `sim/cocotb_gen/run_all.py axis`, Verilator trace enabled |
+| cocotb generated RTL | cocotb 2.0.1 runner (`cocotb_tools.runner`), cocotbext-axi BFMs, Verilator 5.048 locally / 5.020-1 in CI | Generated smoke cores from `sim/cocotb_gen/run_all.py axis`, Verilator trace enabled |
 | Formal smoke | SymbiYosys / z3 when installed | `axis_ready_valid_regslice.sby`, depth 20, ready/valid stability on the generated register slice |
 | Hardware smoke | Vivado/Vitis 2025.2, Arty A7-100T | `run_axis_test.py`, 100 MHz board clock, status GPIO at `0xC004_0000` |
+
+CI pins Verilator to the exact apt package version `5.020-1`, the only Verilator published in
+Ubuntu 24.04 `noble/universe`. The pin lives in `.github/actions/setup-verilator`; bumping it means
+updating that default and this table together. Local runs use a newer 5.048 build, so the two are
+deliberately allowed to differ — what matters is that neither drifts unnoticed.
 
 ## TUSER width
 

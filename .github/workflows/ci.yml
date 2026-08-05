@@ -9,11 +9,7 @@ on:
   pull_request:
 
 env:
-  # Verilator versions this project is validated against. SpinalHDL 1.10.1
-  # segfaulted on 5.048 (see no_commit/BUGS.md #3), so an unpinned runner
-  # image can silently reintroduce that class of failure. Assert the version
-  # instead of trusting whatever apt serves.
-  VERILATOR_EXPECTED: '5.0'
+  # Verilator is pinned in .github/actions/setup-verilator.
   # Unpinned ruff drifts its default rule set: 0.16.0 reports 114 findings
   # on a tree that 0.14.2 passes clean. Pin it so lint is deterministic.
   RUFF_VERSION: '0.14.2'
@@ -29,14 +25,7 @@ jobs:
 
       - uses: ./.github/actions/setup-sbt
 
-      - name: Install Verilator
-        run: |
-          sudo apt-get install -y --no-install-recommends verilator
-          verilator --version
-          verilator --version | grep -q "Verilator ${VERILATOR_EXPECTED}" || {
-            echo "::error::Verilator drifted from ${VERILATOR_EXPECTED}.x - see no_commit/BUGS.md #3"
-            exit 1
-          }
+      - uses: ./.github/actions/setup-verilator
 
       - name: Compile (SpinalHDL)
         run: sbt compile
@@ -76,14 +65,7 @@ jobs:
 
       - uses: ./.github/actions/setup-sbt
 
-      - name: Install Verilator
-        run: |
-          sudo apt-get install -y --no-install-recommends verilator
-          verilator --version
-          verilator --version | grep -q "Verilator ${VERILATOR_EXPECTED}" || {
-            echo "::error::Verilator drifted from ${VERILATOR_EXPECTED}.x - see no_commit/BUGS.md #3"
-            exit 1
-          }
+      - uses: ./.github/actions/setup-verilator
 
       - name: Install Python dependencies
         run: pip install "cocotb==1.9.2" "cocotbext-axi @ git+https://github.com/alexforencich/cocotbext-axi@b2d126c4bc0f4cafa6e2fd3cdcfafc333e716a9a" pyyaml
