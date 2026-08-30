@@ -174,8 +174,14 @@ jobs:
 
       - name: Boot the SoC in SpinalSim
         # Runs the firmware on both the pipelined and the blocking crossbar and
-        # checks what the CPU actually moved across the bus.
+        # checks what the CPU actually moved across the bus, then simulates the
+        # Arty wrapper and decodes its 115200 8N1 report line.
         run: sbt vexZero/test
 
       - name: Generate the SoC netlist
         run: sbt "vexZero/Compile/runMain vexzero.gen.VexZeroSocGen"
+
+      - name: Generate the Arty board netlist
+        # The board wrapper is what the hardware test builds; generating it here
+        # keeps a change to the SoC from breaking that flow unnoticed.
+        run: sbt "vexZero/Compile/runMain vexzero.gen.VexZeroArtyGen"
