@@ -152,6 +152,23 @@ def vivado_env(base: dict | None = None) -> dict:
     return env
 
 
+def require_fpga_tools() -> tuple[Path, Path]:
+    """Find ``vivado`` and ``xsdb`` or exit with an error message.
+
+    For designs with no MicroBlaze in them, where nothing has to be compiled
+    with ``mb-gcc``.  Honours ``VIVADO_BIN`` / ``XSDB_BIN``.
+    """
+    vivado = _env_override("VIVADO_BIN", find_vivado)
+    xsdb = _env_override("XSDB_BIN", find_xsdb)
+    missing = [n for n, p in (("vivado", vivado), ("xsdb", xsdb)) if not p]
+    if missing:
+        print(f"*** Could not find: {', '.join(missing)}")
+        print("    Searched PATH and common AMD/Xilinx install locations.")
+        print("    Set VIVADO_BIN / XSDB_BIN env vars to override.")
+        raise SystemExit(1)
+    return vivado, xsdb
+
+
 def require_tools() -> tuple[Path, Path, Path]:
     """Find all three tools or exit with an error message.
 

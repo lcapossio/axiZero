@@ -1,0 +1,102 @@
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT
+## =============================================================================
+## create_project_vexzero.tcl  —  Arty A7-100T VexZero example SoC
+##
+## Targets: xc7a100tcsg324-1
+##
+## Prerequisite
+## ────────────
+##   sbt "vexZero/runMain vexzero.gen.VexZeroArtyGen"
+##   (writes generated/vexriscv/VexZeroArty.v, ROM inlined)
+##
+## Usage
+## ─────
+##   vivado -mode batch -source hw/vivado/arty_a7/create_project_vexzero.tcl
+##   vivado -mode batch -source ... -tclargs 8      ;# 8 parallel jobs
+##
+## Unlike the other Arty projects here there is no block design and no
+## MicroBlaze: the whole SoC — VexRiscv, the axiZero crossbar, the RAM and the
+## peripherals — is one SpinalHDL-generated Verilog file, so this is a plain
+## RTL project with a top module and one constraints file.
+## =============================================================================
+
+set script_dir [file dirname [file normalize [info script]]]
+set repo_root  [file normalize "$script_dir/../../.."]
+set proj_dir   "$script_dir/vexzero_arty"
+set rtl_file   "$repo_root/generated/vexriscv/VexZeroArty.v"
+set xdc_file   "$script_dir/constraints/arty_a7_100t_vexzero.xdc"
+
+if {![file exists $rtl_file]} {
+    error "Netlist not found: $rtl_file\nRun: sbt \"vexZero/runMain vexzero.gen.VexZeroArtyGen\""
+}
+
+if {[info exists argc] && $argc > 0} {
+    set jobs [lindex $argv 0]
+} else {
+    set jobs 4
+}
+
+## ─── 1. Project ─────────────────────────────────────────────────────────────
+create_project vexzero_arty $proj_dir -part xc7a100tcsg324-1 -force
+catch { set_property board_part digilentinc.com:arty-a7-100:part0:1.1 [current_project] } errmsg
+if {[info exists errmsg] && $errmsg ne ""} {
+    puts "\[vexZero\] Note: board_part not found (Digilent board files not installed) — continuing with part only."
+}
+
+add_files -norecurse $rtl_file
+set_property file_type {Verilog} [get_files VexZeroArty.v]
+set_property top VexZeroArty [current_fileset]
+
+add_files -fileset constrs_1 -norecurse $xdc_file
+
+## ─── 2. Synthesis and implementation ────────────────────────────────────────
+launch_runs synth_1 -jobs $jobs
+wait_on_run synth_1
+if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {
+    error "Synthesis failed — see $proj_dir/vexzero_arty.runs/synth_1/runme.log"
+}
+
+launch_runs impl_1 -to_step write_bitstream -jobs $jobs
+wait_on_run impl_1
+if {[get_property PROGRESS [get_runs impl_1]] ne "100%"} {
+    error "Implementation failed — see $proj_dir/vexzero_arty.runs/impl_1/runme.log"
+}
+
+## ─── 3. Resource and timing report ──────────────────────────────────────────
+## The numbers quoted in the README come from here; keep the format stable so
+## a later build can be compared against it.
+open_run impl_1
+report_utilization    -file "$proj_dir/vexzero_utilization.rpt"
+report_timing_summary -file "$proj_dir/vexzero_timing.rpt"
+
+## The counts are read back out of the report rather than recounted from the
+## netlist, so what is printed here is the same number the report shows and
+## the README can quote either one.
+proc util_row {path label} {
+    set fh [open $path r]
+    set data [read $fh]
+    close $fh
+    foreach line [split $data "\n"] {
+        if {[string match "| $label *" $line] || [string match "| $label|*" $line]} {
+            return [string trim [lindex [split $line "|"] 2]]
+        }
+    }
+    return "n/a"
+}
+
+set util "$proj_dir/vexzero_utilization.rpt"
+
+set wns [get_property STATS.WNS [get_runs impl_1]]
+set clk_period 10.0
+set fmax [expr {1000.0 / ($clk_period - $wns)}]
+
+puts "\n\[vexZero\] ── Implementation summary ──────────────────────────────"
+puts "\[vexZero\]   Slice LUTs      : [util_row $util {Slice LUTs}]"
+puts "\[vexZero\]   Slice Registers : [util_row $util {Slice Registers}]"
+puts "\[vexZero\]   Block RAM Tiles : [util_row $util {Block RAM Tile}]"
+puts "\[vexZero\]   DSPs            : [util_row $util {DSPs}]"
+puts [format "\[vexZero\]   WNS             : %.3f ns at 100 MHz" $wns]
+puts [format "\[vexZero\]   Fmax            : %.1f MHz" $fmax]
+puts "\[vexZero\] Bitstream: $proj_dir/vexzero_arty.runs/impl_1/VexZeroArty.bit"
+puts ""
