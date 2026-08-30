@@ -2,6 +2,15 @@
 
 All notable changes to axiZero will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **VexRiscv example SoC** (`hw/examples/vexriscv/`) — a RISC-V core booting through the crossbar into a mixed AXI4 / AXI4-Lite address map: VexRiscv IBus + DBus as the two masters, an 8 KB on-chip RAM on a full AXI4 port, and AXI4-Lite GPIO and system-control peripherals. Built as a separate sbt project (`vexZero`) against a pinned `third_party/VexRiscv` submodule; the root project neither aggregates nor depends on it, so a checkout without the submodule is unaffected. See [ADR 002](docs/adr/002-vexriscv-example-soc.md).
+- **`vexzero.Rv32`** — a small RV32I encoder that assembles the example's boot firmware at elaboration time, so the SoC test needs no RISC-V cross compiler and no binary is tracked in git. Verified byte-identical to `riscv64-unknown-elf-as` for the whole program.
+- **`VexZeroSocSpec`** — 3 tests: boot to completion on the pipelined crossbar, on the blocking crossbar, and a check that the assembled firmware image matches the documented program.
+- **CI job `VexRiscv example SoC`** — initialises only the VexRiscv submodule, then runs scalafmt, the boot tests, and the netlist generator.
+
 ## [0.3.1] — 2026-03-15
 
 ### Fixed

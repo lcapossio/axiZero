@@ -32,6 +32,9 @@ Hardware-validated on Xilinx Arty A7-100T. 103 SpinalSim + 36 cocotb tests pass.
 - [Simulation](#simulation)
   - [SpinalSim (unit tests)](#spinalsim-unit-tests-run-with-sbt)
   - [cocotb (integration tests)](#cocotb-integration-tests-against-pre-built-verilog-run-with-python)
+- [Example system — VexRiscv SoC](#example-system--vexriscv-soc)
+  - [Running it](#running-it)
+  - [No cross compiler required](#no-cross-compiler-required)
 - [Hardware validation — Arty A7-100T](#hardware-validation--arty-a7-100t)
 - [Port naming](#port-naming)
 - [Tool integration](#tool-integration)
@@ -60,6 +63,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - AXI3-to-AXI4 bridge adapter with WID reorder buffer (write interleaving → strict AW-order), locked access conversion, LEN/LOCK field adaptation
 
 - Standalone AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster
+- VexRiscv example SoC: a RISC-V core booting through the crossbar into a mixed AXI4 / AXI4-Lite address map
 
 **Not yet implemented:**
 
@@ -447,6 +451,77 @@ python3 sim/cocotb_gen/run_all.py axis     # generated AXI4-Stream cocotb suite
 
 ---
 
+## Example system — VexRiscv SoC
+
+A complete RISC-V system built around the interconnect, under
+[hw/examples/vexriscv/](hw/examples/vexriscv/). Where the test suite drives the crossbar with
+bus functional models, this boots a real CPU through it —
+[VexRiscv](https://github.com/SpinalHDL/VexRiscv), which is also written in SpinalHDL, so the
+whole SoC elaborates from one Scala build.
+
+```
+  VexRiscv IBus (Axi4ReadOnly) ─┐                    ┌─ S0  on-chip RAM  (AXI4 full)
+                                ├─ AxiZeroMixedTop ──┼─ S1  GPIO         (AXI4-Lite)
+  VexRiscv DBus (Axi4Shared)  ──┘   2 masters x 3     └─ S2  system ctrl  (AXI4-Lite)
+```
+
+| Slave | Base | Size | Port | Registers |
+|---|---|---|---|---|
+| S0 on-chip RAM | `0x8000_0000` | 8 KB | AXI4 full | preloaded with the boot image |
+| S1 GPIO | `0xF000_0000` | 4 KB | AXI4-Lite | `0x00` led RW, `0x04` switch RO |
+| S2 system control | `0xF001_0000` | 4 KB | AXI4-Lite | `0x00` cycles RO, `0x04` charOut WO, `0x08` status RW, `0x0C` result RW |
+
+### Running it
+
+The example is a separate sbt project (`vexZero`) that needs the pinned VexRiscv submodule.
+The root project neither aggregates nor depends on it, so a checkout without the submodule
+builds and tests exactly as before.
+
+```bash
+git submodule update --init third_party/VexRiscv
+
+sbt vexZero/test                                          # boot the SoC in SpinalSim
+sbt "vexZero/Compile/runMain vexzero.gen.VexZeroSocGen"   # -> generated/vexriscv/VexZeroSoc.v
+```
+
+| Test | Description |
+|---|---|
+| `boot firmware completes on the pipelined crossbar` | `maxOutstanding = 4` |
+| `boot firmware completes on the blocking crossbar` | `maxOutstanding = 1` |
+| `the firmware image is a valid RV32I encoding` | pins the assembled program |
+
+### No cross compiler required
+
+The boot firmware is assembled by [`vexzero.Rv32`](hw/examples/vexriscv/spinal/vexzero/Rv32.scala),
+a small RV32I encoder, so the example runs on a plain JDK and no binary is tracked in git. Its
+output for the whole program is byte-identical to `riscv64-unknown-elf-as`.
+
+The firmware fills and sums 16 words of RAM, writes the checksum to the GPIO LED register, reads
+the switch register back, emits `OK` and a newline a byte at a time, parks the cycle counter in
+RAM, then publishes the result and a done marker. Reaching the marker means fetch, load, store
+and both full→Lite adapters all worked; the checked values pin down what was actually moved, so a
+crossbar that merely keeps the bus alive cannot pass.
+
+### Notes
+
+- **Register slices on the CPU ports are required, not decorative.** VexRiscv couples its two bus
+  ports combinationally — a stalled store stalls the pipeline, which pulls `IBusSimplePlugin`'s
+  `cmd.valid` low — and `Axi4SharedOnChipRam`'s AR/AW arbiter derives `AWREADY` from `ARVALID`.
+  Together those close a ready → valid → ready ring through the fabric. `regSlice = true` on both
+  master ports registers every master → fabric valid and breaks it.
+- **Response ordering.** Pipelined mode routes B/R by ID and both CPU ports drive a constant ID,
+  so ordering only has to hold per master. IBus fetches never leave the RAM region, and
+  `DBusSimplePlugin` keeps at most one read in flight and blocks reads while a write is
+  outstanding.
+- **Simulation only so far.** The SoC is verified in SpinalSim and the netlist generates cleanly;
+  it has not been synthesised or run on a board, so there are no resource or Fmax numbers for it.
+  See [hardware validation](#hardware-validation--arty-a7-100t) for the crossbar's board results.
+
+See [ADR 002](docs/adr/002-vexriscv-example-soc.md) for why VexRiscv is carried as a pinned
+submodule in its own sbt project.
+
+---
+
 ## Hardware validation — Arty A7-100T
 
 Six test suites run on a Xilinx Arty A7-100T (xc7a100t) at 100 MHz. All six pass.
@@ -658,6 +733,15 @@ hw/spinal/axizero/
     ArtyQosDutGen.scala        # Arty A7 QoS DUT (2M×4S, QoS arbitration)
     ArtyAxi3DutGen.scala       # Arty A7 AXI3 adapter DUT (AXI4→AXI3→AXI4→crossbar)
 hw/sim/axizero/sim/            # SpinalSim testbenches (sbt test)
+hw/examples/vexriscv/          # VexRiscv example SoC — separate sbt project `vexZero`
+  spinal/vexzero/
+    VexZeroSoc.scala           # CPU + AxiZeroMixedTop + peripherals
+    Peripherals.scala          # AXI4-Lite register bus, GPIO, system control
+    Rv32.scala                 # RV32I encoder (no cross compiler needed)
+    Firmware.scala             # boot image assembled from Rv32
+    gen/VexZeroSocGen.scala    # -> generated/vexriscv/VexZeroSoc.v
+  sim/vexzero/sim/             # SpinalSim boot test (sbt vexZero/test)
+third_party/VexRiscv/          # pinned submodule, compiled by `vexZero` only
 sim/cocotb_gen/
   run_all.py                   # Python runner (lite + full + wrr + qos + ipif + axis suites)
   lite/test_lite.py            # AxiLiteMaster tests against MyLite_1M4S.v
