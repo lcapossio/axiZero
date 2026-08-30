@@ -175,7 +175,9 @@ jobs:
       - name: Boot the SoC in SpinalSim
         # Runs the firmware on both the pipelined and the blocking crossbar and
         # checks what the CPU actually moved across the bus, then simulates the
-        # Arty wrapper and decodes its 115200 8N1 report line.
+        # Arty wrapper and decodes its 115200 8N1 report line. Also runs
+        # Dhrystone on both crossbar modes and asserts the per-port AXI latency,
+        # so a regression that only shows up as a slower fabric is still caught.
         run: sbt vexZero/test
 
       - name: Generate the SoC netlist
@@ -185,3 +187,8 @@ jobs:
         # The board wrapper is what the hardware test builds; generating it here
         # keeps a change to the SoC from breaking that flow unnoticed.
         run: sbt "vexZero/Compile/runMain vexzero.gen.VexZeroArtyGen"
+
+      - name: Generate the benchmark board netlist
+        # Also proves the Intel HEX image in the submodule still parses and still
+        # fits the RAM the board build gives it.
+        run: sbt "vexZero/Compile/runMain vexzero.gen.VexZeroBenchArtyGen"

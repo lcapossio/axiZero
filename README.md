@@ -35,6 +35,8 @@ Hardware-validated on Xilinx Arty A7-100T. 103 SpinalSim + 36 cocotb tests pass.
 - [Example system — VexRiscv SoC](#example-system--vexriscv-soc)
   - [Running it](#running-it)
   - [No cross compiler required](#no-cross-compiler-required)
+  - [On hardware](#on-hardware)
+  - [Benchmark — Dhrystone](#benchmark--dhrystone)
 - [Hardware validation — Arty A7-100T](#hardware-validation--arty-a7-100t)
 - [Port naming](#port-naming)
 - [Tool integration](#tool-integration)
@@ -64,6 +66,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 
 - Standalone AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster
 - VexRiscv example SoC: a RISC-V core booting through the crossbar into a mixed AXI4 / AXI4-Lite address map, in simulation and on an Arty A7-100T
+- Dhrystone 2.1 on that SoC, in simulation and on the board, with per-port AXI latency and occupancy measured at the crossbar
 
 **Not yet implemented:**
 
@@ -547,6 +550,84 @@ cover the whole SoC — VexRiscv, the axiZero crossbar, the 8 KB RAM, both perip
 reporter — not the crossbar alone; see
 [crossbar-only resource usage](#hardware-validation--arty-a7-100t) for that.
 
+### Benchmark — Dhrystone
+
+A firmware that reaches a done marker proves the crossbar moves the right bytes. It does not say
+what the crossbar *costs*. For that the example carries a second board top level,
+[`VexZeroBenchArty`](hw/examples/vexriscv/spinal/vexzero/VexZeroBenchArty.scala), which runs
+Dhrystone 2.1 — a real program with a real working set — and prints the benchmark's own console
+verbatim over the USB-UART.
+
+The binary is the prebuilt RV32I `dhrystoneO3.hex` that ships inside the pinned VexRiscv submodule,
+read into the RAM by [`HexImage`](hw/examples/vexriscv/spinal/vexzero/HexImage.scala). Nothing is
+recompiled and no cross compiler is needed, and because it is the image VexRiscv's own regression
+suite runs, the numbers are comparable to that suite's. Its console MMIO lives at the addresses that
+testbench implements, so the SoC answers there through a fourth slave
+([`VexZeroBenchIo`](hw/examples/vexriscv/spinal/vexzero/Peripherals.scala)), added to the address
+map for this build only:
+
+| Slave | Base | Size | Port | Registers |
+|---|---|---|---|---|
+| S3 benchmark console | `0xF00F_F000` | 4 KB | AXI4-Lite | `0xF00` putchar WO, `0xF10` cycles RO, `0xF20` exit WO, `0xF24` error WO |
+
+The character path backpressures the whole way: a full FIFO stalls the CPU's store rather than
+dropping a byte, so a 115200-baud line costs time but never corrupts a result line. Dhrystone prints
+nothing inside its timed loop, so that stall never reaches the measurement.
+
+```bash
+sbt "vexZero/testOnly *VexZeroBenchSpec"                     # simulate the benchmark
+python hw/vivado/arty_a7/run_vexzero_bench.py                # generate, build, program, stream
+python hw/vivado/arty_a7/run_vexzero_bench.py --skip-build   # reprogram and re-read only
+```
+
+The program runs once at configuration, so the runner opens the serial port *before* programming
+the board. It then re-runs Dhrystone's own self-checks on the captured text — every printed value
+against the "should be:" line the benchmark prints beside it — and recomputes the score from the
+cycle count rather than trusting the line the firmware printed.
+
+**Results.** The board and the simulation agree on the cycle count exactly — 328,048 cycles for
+200 runs — which is the strongest statement available here that the netlist behaves as simulated:
+
+| | Timed loop (200 runs) | Cycles/run | Dhrystones/s | DMIPS/MHz |
+|---|---:|---:|---:|---:|
+| Arty A7-100T @ 100 MHz | 328,048 | 1640.2 | 60,967 | **0.347** |
+| SpinalSim, `max_outstanding = 4` | 328,048 | 1640.2 | 60,967 | 0.347 |
+| SpinalSim, `max_outstanding = 1` | 331,848 | 1659.2 | 60,269 | 0.343 |
+
+All 20 of Dhrystone's self-checks pass in every case. Pipelined mode is 1.2% faster than blocking
+mode, which is what a single-issue RV32I with one load or store in flight should show: there is
+almost no concurrency for the crossbar to exploit, so this measures the fabric's overhead rather
+than its throughput, and the overhead is small.
+
+What the crossbar actually saw during a run, counted at its master ports in simulation (AR→R and
+AW→B, in `aclk` cycles, pipelined mode):
+
+| Master port | Reads | Read latency | Writes | Write latency |
+|---|---:|---:|---:|---:|
+| M0 instruction fetch (AXI4 full) | 153,191 | 3.04 cycles | — | — |
+| M1 load / store (AXI4 full) | 17,953 | 3.00 cycles | 18,796 | 3.09 cycles |
+
+Three cycles is the floor for this path — register slice in, arbitration and decode, register slice
+out — and the measured averages sit on it, so under this load the crossbar never queues. One
+instruction is fetched every 3.30 cycles, and the ~1.4 cycles between the fetch latency and that
+interval is the uncached `IBusSimplePlugin` waiting on the fabric rather than the fabric waiting on
+anything. A cache would close most of that gap; this configuration deliberately has none.
+
+Test conditions: Vivado 2025.2, `xc7a100tcsg324-1` (speed grade -1), default strategies, one 100 MHz
+clock domain, 32 KB on-chip RAM (the benchmark needs more than the 8 KB verdict build), Dhrystone
+2.1 compiled `-O3` without the `register` attribute, 200 runs, `DMIPS/MHz = 10^6 x runs / (cycles x
+1757)`.
+
+| Resource | Used | Available | Utilisation |
+|---|---:|---:|---:|
+| Slice LUTs | 1213 | 63400 | 1.91% |
+| Slice registers | 1263 | 126800 | 1.00% |
+| Block RAM tiles | 9 | 135 | 6.67% |
+| DSPs | 0 | 240 | 0.00% |
+
+WNS **+0.521 ns** (105.5 MHz Fmax). The figures cover the whole benchmark SoC — VexRiscv, the
+axiZero crossbar, 32 KB of RAM, three slaves and the UART — not the crossbar alone.
+
 ### Notes
 
 - **Register slices on the CPU ports are required, not decorative.** VexRiscv couples its two bus
@@ -665,6 +746,7 @@ python hw/vivado/arty_a7/run_axis_test.py
 
 # The VexRiscv example SoC (no MicroBlaze, so no mb-gcc needed)
 python hw/vivado/arty_a7/run_vexzero_test.py
+python hw/vivado/arty_a7/run_vexzero_bench.py    # ... and Dhrystone on the same SoC
 
 # Override tool paths via env vars
 VIVADO_BIN=/opt/Xilinx/2025.2/Vivado/bin/vivado \
@@ -673,7 +755,7 @@ MBGCC_BIN=/opt/Xilinx/2025.2/Vitis/gnu/microblaze/lin64/bin/mb-gcc \
   python hw/vivado/arty_a7/run_qos_stress_test.py
 ```
 
-Each runner: (1) creates the Vivado project + bitstream if not already built, (2) compiles MicroBlaze firmware with mb-gcc, (3) programs the FPGA and runs tests via xsdb. `run_vexzero_test.py` is the exception: the VexRiscv example SoC carries its firmware inside the bitstream, so it needs only Vivado and xsdb, and it reads its verdict off the USB-UART with pyserial. See [example system](#example-system--vexriscv-soc).
+Each runner: (1) creates the Vivado project + bitstream if not already built, (2) compiles MicroBlaze firmware with mb-gcc, (3) programs the FPGA and runs tests via xsdb. The two VexZero runners are the exception: the VexRiscv example SoC carries its firmware inside the bitstream, so they need only Vivado and xsdb, and they read the result off the USB-UART with pyserial. See [example system](#example-system--vexriscv-soc).
 
 **Crossbar-only resource usage** (OOC synthesis, xc7a100t):
 
@@ -787,9 +869,13 @@ hw/examples/vexriscv/          # VexRiscv example SoC — separate sbt project `
     Rv32.scala                 # RV32I encoder (no cross compiler needed)
     Firmware.scala             # boot image assembled from Rv32
     VexZeroArty.scala          # Arty A7-100T board wrapper: checks + LED/UART report
+    VexZeroBenchArty.scala     # Arty A7-100T board wrapper: Dhrystone console over UART
+    VexZeroBoard.scala         # clock/reset generation shared by both board wrappers
+    HexImage.scala             # Intel HEX reader for prebuilt firmware images
     gen/VexZeroSocGen.scala    # -> generated/vexriscv/VexZeroSoc.v
     gen/VexZeroArtyGen.scala   # -> generated/vexriscv/VexZeroArty.v (ROM inlined)
-  sim/vexzero/sim/             # SpinalSim boot test (sbt vexZero/test)
+    gen/VexZeroBenchArtyGen.scala  # -> generated/vexriscv/VexZeroBenchArty.v
+  sim/vexzero/sim/             # SpinalSim boot + benchmark tests (sbt vexZero/test)
 third_party/VexRiscv/          # pinned submodule, compiled by `vexZero` only
 sim/cocotb_gen/
   run_all.py                   # Python runner (lite + full + wrr + qos + ipif + axis suites)
@@ -807,7 +893,8 @@ hw/vivado/arty_a7/             # Vivado TCL build and test scripts
   find_xilinx_tools.py         # cross-platform Vivado/xsdb/mb-gcc auto-detection
   run_wrr_test.py              # WRR HW test runner (build + program + verify)
   run_vexzero_test.py          # VexRiscv example SoC HW test runner (UART verdict)
-  create_project_vexzero.tcl   # plain RTL project for the VexZero board wrapper
+  run_vexzero_bench.py         # VexRiscv example SoC Dhrystone runner (UART console)
+  create_project_vexzero.tcl   # plain RTL project for either VexZero board wrapper
   run_qos_test.py              # QoS HW test runner
   run_qos_stress_test.py       # QoS 10-minute stress test runner
   run_axi3_test.py             # AXI3 adapter HW test runner
