@@ -33,32 +33,7 @@ class VexZeroArtySpec extends AnyFunSuite {
 
   private def simCfg = SimConfig.withConfig(spinalCfg)
 
-  // UartCtrl divides by (clk / baud / samplesPerBit) - 1 and takes
-  // samplesPerBit ticks per bit, so a bit is this many clocks.
-  private val samplesPerBit = 1 + 5 + 2
-  private val bitCycles     = (100000000 / 115200 / samplesPerBit) * samplesPerBit
-
-  /** Receive one 8N1 byte from a serial line, LSB first. */
-  private def uartReceive(dut: VexZeroArty, cd: ClockDomain): Int = {
-    while (dut.io.uart_rxd_out.toBoolean) cd.waitSampling()
-    cd.waitSampling(bitCycles + bitCycles / 2) // into the middle of bit 0
-    var value = 0
-    for (bit <- 0 until 8) {
-      if (dut.io.uart_rxd_out.toBoolean) value |= 1 << bit
-      cd.waitSampling(bitCycles)
-    }
-    value
-  }
-
-  private def uartReceiveLine(dut: VexZeroArty, cd: ClockDomain, maxBytes: Int = 32): String = {
-    val line = new StringBuilder
-    var done = false
-    while (!done && line.length < maxBytes) {
-      val c = uartReceive(dut, cd).toChar
-      if (c == '\n') done = true else line += c
-    }
-    line.toString
-  }
+  private val bitCycles = UartRx.bitCycles(clockHz = 100000000L, baud = 115200L)
 
   test("the board wrapper reports every check passing over the UART") {
     // 2^15 clocks between lines: long enough for the firmware to finish,
@@ -79,7 +54,7 @@ class VexZeroArtySpec extends AnyFunSuite {
       val lines    = mutable.ArrayBuffer[String]()
       var pass     = false
       while (lines.length < 3 && !pass) {
-        val line = uartReceiveLine(dut, cd)
+        val line = UartRx.line(() => dut.io.uart_rxd_out.toBoolean, cd, bitCycles)
         lines += line
         if (line == expected) pass = true
       }
