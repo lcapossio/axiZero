@@ -63,7 +63,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - AXI3-to-AXI4 bridge adapter with WID reorder buffer (write interleaving → strict AW-order), locked access conversion, LEN/LOCK field adaptation
 
 - Standalone AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster
-- VexRiscv example SoC: a RISC-V core booting through the crossbar into a mixed AXI4 / AXI4-Lite address map
+- VexRiscv example SoC: a RISC-V core booting through the crossbar into a mixed AXI4 / AXI4-Lite address map, in simulation and on an Arty A7-100T
 
 **Not yet implemented:**
 
@@ -502,6 +502,51 @@ RAM, then publishes the result and a done marker. Reaching the marker means fetc
 and both full→Lite adapters all worked; the checked values pin down what was actually moved, so a
 crossbar that merely keeps the bus alive cannot pass.
 
+### On hardware
+
+The example is not simulation-only — it runs on an Arty A7-100T. A board has no wires back to a
+test runner, so the wrapper
+([`VexZeroArty`](hw/examples/vexriscv/spinal/vexzero/VexZeroArty.scala)) reruns the SoC's checks in
+hardware and reports the verdict two ways: LD4–LD7 (done, pass, fail, heartbeat) for a human, and a
+9-byte line on the USB-UART at 115200 8N1, repeated every ~0.67 s, for the runner.
+
+| Line | Meaning |
+|---|---|
+| `VZPDRCL5` | every check passed; the switch nibble read back over AXI4-Lite was `0x5` (the value varies with the switches) |
+| `VZFdrcl0` | the CPU never finished — held in reset, or hung |
+
+Upper case is a passing check: **P** overall, **D** done marker, **R** result value, **C** character
+stream, **L** LED register. The last byte is the switch nibble the firmware read back through the
+AXI4-Lite GPIO. It is reported because the result check is `checksum + switches`, so with every
+switch down a Lite read that always returned zero would pass; the runner says as much when it sees
+a zero nibble.
+
+```bash
+python hw/vivado/arty_a7/run_vexzero_test.py                # generate, build, program, verify
+python hw/vivado/arty_a7/run_vexzero_test.py --skip-build   # reprogram and re-read only
+```
+
+The runner generates the netlist with sbt, builds the bitstream, programs the board over JTAG with
+xsdb, then decodes the serial line. There is no MicroBlaze in this design, so unlike the crossbar HW
+tests it needs no `mb-gcc` — the firmware is already inside the bitstream.
+
+**Result** — the board reports `VZPDRCLF`. The trailing nibble is the switch register read back
+over AXI4-Lite (all four slide switches up on this run), so the result check ran against
+`checksum + 15` rather than against zero. Timing closes:
+
+| Resource | Used | Available | Utilisation |
+|---|---:|---:|---:|
+| Slice LUTs | 1093 | 63400 | 1.72% |
+| Slice registers | 1142 | 126800 | 0.90% |
+| Block RAM tiles | 3 | 135 | 2.22% |
+| DSPs | 0 | 240 | 0.00% |
+
+Test conditions: Vivado 2025.2, `xc7a100tcsg324-1` (speed grade -1), default synthesis and
+implementation strategies, one 100 MHz clock domain, WNS **+0.634 ns** (106.8 MHz Fmax). The figures
+cover the whole SoC — VexRiscv, the axiZero crossbar, the 8 KB RAM, both peripherals and the UART
+reporter — not the crossbar alone; see
+[crossbar-only resource usage](#hardware-validation--arty-a7-100t) for that.
+
 ### Notes
 
 - **Register slices on the CPU ports are required, not decorative.** VexRiscv couples its two bus
@@ -513,9 +558,6 @@ crossbar that merely keeps the bus alive cannot pass.
   so ordering only has to hold per master. IBus fetches never leave the RAM region, and
   `DBusSimplePlugin` keeps at most one read in flight and blocks reads while a write is
   outstanding.
-- **Simulation only so far.** The SoC is verified in SpinalSim and the netlist generates cleanly;
-  it has not been synthesised or run on a board, so there are no resource or Fmax numbers for it.
-  See [hardware validation](#hardware-validation--arty-a7-100t) for the crossbar's board results.
 
 See [ADR 002](docs/adr/002-vexriscv-example-soc.md) for why VexRiscv is carried as a pinned
 submodule in its own sbt project.
@@ -524,7 +566,9 @@ submodule in its own sbt project.
 
 ## Hardware validation — Arty A7-100T
 
-Six test suites run on a Xilinx Arty A7-100T (xc7a100t) at 100 MHz. All six pass.
+Six test suites run on a Xilinx Arty A7-100T (xc7a100t) at 100 MHz. All six pass. The
+[VexRiscv example SoC](#example-system--vexriscv-soc) runs on the same board with its own
+runner; its results are reported with the example.
 
 ### Base test (1M×4S)
 
@@ -619,6 +663,9 @@ python hw/vivado/arty_a7/run_qos_stress_test.py
 python hw/vivado/arty_a7/run_axi3_test.py
 python hw/vivado/arty_a7/run_axis_test.py
 
+# The VexRiscv example SoC (no MicroBlaze, so no mb-gcc needed)
+python hw/vivado/arty_a7/run_vexzero_test.py
+
 # Override tool paths via env vars
 VIVADO_BIN=/opt/Xilinx/2025.2/Vivado/bin/vivado \
 XSDB_BIN=/opt/Xilinx/2025.2/Vitis/bin/xsdb \
@@ -626,7 +673,7 @@ MBGCC_BIN=/opt/Xilinx/2025.2/Vitis/gnu/microblaze/lin64/bin/mb-gcc \
   python hw/vivado/arty_a7/run_qos_stress_test.py
 ```
 
-Each runner: (1) creates the Vivado project + bitstream if not already built, (2) compiles MicroBlaze firmware with mb-gcc, (3) programs the FPGA and runs tests via xsdb.
+Each runner: (1) creates the Vivado project + bitstream if not already built, (2) compiles MicroBlaze firmware with mb-gcc, (3) programs the FPGA and runs tests via xsdb. `run_vexzero_test.py` is the exception: the VexRiscv example SoC carries its firmware inside the bitstream, so it needs only Vivado and xsdb, and it reads its verdict off the USB-UART with pyserial. See [example system](#example-system--vexriscv-soc).
 
 **Crossbar-only resource usage** (OOC synthesis, xc7a100t):
 
@@ -739,7 +786,9 @@ hw/examples/vexriscv/          # VexRiscv example SoC — separate sbt project `
     Peripherals.scala          # AXI4-Lite register bus, GPIO, system control
     Rv32.scala                 # RV32I encoder (no cross compiler needed)
     Firmware.scala             # boot image assembled from Rv32
+    VexZeroArty.scala          # Arty A7-100T board wrapper: checks + LED/UART report
     gen/VexZeroSocGen.scala    # -> generated/vexriscv/VexZeroSoc.v
+    gen/VexZeroArtyGen.scala   # -> generated/vexriscv/VexZeroArty.v (ROM inlined)
   sim/vexzero/sim/             # SpinalSim boot test (sbt vexZero/test)
 third_party/VexRiscv/          # pinned submodule, compiled by `vexZero` only
 sim/cocotb_gen/
@@ -757,6 +806,8 @@ hw/vivado/arty_a7/             # Vivado TCL build and test scripts
   ip/rtl/                      # tracked Arty handoff RTL consumed by Vivado IP integrator
   find_xilinx_tools.py         # cross-platform Vivado/xsdb/mb-gcc auto-detection
   run_wrr_test.py              # WRR HW test runner (build + program + verify)
+  run_vexzero_test.py          # VexRiscv example SoC HW test runner (UART verdict)
+  create_project_vexzero.tcl   # plain RTL project for the VexZero board wrapper
   run_qos_test.py              # QoS HW test runner
   run_qos_stress_test.py       # QoS 10-minute stress test runner
   run_axi3_test.py             # AXI3 adapter HW test runner
