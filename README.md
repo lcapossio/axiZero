@@ -539,13 +539,13 @@ over AXI4-Lite (all four slide switches up on this run), so the result check ran
 
 | Resource | Used | Available | Utilisation |
 |---|---:|---:|---:|
-| Slice LUTs | 1093 | 63400 | 1.72% |
+| Slice LUTs | 1091 | 63400 | 1.72% |
 | Slice registers | 1142 | 126800 | 0.90% |
 | Block RAM tiles | 3 | 135 | 2.22% |
 | DSPs | 0 | 240 | 0.00% |
 
 Test conditions: Vivado 2025.2, `xc7a100tcsg324-1` (speed grade -1), default synthesis and
-implementation strategies, one 100 MHz clock domain, WNS **+0.634 ns** (106.8 MHz Fmax). The figures
+implementation strategies, one 100 MHz clock domain, WNS **+0.698 ns** (107.5 MHz Fmax). The figures
 cover the whole SoC — VexRiscv, the axiZero crossbar, the 8 KB RAM, both peripherals and the UART
 reporter — not the crossbar alone; see
 [crossbar-only resource usage](#hardware-validation--arty-a7-100t) for that.
