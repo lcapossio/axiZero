@@ -51,34 +51,9 @@ class VexZeroArty(
   noIoPrefix()
 
   // ── Reset generation ─────────────────────────────────────────────────────
-  // BOOT reset: these registers come out of FPGA configuration already
-  // initialised, so the SoC is held in reset until the button is released and
-  // the counter has run out.
-  // Not private: a simulation drives the board clock through this domain.
-  val bootDomain = ClockDomain(
-    clock = io.sys_clk,
-    config = ClockDomainConfig(clockEdge = RISING, resetKind = BOOT),
-    frequency = FixedFrequency(clkFrequency)
-  )
-
-  val resetCtrl = new ClockingArea(bootDomain) {
-    val buttonN = BufferCC(io.ck_rst, init = False)
-    val counter = Reg(UInt(8 bits)) init (0)
-    when(counter =/= 255) { counter := counter + 1 }
-    when(!buttonN) { counter := 0 }
-    val systemResetN = RegNext(counter === 255) init (False)
-  }
-
-  private val systemDomain = ClockDomain(
-    clock = io.sys_clk,
-    reset = resetCtrl.systemResetN,
-    config = ClockDomainConfig(
-      clockEdge = RISING,
-      resetKind = SYNC,
-      resetActiveLevel = LOW
-    ),
-    frequency = FixedFrequency(clkFrequency)
-  )
+  // bootDomain is not private: a simulation drives the board clock through it.
+  val (bootDomain, systemDomain) =
+    VexZeroBoard.domains(io.sys_clk, io.ck_rst, clkFrequency)
 
   val system = new ClockingArea(systemDomain) {
 
