@@ -20,13 +20,16 @@ import spinal.lib.bus.amba4.axi._
 //
 // readData is declared here and assigned by the user afterwards.
 // ---------------------------------------------------------------------------
-case class LiteRegBus(axi: Axi4, wordCount: Int) extends Area {
+case class LiteRegBus(axi: Axi4, wordCount: Int, writeStall: Bool = False) extends Area {
   private val dataWidth = axi.config.dataWidth
   private val byteCount = dataWidth / 8
   private val idxW      = Math.max(log2Up(wordCount), 1)
   private val wordRange = (idxW + log2Up(byteCount) - 1) downto log2Up(byteCount)
 
-  /** One-cycle pulse: AW and W have both landed and no B is pending. */
+  /** One-cycle pulse: AW and W have both landed, no B is pending, and the peripheral is not holding
+    * the write off. `writeStall` is how a peripheral backpressures the CPU: the write simply does
+    * not complete, so no B goes back and the store stalls in the pipeline.
+    */
   val writeFire  = Bool()
   val writeIndex = UInt(idxW bits)
   val writeData  = Bits(dataWidth bits)
@@ -57,7 +60,7 @@ case class LiteRegBus(axi: Axi4, wordCount: Int) extends Area {
     wStrb := (if (axi.config.useStrb) axi.w.strb else B(byteCount bits, default -> true))
   }
 
-  writeFire  := awHeld && wHeld && !bHeld
+  writeFire  := awHeld && wHeld && !bHeld && !writeStall
   writeIndex := awIdx
   writeData  := wData
   writeStrb  := wStrb
@@ -176,4 +179,89 @@ class VexZeroSysCtrl(axiCfg: Axi4Config) extends Component {
       is(3) { bus.maskedUpdate(resultReg) }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// VexZeroBenchIo  —  AXI4-Lite console and timer for prebuilt VexRiscv binaries
+//
+// The register layout is not ours: it is the one VexRiscv's own regression
+// testbench implements, so the benchmark and test binaries that ship with the
+// submodule run on this SoC unmodified, at the address their linker already
+// baked in.
+//
+//   0xF00  W   putchar        byte written here leaves on io.charOut
+//   0xF10  R   clock()        free-running cycle counter
+//   0xF20  W   exit           end of run; 0 means success
+//   0xF24  W   error          end of run, always a failure
+//
+// putchar backpressures. A CPU printing at one character per few hundred
+// cycles outruns a 115200 baud line by two orders of magnitude, and a dropped
+// character in the middle of a result line is worse than a slow print, so the
+// store is held until the character is taken. Nothing in the timed part of a
+// benchmark prints, so this does not touch the measurement.
+// ---------------------------------------------------------------------------
+object VexZeroBenchIo {
+  val charWord  = 0xf00 / 4
+  val clockWord = 0xf10 / 4
+  val exitWord  = 0xf20 / 4
+  val errorWord = 0xf24 / 4
+
+  /** Window the peripheral needs: the offsets above are near the top of 4 KB. */
+  val windowSize: BigInt = 4096
+}
+
+class VexZeroBenchIo(axiCfg: Axi4Config) extends Component {
+  import VexZeroBenchIo._
+
+  val io = new Bundle {
+    val axi     = slave(Axi4(axiCfg))
+    val charOut = master Stream (Bits(8 bits))
+
+    /** High once the program has written the exit register. */
+    val done = out Bool ()
+
+    /** The value it exited with; 0 is success by the testbench's convention. */
+    val exitCode = out Bits (axiCfg.dataWidth bits)
+  }
+
+  private val cycles   = Reg(UInt(axiCfg.dataWidth bits)) init (0)
+  private val doneReg  = RegInit(False)
+  private val codeReg  = Reg(Bits(axiCfg.dataWidth bits)) init (0)
+  private val charReg  = Reg(Bits(8 bits)) init (0)
+  private val charHeld = RegInit(False)
+
+  cycles := cycles + 1
+
+  // The next putchar waits for the previous character to be taken, so valid is
+  // driven from registers only and never from the consumer's ready.
+  private val stall = Bool()
+  private val bus   = LiteRegBus(io.axi, wordCount = (windowSize / 4).toInt, writeStall = stall)
+  stall := charHeld && bus.writeIndex === charWord
+
+  bus.readData := B(0, axiCfg.dataWidth bits)
+  when(bus.readIndex === clockWord) { bus.readData := cycles.asBits }
+
+  when(bus.writeFire) {
+    switch(bus.writeIndex) {
+      is(charWord) {
+        charReg  := bus.writeData(7 downto 0)
+        charHeld := True
+      }
+      is(exitWord) {
+        doneReg := True
+        codeReg := bus.writeData
+      }
+      is(errorWord) {
+        doneReg := True
+        codeReg := bus.writeData.orR ? bus.writeData | B(1, axiCfg.dataWidth bits)
+      }
+    }
+  }
+
+  io.charOut.valid   := charHeld
+  io.charOut.payload := charReg
+  when(io.charOut.fire) { charHeld := False }
+
+  io.done     := doneReg
+  io.exitCode := codeReg
 }

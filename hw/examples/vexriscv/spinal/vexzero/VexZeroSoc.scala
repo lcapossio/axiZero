@@ -43,7 +43,13 @@ case class VexZeroSocConfig(
   /** > 1 selects the pipelined crossbar path; see the ordering note above. */
   maxOutstanding: Int = 4,
   /** Boot image words. Empty means "assemble Firmware for this memory map". */
-  bootImage: Seq[Long] = Nil
+  bootImage: Seq[Long] = Nil,
+  /** Base of the benchmark console, or None to leave it out of the crossbar.
+    *
+    * Set it to run a prebuilt VexRiscv regression binary (Dhrystone among them): the address is
+    * theirs, not ours, so it has to match what their linker baked in. See [[VexZeroBenchIo]].
+    */
+  benchIoBase: Option[BigInt] = None
 ) {
   require(ramSize >= (8 KiB), "the boot firmware keeps its data at RAM + 0x1000")
   val ramWords: Int = (ramSize / 4).toInt
@@ -57,6 +63,13 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
     val charOut  = master Flow (Bits(8 bits))
     val status   = out Bits (32 bits)
     val result   = out Bits (32 bits)
+
+    /** Present only with a benchmark console configured. */
+    val bench = cfg.benchIoBase.isDefined generate new Bundle {
+      val charOut  = master Stream (Bits(8 bits))
+      val done     = out Bool ()
+      val exitCode = out Bits (32 bits)
+    }
   }
 
   // ── Bus configurations ───────────────────────────────────────────────────
@@ -98,6 +111,8 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
       SlavePort(fullSlaveCfg, FullAxi4, cfg.ramBase, cfg.ramSize),
       SlavePort(liteSlaveCfg, LiteAxi4, cfg.gpioBase, cfg.peripheralSize),
       SlavePort(liteSlaveCfg, LiteAxi4, cfg.sysCtrlBase, cfg.peripheralSize)
+    ) ++ cfg.benchIoBase.map(
+      SlavePort(liteSlaveCfg, LiteAxi4, _, VexZeroBenchIo.windowSize)
     ),
     arbitration = RoundRobin,
     maxOutstanding = cfg.maxOutstanding
@@ -163,6 +178,16 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   io.charOut <> sysCtrl.io.charOut
   io.status := sysCtrl.io.status
   io.result := sysCtrl.io.result
+
+  // ── S3 — benchmark console, only when one is configured ──────────────────
+  val benchIo = cfg.benchIoBase.map { _ =>
+    val peripheral = new VexZeroBenchIo(liteSlaveCfg)
+    peripheral.io.axi <> fabric.io.slaves(3)
+    io.bench.charOut << peripheral.io.charOut
+    io.bench.done     := peripheral.io.done
+    io.bench.exitCode := peripheral.io.exitCode
+    peripheral
+  }
 }
 
 object VexZeroSoc {
