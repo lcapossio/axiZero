@@ -147,3 +147,35 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: formal
         run: sby -f axis_ready_valid_regslice.sby
+
+  # ── VexRiscv example SoC (hw/examples/vexriscv) ───────────────────────────
+  vexriscv-soc:
+    name: VexRiscv example SoC
+    runs-on: ubuntu-24.04
+    # The example is its own sbt project (`vexZero`) and is neither aggregated
+    # nor depended on by the root build, so none of the jobs above touch it and
+    # it needs its own. It is the only job that checks out a submodule: only
+    # third_party/VexRiscv is initialised, deliberately not `submodules: true`,
+    # which would also pull fcapz for no reason.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the pinned VexRiscv submodule
+        run: git submodule update --init third_party/VexRiscv
+
+      - uses: ./.github/actions/setup-sbt
+
+      - uses: ./.github/actions/setup-verilator
+
+      - name: Check formatting (scalafmt)
+        # Only the example's own sources; .scalafmt.conf excludes third_party.
+        run: sbt vexZero/scalafmtCheck vexZero/Test/scalafmtCheck
+
+      - name: Boot the SoC in SpinalSim
+        # Runs the firmware on both the pipelined and the blocking crossbar and
+        # checks what the CPU actually moved across the bus.
+        run: sbt vexZero/test
+
+      - name: Generate the SoC netlist
+        run: sbt "vexZero/Compile/runMain vexzero.gen.VexZeroSocGen"
