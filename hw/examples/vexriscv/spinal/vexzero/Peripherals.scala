@@ -39,6 +39,12 @@ case class LiteRegBus(axi: Axi4, wordCount: Int, writeStall: Bool = False) exten
   val readIndex = UInt(idxW bits)
   val readData  = Bits(dataWidth bits)
 
+  /** One-cycle pulse as a read completes on the bus. A register whose read has a side effect — a
+    * FIFO the reader pops — has to act on this rather than on readIndex, which is live for as long
+    * as the read is outstanding.
+    */
+  val readFire = Bool()
+
   // ── Write channel ────────────────────────────────────────────────────────
   private val awHeld = RegInit(False)
   private val awIdx  = Reg(UInt(idxW bits)) init (0)
@@ -92,6 +98,7 @@ case class LiteRegBus(axi: Axi4, wordCount: Int, writeStall: Bool = False) exten
   if (axi.config.useResp) axi.r.resp := Axi4.resp.OKAY
   if (axi.config.useId) axi.r.id     := 0
   if (axi.config.useLast) axi.r.last := True
+  readFire                           := axi.r.fire
   when(axi.r.fire) { arHeld := False }
 
   /** Byte-masked update of a register from the current write beat. */
@@ -206,16 +213,36 @@ object VexZeroBenchIo {
   val exitWord  = 0xf20 / 4
   val errorWord = 0xf24 / 4
 
+  // Read-only, for a host draining the console over the bus instead of over a
+  // UART. They sit at the bottom of the same window: the firmware's addresses
+  // are fixed by someone else's linker, but the rest of the 4 KB is ours, so
+  // this costs no extra slave port and no change to the program being run.
+  val drainWord  = 0x000 / 4 // [7:0] character, [8] valid — reading it pops one
+  val levelWord  = 0x004 / 4 // characters buffered right now
+  val statusWord = 0x008 / 4 // [0] the program has written its exit register
+
+  /** Bit 8 of the drain register: the byte below it is a real character. */
+  val drainValidBit = 8
+
   /** Window the peripheral needs: the offsets above are near the top of 4 KB. */
   val windowSize: BigInt = 4096
 }
 
-class VexZeroBenchIo(axiCfg: Axi4Config) extends Component {
+/** @param hostDrainDepth
+  *   0 leaves the console a stream for a UART to consume. Greater than zero buffers it here
+  *   instead, for a host to read out through [[VexZeroBenchIo.drainWord]] — which is what a board
+  *   with no serial port has to do. Backpressure is unchanged either way: a full buffer stalls the
+  *   store, so a host that reads too slowly costs time and never a character.
+  */
+class VexZeroBenchIo(axiCfg: Axi4Config, hostDrainDepth: Int = 0) extends Component {
   import VexZeroBenchIo._
+
+  require(hostDrainDepth >= 0, "a console buffer cannot have negative depth")
+  private val hostDrain = hostDrainDepth > 0
 
   val io = new Bundle {
     val axi     = slave(Axi4(axiCfg))
-    val charOut = master Stream (Bits(8 bits))
+    val charOut = (!hostDrain) generate master(Stream(Bits(8 bits)))
 
     /** High once the program has written the exit register. */
     val done = out Bool ()
@@ -241,6 +268,14 @@ class VexZeroBenchIo(axiCfg: Axi4Config) extends Component {
   bus.readData := B(0, axiCfg.dataWidth bits)
   when(bus.readIndex === clockWord) { bus.readData := cycles.asBits }
 
+  // The program writes these; a host reading the console needs them back to
+  // tell a finished run from a stalled one. The firmware never reads them, so
+  // making them readable costs nothing and changes nothing for the benchmark.
+  when(bus.readIndex === exitWord) { bus.readData := codeReg }
+  when(bus.readIndex === statusWord) {
+    bus.readData := doneReg.asBits.resize(axiCfg.dataWidth bits)
+  }
+
   when(bus.writeFire) {
     switch(bus.writeIndex) {
       is(charWord) {
@@ -258,9 +293,31 @@ class VexZeroBenchIo(axiCfg: Axi4Config) extends Component {
     }
   }
 
-  io.charOut.valid   := charHeld
-  io.charOut.payload := charReg
-  when(io.charOut.fire) { charHeld := False }
+  // The character on its way out of the register file, however it is consumed.
+  private val outgoing = Stream(Bits(8 bits))
+  outgoing.valid   := charHeld
+  outgoing.payload := charReg
+  when(outgoing.fire) { charHeld := False }
+
+  private val drain = hostDrain generate new Area {
+    val fifo = StreamFifo(Bits(8 bits), hostDrainDepth)
+    fifo.io.push << outgoing
+
+    // Popping on readFire, not on readIndex: the index stays put for as long as
+    // the read is outstanding, which would drain the whole buffer in one read.
+    fifo.io.pop.ready := bus.readFire && bus.readIndex === drainWord
+
+    when(bus.readIndex === drainWord) {
+      bus.readData := (B(0, axiCfg.dataWidth - 9 bits)
+        ## fifo.io.pop.valid
+        ## fifo.io.pop.payload)
+    }
+    when(bus.readIndex === levelWord) {
+      bus.readData := fifo.io.occupancy.asBits.resize(axiCfg.dataWidth bits)
+    }
+  }
+
+  if (!hostDrain) io.charOut << outgoing
 
   io.done     := doneReg
   io.exitCode := codeReg
