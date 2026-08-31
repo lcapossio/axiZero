@@ -58,6 +58,22 @@ hw/vivado/arty_a7/axizero_arty_qos_stress_old/
 hw/vivado/arty_a7/axizero_arty_wrr/
 hw/vivado/arty_a7/vexzero_arty/
 hw/vivado/arty_a7/vexzero_bench/
+
+# Quartus build outputs for the DE25-Nano example
+hw/quartus/de25_nano/vexzero_de25/
+hw/quartus/de25_nano/vexzero_bench_de25/
+hw/quartus/de25_nano/db/
+hw/quartus/de25_nano/incremental_db/
+hw/quartus/de25_nano/output_files/
+hw/quartus/de25_nano/qdb/
+hw/quartus/de25_nano/*.qws
+hw/quartus/de25_nano/*.rpt
+hw/quartus/de25_nano/*.summary
+hw/quartus/de25_nano/*.done
+hw/quartus/de25_nano/*.sof
+hw/quartus/de25_nano/*.pin
+hw/quartus/de25_nano/*.jdi
+hw/quartus/de25_nano/*.qpf
 hw/vivado/arty_a7/arty_a7.xdc
 hw/vivado/arty_a7/arty_dc_1m3s.yaml
 hw/vivado/arty_a7/ip/rtl/ArtyDC_2M4S.v
