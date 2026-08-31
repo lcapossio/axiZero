@@ -37,6 +37,7 @@ Hardware-validated on Xilinx Arty A7-100T. 103 SpinalSim + 36 cocotb tests pass.
   - [No cross compiler required](#no-cross-compiler-required)
   - [On hardware](#on-hardware)
   - [Benchmark — Dhrystone](#benchmark--dhrystone)
+  - [A second board — DE25-Nano (Agilex 5)](#a-second-board--de25-nano-agilex-5)
 - [Hardware validation — Arty A7-100T](#hardware-validation--arty-a7-100t)
 - [Port naming](#port-naming)
 - [Tool integration](#tool-integration)
@@ -67,6 +68,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - Standalone AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster
 - VexRiscv example SoC: a RISC-V core booting through the crossbar into a mixed AXI4 / AXI4-Lite address map, in simulation and on an Arty A7-100T
 - Dhrystone 2.1 on that SoC, in simulation and on the board, with per-port AXI latency and occupancy measured at the crossbar
+- The same SoC on two FPGA families — Xilinx Artix-7 and Altera Agilex 5 — with a JTAG-to-AXI bridge acting as a third bus master on the board that has no UART
 
 **Not yet implemented:**
 
@@ -628,6 +630,94 @@ clock domain, 32 KB on-chip RAM (the benchmark needs more than the 8 KB verdict 
 WNS **+0.521 ns** (105.5 MHz Fmax). The figures cover the whole benchmark SoC — VexRiscv, the
 axiZero crossbar, 32 KB of RAM, three slaves and the UART — not the crossbar alone.
 
+### A second board — DE25-Nano (Agilex 5)
+
+The example is not tied to one FPGA family. The same SoC, the same crossbar and the same firmware
+also run on a Terasic DE25-Nano (Altera Agilex 5), built with Quartus Prime Pro instead of Vivado.
+Porting it needed no change to the interconnect and no vendor-specific memory or reset primitive —
+the design is ordinary inferred RTL — but it did need a different answer to one question: how does
+the board say what happened?
+
+The DE25-Nano has no UART. Its only link to a host is the on-board USB-Blaster. So rather than the
+design pushing a report out, the host reaches in: fpgacapZero's JTAG-to-AXI bridge joins the
+crossbar as a **third bus master**, and the runner reads the registers the firmware wrote.
+
+```
+  host ── USB-Blaster ──> M2 ─┐
+       VexRiscv IBus ── M0 ───┼─ AxiZeroMixedTop ──> RAM / GPIO / sysctrl / console
+       VexRiscv DBus ── M1 ───┘      3 masters
+```
+
+That is a better arrangement than a side channel, because the report path is now part of what is
+being tested. Every value the runner checks crosses the interconnect, arbitrated against a CPU that
+is still fetching out of the same RAM. A crossbar that mixed up two masters' responses would fail
+the test rather than quietly reporting on itself.
+
+The bridge comes from the `fcapz` submodule — the same one the
+[Arty debug flows](#arty-fcapz-debug) already use, so fpgacapZero is pinned once for the whole
+repository rather than once per board. It is wrapped in
+[`JtagAxi`](hw/examples/vexriscv/spinal/vexzero/JtagAxi.scala), which presents it as a plain axiZero
+master port and ties off the signals it does not drive. It has no IDs and issues one transaction at
+a time, so a constant ID is enough for the pipelined crossbar to route its responses — the same
+argument that already covers the two CPU ports.
+
+```bash
+git submodule update --init fcapz
+
+python hw/quartus/de25_nano/run_vexzero_de25.py                  # self test
+python hw/quartus/de25_nano/run_vexzero_de25.py --design bench   # Dhrystone
+python hw/quartus/de25_nano/run_vexzero_de25.py --skip-build     # reprogram and re-read
+```
+
+For the benchmark there is no serial line to stream the console over either, so the console is
+buffered inside the peripheral and the host drains it a read at a time
+([`VexZeroBenchIo`](hw/examples/vexriscv/spinal/vexzero/Peripherals.scala)). Backpressure is
+unchanged: a full buffer stalls the store in the CPU rather than dropping a character, so a host
+that reads slowly costs the run time and never a byte. Nothing prints inside Dhrystone's timed
+loop, so the measurement is untouched.
+
+**Results** — both designs pass on the board. The self test's every checked value is read back
+over JTAG-AXI: the done marker, the computed result, the GPIO register the firmware wrote, and a
+word of the program read straight out of RAM while the CPU was running. Dhrystone runs to
+completion with its whole console drained through the bridge, all 20 of its self-checks passing
+and an exit code of 0.
+
+And it takes **328,048 cycles for 200 runs — the same count as the Arty, and the same count as
+simulation**. Three platforms, two FPGA vendors, two toolchains, one number: the SoC is doing
+exactly the same work on the Agilex 5 as it does on the Artix-7, cycle for cycle.
+
+| | Timed loop | Cycles/run | Dhrystones/s | DMIPS/MHz |
+|---|---:|---:|---:|---:|
+| DE25-Nano @ 50 MHz | 328,048 | 1640.2 | 30,483 | **0.347** |
+| Arty A7-100T @ 100 MHz | 328,048 | 1640.2 | 60,967 | 0.347 |
+| SpinalSim | 328,048 | 1640.2 | — | 0.347 |
+
+Only the wall-clock rate differs, because the DE25-Nano's oscillator is half the Arty's.
+
+| Resource | Self test | Benchmark | Available |
+|---|---:|---:|---:|
+| ALMs | 4,589 | 4,802 | 46,800 |
+| Registers | 6,618 | 6,861 | — |
+| RAM blocks | 6 | 19 | 358 |
+| DSP blocks | 0 | 0 | 376 |
+
+Test conditions: Quartus Prime Pro 26.1, `A5EB013BB23BE4SR1`, default synthesis and fitter settings,
+one 50 MHz clock domain. Worst-case slack **+12.824 ns** (self test) and **+12.631 ns** (benchmark),
+zero failing endpoints in both, with reported Fmax of **139.35 MHz** and **135.70 MHz** on the Slow
+0 °C model. The figures cover the whole system — VexRiscv, the axiZero crossbar, the RAM, the
+peripherals *and* the JTAG-to-AXI bridge, which accounts for much of the register count and has no
+counterpart in the Arty builds, so the two boards' numbers are not comparable to each other.
+
+Simulation covers the three-master arrangement without needing the vendor primitive:
+[`VexZeroHostSpec`](hw/examples/vexriscv/sim/vexzero/sim/VexZeroHostSpec.scala) drives the SoC's
+host port directly with the transactions the bridge would issue.
+
+| Test | What it proves |
+|---|---|
+| `the host reads the firmware's verdict over the third master port` | the host reaches both the Lite peripherals and the full-AXI4 RAM |
+| `the host and the CPU share the crossbar without disturbing each other` | dozens of host reads interleaved with instruction fetch, all correct, and the firmware's own result unchanged |
+| `the host drains the benchmark console over the bus` | a whole Dhrystone run read out through the buffer, with Dhrystone's own self-checks re-run on the text |
+
 ### Notes
 
 - **Register slices on the CPU ports are required, not decorative.** VexRiscv couples its two bus
@@ -870,11 +960,16 @@ hw/examples/vexriscv/          # VexRiscv example SoC — separate sbt project `
     Firmware.scala             # boot image assembled from Rv32
     VexZeroArty.scala          # Arty A7-100T board wrapper: checks + LED/UART report
     VexZeroBenchArty.scala     # Arty A7-100T board wrapper: Dhrystone console over UART
-    VexZeroBoard.scala         # clock/reset generation shared by both board wrappers
+    VexZeroBoard.scala         # clock/reset generation shared by the board wrappers
+    VexZeroChecks.scala        # the self test's verdict, shared by the board wrappers
+    VexZeroDe25.scala          # DE25-Nano board wrapper: verdict over JTAG-AXI
+    VexZeroBenchDe25.scala     # DE25-Nano board wrapper: Dhrystone over JTAG-AXI
+    JtagAxi.scala              # fpgacapZero JTAG-to-AXI bridge as an axiZero master
     HexImage.scala             # Intel HEX reader for prebuilt firmware images
     gen/VexZeroSocGen.scala    # -> generated/vexriscv/VexZeroSoc.v
     gen/VexZeroArtyGen.scala   # -> generated/vexriscv/VexZeroArty.v (ROM inlined)
     gen/VexZeroBenchArtyGen.scala  # -> generated/vexriscv/VexZeroBenchArty.v
+    gen/VexZeroDe25Gen.scala   # -> generated/vexriscv/VexZero{,Bench}De25.v
   sim/vexzero/sim/             # SpinalSim boot + benchmark tests (sbt vexZero/test)
 third_party/VexRiscv/          # pinned submodule, compiled by `vexZero` only
 sim/cocotb_gen/

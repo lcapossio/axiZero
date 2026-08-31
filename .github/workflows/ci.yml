@@ -192,3 +192,12 @@ jobs:
         # Also proves the Intel HEX image in the submodule still parses and still
         # fits the RAM the board build gives it.
         run: sbt "vexZero/Compile/runMain vexzero.gen.VexZeroBenchArtyGen"
+
+      - name: Generate the DE25-Nano netlists
+        # The Altera board wrappers. Only the JTAG bridge's black-box
+        # declaration is needed to elaborate them, not the fpgacapZero
+        # submodule itself, so this runs without checking that one out --
+        # which is also what keeps the bridge's port list honest.
+        run: |
+          sbt "vexZero/Compile/runMain vexzero.gen.VexZeroDe25Gen"
+          sbt "vexZero/Compile/runMain vexzero.gen.VexZeroBenchDe25Gen"
