@@ -37,6 +37,8 @@ Hardware-validated on Xilinx Arty A7-100T. 103 SpinalSim + 36 cocotb tests pass.
   - [No cross compiler required](#no-cross-compiler-required)
   - [On hardware](#on-hardware)
   - [Benchmark — Dhrystone](#benchmark--dhrystone)
+  - [What Dhrystone does not test](#what-dhrystone-does-not-test)
+  - [Stress — the crossbar under load](#stress--the-crossbar-under-load)
   - [A second board — DE25-Nano (Agilex 5)](#a-second-board--de25-nano-agilex-5)
 - [Hardware validation — Arty A7-100T](#hardware-validation--arty-a7-100t)
 - [Port naming](#port-naming)
@@ -68,6 +70,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - Standalone AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster
 - VexRiscv example SoC: a RISC-V core booting through the crossbar into a mixed AXI4 / AXI4-Lite address map, in simulation and on an Arty A7-100T
 - Dhrystone 2.1 on that SoC, in simulation and on the board, with per-port AXI latency and occupancy measured at the crossbar
+- A system-level stress test: the same SoC with caches on and a third master saturating the fabric — 85.7% of cycles contended, 859,209 burst beats checked against their expected values while the program on top still passes all 20 of its own self-checks
 - The same SoC on two FPGA families — Xilinx Artix-7 and Altera Agilex 5 — with a JTAG-to-AXI bridge acting as a third bus master on the board that has no UART
 
 **Not yet implemented:**
@@ -599,7 +602,8 @@ cycle count rather than trusting the line the firmware printed.
 All 20 of Dhrystone's self-checks pass in every case. Pipelined mode is 1.2% faster than blocking
 mode, which is what a single-issue RV32I with one load or store in flight should show: there is
 almost no concurrency for the crossbar to exploit, so this measures the fabric's overhead rather
-than its throughput, and the overhead is small.
+than its throughput, and the overhead is small. That 1.2% is *not* a throughput result, and
+[what Dhrystone does not test](#what-dhrystone-does-not-test) says why.
 
 What the crossbar actually saw during a run, counted at its master ports in simulation (AR→R and
 AW→B, in `aclk` cycles, pipelined mode):
@@ -629,6 +633,89 @@ clock domain, 32 KB on-chip RAM (the benchmark needs more than the 8 KB verdict 
 
 WNS **+0.521 ns** (105.5 MHz Fmax). The figures cover the whole benchmark SoC — VexRiscv, the
 axiZero crossbar, 32 KB of RAM, three slaves and the UART — not the crossbar alone.
+
+### What Dhrystone does not test
+
+Dhrystone is the right test for *does a real program run correctly across the fabric*. It is the
+wrong test for *is the fabric any good*, and the difference is large enough to be worth measuring
+rather than asserting.
+[`VexZeroProfileSpec`](hw/examples/vexriscv/sim/vexzero/sim/VexZeroProfileSpec.scala) counts what
+the crossbar was actually asked for during a run, at its master ports:
+
+| | Uncached CPU | Cached CPU (4 KiB I$ + D$) |
+|---|---:|---:|
+| Transactions | 189,937 | 21,190 |
+| Beats carried | 189,937 | 37,921 |
+| Instruction fetch | 153,187 × 1-beat | 2,328 × **8-beat** |
+| Data reads | 17,953 × 1-beat | 63 × 8-beat, 2 × 1-beat |
+| Data writes | 18,797 × 1-beat | 18,797 × 1-beat |
+| Peak in flight, any port | 2 | 4 |
+| Cycles with any request | 36.5% | 8.2% |
+| **Cycles with two masters requesting** | **1.1%** | **0.0%** |
+| DMIPS/MHz | 0.347 | 0.687 |
+
+Coverage is maximal and pressure is minimal. With no caches every instruction and every load or
+store crosses the crossbar — bus traffic *is* the whole program — but all 189,937 transactions are
+single beats, never more than two are in flight, and the two masters want the bus in the same cycle
+in 1.1% of cycles. The measured 3.00–3.09 cycle latencies sit exactly on the registered-path floor,
+which is another way of saying the crossbar never queued. Bursts, outstanding depth and arbitration
+under contention are simply not on trial.
+
+Turning the caches on (`cachedCpu = true`) buys the bursts — each miss becomes an 8-beat INCR line
+refill — and nearly doubles DMIPS/MHz, but it makes the *pressure* problem worse, not better: the
+hit rate is so high that the fabric goes idle 92% of the time and contention falls to zero. Writes
+do not change at all, because VexRiscv's data cache is write-through on a 32-bit bus, so every
+store still leaves as a single beat.
+
+So neither configuration loads the interconnect. The pressure has to come from somewhere other than
+this CPU.
+
+### Stress — the crossbar under load
+
+[`VexZeroStressSpec`](hw/examples/vexriscv/sim/vexzero/sim/VexZeroStressSpec.scala) supplies it. The
+CPU runs the same unmodified Dhrystone with caches on, and a third master —
+[`HostTraffic`](hw/examples/vexriscv/sim/vexzero/sim/HostTraffic.scala), on the same port a debug
+cable occupies on the DE25-Nano — drives the port as hard as it will go at **the same RAM slave the
+CPU is fetching from**: 16-beat INCR bursts, several outstanding, and AW deliberately running ahead
+of W so write data reaches the fabric after its address and has to be routed from a queue.
+
+```
+sbt "vexZero/testOnly *VexZeroProfileSpec"   # what Dhrystone asks for, uncached vs cached
+sbt "vexZero/testOnly *VexZeroStressSpec"    # the same SoC with a third master saturating it
+```
+
+Every host burst carries the value it expects, so this is a checker and not only a load: a crossbar
+that mis-routed a beat, dropped one or returned another master's data fails here rather than merely
+running slowly.
+
+| | Dhrystone alone (cached) | Dhrystone + host traffic |
+|---|---:|---:|
+| Cycles with any request | 8.2% | **99.8%** |
+| Cycles with two or more masters requesting | 0.0% | **85.7%** |
+| Longest burst | 8 beats | 16 beats |
+| Beats carried | 37,921 | 897,137 |
+| Instruction-fetch latency | 10.0 cycles | 25.0 cycles |
+| Host read-burst latency | — | 42.0 cycles |
+| Host beats checked | — | 859,209, **0 mismatches** |
+| Dhrystone self-checks | 20/20 pass | 20/20 pass, exit 0 |
+
+Latency rising from 10 to 25 cycles is the point: under Dhrystone alone the crossbar never queued,
+and here it queues constantly, while the program on top still computes every one of its results
+correctly.
+
+**Pipelined against blocking, under real load.** With the fabric at 99.8% occupancy the two modes
+come out level — 53,700 host transactions in 895,467 cycles pipelined against 52,583 in 880,430
+blocking, a 0.4% difference in transactions per cycle, with Dhrystone itself 2.1% *slower* on the
+pipelined path. That is not a defect: this load is bandwidth-bound at a single RAM slave, and
+allowing more transactions outstanding to one slave reorders who waits rather than creating
+bandwidth that is not there. The pipelined path's advantage is concurrency across *different*
+slaves, which is what
+[`PipelinedArbitrationSpec`](hw/sim/axizero/sim/PipelinedArbitrationSpec.scala) measures directly.
+
+Test conditions: SpinalSim + Verilator, 3-master × 4-slave `AxiZeroMixedTop`, round-robin, 64 KB
+on-chip RAM, VexRiscv RV32I with 4 KiB one-way 32-byte-line I$ and D$, Dhrystone 2.1 `-O3`, 200
+runs. The host reads the program text back from where it is being fetched and round-trips a pattern
+through the unused top 16 KB of RAM.
 
 ### A second board — DE25-Nano (Agilex 5)
 
@@ -970,7 +1057,12 @@ hw/examples/vexriscv/          # VexRiscv example SoC — separate sbt project `
     gen/VexZeroArtyGen.scala   # -> generated/vexriscv/VexZeroArty.v (ROM inlined)
     gen/VexZeroBenchArtyGen.scala  # -> generated/vexriscv/VexZeroBenchArty.v
     gen/VexZeroDe25Gen.scala   # -> generated/vexriscv/VexZero{,Bench}De25.v
-  sim/vexzero/sim/             # SpinalSim boot + benchmark tests (sbt vexZero/test)
+  sim/vexzero/sim/             # SpinalSim tests for the example (sbt vexZero/test)
+    VexZeroBenchSpec.scala     #   Dhrystone over the crossbar, pipelined vs blocking
+    VexZeroProfileSpec.scala   #   what that run asks of the fabric, uncached vs cached
+    VexZeroStressSpec.scala    #   the same SoC with a third master saturating the fabric
+    HostTraffic.scala          #   the saturating master: 16-beat bursts, AW ahead of W
+    AxiProfile.scala           #   per-port traffic shape, measured at the master ports
 third_party/VexRiscv/          # pinned submodule, compiled by `vexZero` only
 sim/cocotb_gen/
   run_all.py                   # Python runner (lite + full + wrr + qos + ipif + axis suites)
