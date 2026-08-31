@@ -53,10 +53,7 @@ class VexZeroBenchSpec extends AnyFunSuite {
   private val benchIoBase = BigInt("F00FF000", 16)
 
   /** Number_Of_Runs, compiled into the binary. */
-  private val runs = 200
-
-  /** One Dhrystone iteration is 1757 VAX instructions, by definition. */
-  private val vaxDhrystonesPerSecond = 1757.0
+  private val runs = DhrystoneConsole.runs
 
   /** Generous: the whole run is a few hundred thousand cycles. */
   private val timeoutCycles = 8000000
@@ -93,26 +90,10 @@ class VexZeroBenchSpec extends AnyFunSuite {
   ) {
 
     /** Cycles Dhrystone itself timed, straight out of its printout. */
-    val userCycles: Long =
-      """Clock cycles=(\d+)""".r
-        .findFirstMatchIn(text)
-        .map(_.group(1).toLong)
-        .getOrElse(sys.error(s"Dhrystone printed no cycle count:\n$text"))
+    val userCycles: Long = DhrystoneConsole.userCycles(text)
 
     val cyclesPerRun: Double = userCycles.toDouble / runs
-    val dmipsPerMhz: Double  = 1e6 * runs / (userCycles * vaxDhrystonesPerSecond)
-
-    /** Every "X: value" line followed by a "should be: value" line. */
-    def selfChecks: Seq[(String, String, String)] = {
-      val lines = text.linesIterator.toIndexedSeq
-      for {
-        i <- lines.indices.tail
-        if lines(i).trim.startsWith("should be:")
-        expected = lines(i).trim.stripPrefix("should be:").trim
-        actual   = lines(i - 1).split(":", 2).last.trim
-        label    = lines(i - 1).split(":", 2).head.trim
-      } yield (label, actual, expected)
-    }
+    val dmipsPerMhz: Double  = DhrystoneConsole.dmipsPerMhz(userCycles)
   }
 
   private def runDhrystone(maxOutstanding: Int, name: String): BenchRun = {
@@ -189,24 +170,7 @@ class VexZeroBenchSpec extends AnyFunSuite {
   }
 
   private def checkResults(run: BenchRun): Unit = {
-    val checks = run.selfChecks
-    assert(
-      checks.length >= 15,
-      s"expected Dhrystone's result block, found ${checks.length} checks in:\n${run.text}"
-    )
-    for ((label, actual, expected) <- checks if !expected.startsWith("(implementation-dependent")) {
-      // The one line Dhrystone prints symbolically rather than as a number.
-      val want = if (expected == "Number_Of_Runs + 10") (runs + 10).toString else expected
-      assert(actual == want, s"Dhrystone check '$label': got '$actual', should be '$want'")
-    }
-
-    // The two pointer prints are the same malloc'd object seen through two
-    // records; their value is nobody's business but they must agree, which a
-    // crossbar that mixed up two in-flight reads would not manage.
-    val pointers = checks.collect { case ("Ptr_Comp", actual, _) => actual }
-    assert(pointers.length == 2, s"expected two Ptr_Comp lines, saw ${pointers.length}")
-    assert(pointers.distinct.length == 1, s"Ptr_Comp printed ${pointers.mkString(" and ")}")
-
+    DhrystoneConsole.verify(run.text)
     assert(run.exitCode == 0, s"Dhrystone exited with code ${run.exitCode}")
   }
 
