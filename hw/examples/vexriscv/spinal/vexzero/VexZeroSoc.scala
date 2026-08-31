@@ -21,6 +21,11 @@ import axizero._
 //                                 ├─ AxiZeroMixedTop ──┼─ S1  GPIO          (AXI4-Lite)
 //   VexRiscv DBus (Axi4Shared)  ──┘   2 masters × 3     └─ S2  system ctrl   (AXI4-Lite)
 //
+// A board whose only link to the host is a debug cable can add that host as a
+// third master (`hostMaster`), which is how the DE25-Nano reports: the host
+// reads the very registers the firmware wrote, arbitrated against the CPU by
+// the crossbar under test. See [[JtagAxi]].
+//
 // Response ordering
 // ─────────────────
 // maxOutstanding > 1 selects the pipelined crossbar, which routes B/R by ID.
@@ -49,7 +54,20 @@ case class VexZeroSocConfig(
     * Set it to run a prebuilt VexRiscv regression binary (Dhrystone among them): the address is
     * theirs, not ours, so it has to match what their linker baked in. See [[VexZeroBenchIo]].
     */
-  benchIoBase: Option[BigInt] = None
+  benchIoBase: Option[BigInt] = None,
+  /** Add a third master port, brought out at the SoC boundary.
+    *
+    * Meant for a debug-cable bridge on boards with no UART. It is left at the SoC edge rather than
+    * instantiated here so that a simulation can drive it directly and no vendor primitive has to
+    * exist for the SoC to elaborate.
+    */
+  hostMaster: Boolean = false,
+  /** Depth of the benchmark console buffer the host drains over the bus.
+    *
+    * 0 keeps the console a stream for a UART. Anything else is for a board with no serial port; see
+    * [[VexZeroBenchIo]].
+    */
+  benchHostDrain: Int = 0
 ) {
   require(ramSize >= (8 KiB), "the boot firmware keeps its data at RAM + 0x1000")
   val ramWords: Int = (ramSize / 4).toInt
@@ -64,19 +82,28 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
     val status   = out Bits (32 bits)
     val result   = out Bits (32 bits)
 
+    /** The third master port, present only with `hostMaster`. */
+    val host = cfg.hostMaster generate slave(Axi4(VexZeroSoc.masterCfg))
+
     /** Present only with a benchmark console configured. */
     val bench = cfg.benchIoBase.isDefined generate new Bundle {
-      val charOut  = master Stream (Bits(8 bits))
+
+      /** Absent when the host drains the console over the bus instead. */
+      val charOut  = (cfg.benchHostDrain == 0) generate master(Stream(Bits(8 bits)))
       val done     = out Bool ()
       val exitCode = out Bits (32 bits)
     }
   }
 
   // ── Bus configurations ───────────────────────────────────────────────────
-  // 2 masters → masterIndexBits = 1, and neither CPU port carries an ID, so
-  // AxiZeroMixedTop's effective master ID width is 1 and slaveIdW = 2.
-  private val masterCfg    = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
-  private val fullSlaveCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 2)
+  // No master port carries a meaningful ID (both CPU ports and the optional
+  // host bridge drive a constant), so AxiZeroMixedTop's effective master ID
+  // width is 1 and the slave side widens by the master index: 2 masters give
+  // slaveIdW 2, and 3 masters give 3.
+  private val masterCount = if (cfg.hostMaster) 3 else 2
+  private val masterCfg   = VexZeroSoc.masterCfg
+  private val fullSlaveCfg =
+    Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = masterCfg.idWidth + log2Up(masterCount))
   private val liteSlaveCfg = Axi4Config(
     addressWidth = 32,
     dataWidth = 32,
@@ -106,6 +133,8 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
     masters = Seq(
       MasterPort(masterCfg, FullAxi4, regSlice = true), // M0 — instruction fetch
       MasterPort(masterCfg, FullAxi4, regSlice = true)  // M1 — load / store
+    ) ++ Option.when(cfg.hostMaster)(
+      MasterPort(masterCfg, FullAxi4, regSlice = true) // M2 — debug cable
     ),
     slaves = Seq(
       SlavePort(fullSlaveCfg, FullAxi4, cfg.ramBase, cfg.ramSize),
@@ -146,6 +175,10 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   // M1: the shared AR/AW command channel is split back into AXI4 AR + AW.
   fabric.io.masters(1) << dBus.toAxi4()
 
+  // M2: the host, if this board has one. It arrives already an Axi4, so the
+  // crossbar sees it exactly as it sees the CPU ports.
+  if (cfg.hostMaster) fabric.io.masters(2) << io.host
+
   // ── S0 — on-chip RAM, preloaded with the boot image ──────────────────────
   val ram = Axi4SharedOnChipRam(
     dataWidth = 32,
@@ -181,9 +214,9 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
 
   // ── S3 — benchmark console, only when one is configured ──────────────────
   val benchIo = cfg.benchIoBase.map { _ =>
-    val peripheral = new VexZeroBenchIo(liteSlaveCfg)
+    val peripheral = new VexZeroBenchIo(liteSlaveCfg, hostDrainDepth = cfg.benchHostDrain)
     peripheral.io.axi <> fabric.io.slaves(3)
-    io.bench.charOut << peripheral.io.charOut
+    if (cfg.benchHostDrain == 0) io.bench.charOut << peripheral.io.charOut
     io.bench.done     := peripheral.io.done
     io.bench.exitCode := peripheral.io.exitCode
     peripheral
@@ -191,6 +224,12 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
 }
 
 object VexZeroSoc {
+
+  /** The shape of every master port on this SoC.
+    *
+    * One ID bit, driven to a constant by all three masters; see the ordering note above.
+    */
+  val masterCfg: Axi4Config = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
 
   /** The smallest VexRiscv that can run the example firmware and speak AXI4.
     *
