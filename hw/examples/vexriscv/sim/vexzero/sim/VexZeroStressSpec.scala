@@ -7,6 +7,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import scala.collection.mutable
 import spinal.core._
 import spinal.core.sim._
+import axizero.{ArbitrationPolicy, QosBased, RoundRobin}
 import vexzero._
 
 // ---------------------------------------------------------------------------
@@ -96,11 +97,20 @@ class VexZeroStressSpec extends AnyFunSuite {
     def transactions: Long   = stats.map(_.transactions).sum
   }
 
-  private def stress(maxOutstanding: Int, label: String, name: String): StressRun = {
+  private def stress(
+    maxOutstanding: Int,
+    label: String,
+    name: String,
+    arbitration: ArbitrationPolicy = RoundRobin,
+    cpuQos: Int = 0,
+    hostQos: Int = 0
+  ): StressRun = {
     val image = HexImage.loadWords(hexPath, ramBase)
     val socConfig = VexZeroSocConfig(
       ramSize = ramSize,
       maxOutstanding = maxOutstanding,
+      arbitration = arbitration,
+      cpuQos = cpuQos,
       cachedCpu = true,
       // Sized to miss. At 4 KiB this port issues 63 reads in a whole run; at
       // 512 B it issues thousands, all of them line refills, which is the only
@@ -144,7 +154,7 @@ class VexZeroStressSpec extends AnyFunSuite {
         if (requesting > 1) contend += 1
       }
 
-      val host = new HostTraffic(dut.io.host, dut.clockDomain)
+      val host = new HostTraffic(dut.io.host, dut.clockDomain, qos = hostQos)
       host.start()
 
       // ── The load ─────────────────────────────────────────────────────────
@@ -170,9 +180,13 @@ class VexZeroStressSpec extends AnyFunSuite {
             val base = ((addr - ramBase.toLong) / 4).toInt
             host.read(addr, (0 until burstBeats).map(i => image(base + i)))
 
-            // A scratch round-trip, written and then verified.
+            // A scratch round-trip, written and then verified. The stride is one
+            // whole burst, so no round can still be reading an address that the
+            // next round is already writing -- AXI orders nothing between the
+            // read and write channels, and a shorter stride turns that into a
+            // data mismatch that looks exactly like a crossbar fault.
             val offset  = (round * burstBeats * 4) % (scratchSize - burstBeats * 4)
-            val target  = scratchBase + (offset & ~0x3f)
+            val target  = scratchBase + offset
             val pattern = (0 until burstBeats).map(i => (round.toLong << 16 | i) & 0xffffffffL)
             host.write(target, pattern)
             host.drainWrites()
@@ -305,5 +319,228 @@ class VexZeroStressSpec extends AnyFunSuite {
 
     check(pipelined)
     check(blocking)
+  }
+
+  // -------------------------------------------------------------------------
+  // QoS, and the condition under which it stops meaning anything
+  //
+  // QosCrossbarSpec already shows that a higher AXQOS wins a grant and that a
+  // starved low-QoS requester is eventually let through. The question an
+  // integrator actually has is different: if I rank the CPU above a bulk
+  // transfer, how much of the bus does that move?
+  //
+  // The answer depends on something the unit tests cannot show, because it
+  // only appears when transactions are long enough to make masters wait. The
+  // crossbar boosts a waiting master's effective priority by one per cycle and
+  // saturates it at 15 (Axi4Crossbar.qosAgeMax), so the ranking is erased once
+  // the low-ranked master has waited its own distance from 15. Rank 12 against
+  // 2 and the difference is intact after a ten-cycle wait and gone after
+  // thirteen, whatever the two numbers were.
+  //
+  // So this runs the same ranking at two burst lengths. Four beats: waits are
+  // short, ranking decides the split. Sixteen beats: every wait outlasts the
+  // boost, both masters arrive saturated at 15, and the arbiter falls back to
+  // round-robin between them — ranking buys almost nothing. That is not a
+  // defect, it is the anti-starvation mechanism doing exactly what it says,
+  // and it is the difference between a QoS setting that will work in a system
+  // and one that will quietly do nothing.
+  //
+  // Each run is a fixed window rather than a whole Dhrystone: the question is
+  // how the bus was shared, not whether the program finished, and the test
+  // above already answers the latter.
+  // -------------------------------------------------------------------------
+  private case class ShareRun(
+    label: String,
+    burst: Int,
+    stats: Seq[AxiProfile],
+    host: HostTraffic
+  ) {
+    def cpuGrants: Long   = stats(0).transactions + stats(1).transactions
+    def hostGrants: Long  = stats(2).transactions
+    def hostShare: Double = 100.0 * hostGrants / (cpuGrants + hostGrants)
+  }
+
+  /** Run the saturating load for a fixed window under QosBased arbitration, and report who got the
+    * bus.
+    */
+  private def qosShare(
+    burst: Int,
+    cpuQos: Int,
+    hostQos: Int,
+    window: Int,
+    label: String,
+    name: String
+  ): ShareRun = {
+    val image = HexImage.loadWords(hexPath, ramBase)
+    val socConfig = VexZeroSocConfig(
+      ramSize = ramSize,
+      maxOutstanding = 4,
+      arbitration = QosBased,
+      cpuQos = cpuQos,
+      cachedCpu = true,
+      dCacheSize = 512,
+      hostMaster = true,
+      benchIoBase = Some(benchIoBase),
+      bootImage = image
+    )
+
+    var run: ShareRun = null
+    val compiled = simCfg.compile {
+      val dut = new VexZeroSoc(socConfig)
+      AxiProfile.publish(dut.fabric.io.masters)
+      dut
+    }
+
+    compiled.doSim(name) { dut =>
+      SimTimeout(400000000)
+      dut.io.switches #= 0
+      dut.io.bench.charOut.ready #= true
+      dut.clockDomain.forkStimulus(10)
+
+      val stats = Seq(
+        new AxiProfile("instruction fetch"),
+        new AxiProfile("load / store"),
+        new AxiProfile("host")
+      )
+      var cycles = 0L
+      dut.clockDomain.onSamplings {
+        cycles += 1
+        AxiProfile.sample(dut.fabric.io.masters, stats, cycles)
+      }
+
+      val host = new HostTraffic(dut.io.host, dut.clockDomain, qos = hostQos)
+      host.start()
+
+      var feeding = true
+      val feeder = fork {
+        var round = 0
+        while (feeding) {
+          if (host.backlog < 6) {
+            val textWords = math.min(image.length, 0x2000 / 4)
+            val word      = (round * burst) % math.max(1, textWords - burst)
+            val addr      = ramBase.toLong + (word & ~(burst - 1)) * 4
+            val base      = ((addr - ramBase.toLong) / 4).toInt
+            host.read(addr, (0 until burst).map(i => image(base + i)))
+
+            val offset  = (round * burst * 4) % (scratchSize - burst * 4)
+            val target  = scratchBase + offset
+            val pattern = (0 until burst).map(i => (round.toLong << 16 | i) & 0xffffffffL)
+            host.write(target, pattern)
+            host.drainWrites()
+            host.read(target, pattern)
+            round += 1
+          } else dut.clockDomain.waitSampling()
+        }
+      }
+
+      dut.clockDomain.waitSampling(window)
+      feeding = false
+      feeder.join()
+      host.halt()
+
+      run = ShareRun(label, burst, stats, host)
+    }
+    run
+  }
+
+  private def reportShare(a: ShareRun, b: ShareRun): Unit = {
+    println()
+    println(s"  ---- ${a.burst}-beat bursts ----")
+    for (r <- Seq(a, b)) {
+      println(
+        f"  ${r.label}%-22s cpu ${r.cpuGrants}%,7d  host ${r.hostGrants}%,7d  " +
+          f"host share ${r.hostShare}%5.1f%%  host latency ${r.stats(2).readLatency}%5.1f cycles"
+      )
+    }
+    println(f"  ${"ranking moved the split by"}%-22s ${b.hostShare - a.hostShare}%+.1f points")
+  }
+
+  test("QoS decides how a saturated crossbar is shared, until the age boost erases it") {
+    assume(
+      Files.isRegularFile(Paths.get(hexPath)),
+      s"$hexPath is missing — run: git submodule update --init third_party/VexRiscv"
+    )
+
+    val window = 300000
+
+    // Short bursts: a waiting master is granted again before the boost can
+    // close a ten-point gap, so the ranking is what decides the split.
+    val shortCpu =
+      qosShare(4, 12, 2, window, "CPU 12, host 2", "vexzero_qos_short_cpu")
+    val shortHost =
+      qosShare(4, 2, 12, window, "CPU 2, host 12", "vexzero_qos_short_host")
+
+    // Long bursts: every wait outlasts the boost, both arrive at 15, and the
+    // arbiter is round-robin again no matter what was asked for.
+    val longCpu =
+      qosShare(16, 12, 2, window, "CPU 12, host 2", "vexzero_qos_long_cpu")
+    val longHost =
+      qosShare(16, 2, 12, window, "CPU 2, host 12", "vexzero_qos_long_host")
+
+    reportShare(shortCpu, shortHost)
+    reportShare(longCpu, longHost)
+
+    val shortSwing = shortHost.hostShare - shortCpu.hostShare
+    val longSwing  = longHost.hostShare - longCpu.hostShare
+    println()
+    println("  ---- What the ranking was worth ----")
+    println(f"  4-beat bursts  : $shortSwing%+.1f points of bus share")
+    println(f"  16-beat bursts : $longSwing%+.1f points of bus share")
+    println(
+      "  a waiting master gains one point of effective QoS per cycle up to 15,"
+    )
+    println(
+      "  so a burst long enough to make the low-ranked master wait its own"
+    )
+    println(
+      "  distance from 15 erases the ranking before the arbiter ever sees it"
+    )
+    println()
+
+    // Nothing here is worth reading if the data came back wrong.
+    for (r <- Seq(shortCpu, shortHost, longCpu, longHost)) {
+      assert(
+        r.host.mismatches.isEmpty,
+        s"${r.burst}-beat ${r.label}: the crossbar returned wrong data:\n  " +
+          r.host.mismatches.mkString("\n  ")
+      )
+      assert(
+        r.hostGrants > 500 && r.cpuGrants > 500,
+        s"${r.burst}-beat ${r.label}: too little traffic to compare " +
+          s"(cpu ${r.cpuGrants}, host ${r.hostGrants})"
+      )
+      assert(
+        r.stats(2).readLens.contains(r.burst - 1),
+        s"${r.burst}-beat ${r.label}: the host issued no ${r.burst}-beat burst: " +
+          r.stats(2).readSummary
+      )
+    }
+
+    // 1. With short transactions, ranking decides the split, and by a margin
+    //    nobody would mistake for noise.
+    assert(
+      shortSwing > 5.0,
+      f"swapping the ranking moved the bus share by only $shortSwing%+.1f points at 4-beat " +
+        "bursts, where the age boost should not have had time to erase a ten-point gap"
+    )
+
+    // 2. With long ones it does not, because the boost got there first. Pinned
+    //    so that a change to qosAgeMax has to be noticed here.
+    assert(
+      math.abs(longSwing) < shortSwing / 2,
+      f"at 16-beat bursts the ranking moved the share by $longSwing%+.1f points against " +
+        f"$shortSwing%+.1f at 4 beats — if the age boost no longer erases the gap, this test " +
+        "and the README section on it need rewriting"
+    )
+
+    // 3. Neither ranking starves the loser in either regime. This is the whole
+    //    reason the boost exists, and it has to hold where QoS is effective.
+    for ((a, b) <- Seq(shortCpu -> shortHost, longCpu -> longHost)) {
+      assert(
+        a.hostShare > 10.0 && b.hostShare < 90.0,
+        f"${a.burst}%d-beat: a ranking left one master with almost nothing " +
+          f"(host share ${a.hostShare}%.1f%% when ranked low, ${b.hostShare}%.1f%% when high)"
+      )
+    }
   }
 }

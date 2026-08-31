@@ -30,8 +30,11 @@ import spinal.lib.bus.amba4.axi.Axi4
 // Every read carries the value it expects, so this is a checker and not only
 // a load: a crossbar that mis-routed a beat, dropped one, or returned another
 // master's data fails here rather than merely running slowly.
+//
+// It also carries an AXQOS, so a test can rank it against the CPU and watch
+// what the arbiter does about it.
 // ---------------------------------------------------------------------------
-class HostTraffic(axi: Axi4, cd: ClockDomain) {
+class HostTraffic(axi: Axi4, cd: ClockDomain, qos: Int = 0) {
 
   /** Reads issued and fully answered. */
   var reads = 0L
@@ -126,6 +129,7 @@ class HostTraffic(axi: Axi4, cd: ClockDomain) {
         axi.ar.payload.len #= expect.length - 1
         axi.ar.payload.size #= 2  // 4 bytes
         axi.ar.payload.burst #= 1 // INCR
+        axi.ar.payload.qos #= qos
         cd.waitSamplingWhere(axi.ar.ready.toBoolean)
         axi.ar.valid #= false
         outstanding += 1
@@ -178,6 +182,7 @@ class HostTraffic(axi: Axi4, cd: ClockDomain) {
         axi.aw.payload.len #= data.length - 1
         axi.aw.payload.size #= 2
         axi.aw.payload.burst #= 1
+        axi.aw.payload.qos #= qos
         cd.waitSamplingWhere(axi.aw.ready.toBoolean)
         axi.aw.valid #= false
       }

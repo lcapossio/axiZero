@@ -48,6 +48,21 @@ case class VexZeroSocConfig(
   switchWidth: Int = 8,
   /** > 1 selects the pipelined crossbar path; see the ordering note above. */
   maxOutstanding: Int = 4,
+  /** How the crossbar picks between masters that want the same slave in the same cycle.
+    *
+    * Round-robin unless something in the system deserves to be ranked. With three masters sharing
+    * one RAM, `QosBased` is the interesting one: it lets a latency-sensitive CPU outrank a bulk
+    * transfer without starving it, because the crossbar boosts a waiting master's effective
+    * priority until it reaches parity.
+    */
+  arbitration: ArbitrationPolicy = RoundRobin,
+  /** AXQOS the CPU's two master ports present to the crossbar.
+    *
+    * The SoC declares this rather than the CPU driving it, because VexRiscv has no QoS output at
+    * all: both of its buses are built with `useQos = false`, so without this they would arrive as
+    * QoS 0 and could never be ranked above anything. Ignored unless `arbitration` reads AXQOS.
+    */
+  cpuQos: Int = 0,
   /** Boot image words. Empty means "assemble Firmware for this memory map". */
   bootImage: Seq[Long] = Nil,
   /** Base of the benchmark console, or None to leave it out of the crossbar.
@@ -90,6 +105,7 @@ case class VexZeroSocConfig(
   benchHostDrain: Int = 0
 ) {
   require(ramSize >= (8 KiB), "the boot firmware keeps its data at RAM + 0x1000")
+  require(cpuQos >= 0 && cpuQos <= 15, s"cpuQos must fit AXQOS's four bits, not $cpuQos")
   val ramWords: Int = (ramSize / 4).toInt
 }
 
@@ -163,7 +179,7 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
     ) ++ cfg.benchIoBase.map(
       SlavePort(liteSlaveCfg, LiteAxi4, _, VexZeroBenchIo.windowSize)
     ),
-    arbitration = RoundRobin,
+    arbitration = cfg.arbitration,
     maxOutstanding = cfg.maxOutstanding
   )
 
@@ -193,17 +209,25 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   // crossbar port is fully driven.
   private val iPort = fabric.io.masters(0)
   iPort << iBus
-  iPort.aw.valid := False
+  // `<<` has already driven QoS to zero -- driveWeak assigns every field the
+  // source lacks, and VexRiscv's bus lacks this one -- so replacing it has to
+  // be declared rather than merely written second.
+  iPort.ar.qos.allowOverride := B(cfg.cpuQos, 4 bits)
+  iPort.aw.valid             := False
   iPort.aw.payload.clearAll()
   iPort.w.valid := False
   iPort.w.payload.clearAll()
   iPort.b.ready := False
 
   // M1: the shared AR/AW command channel is split back into AXI4 AR + AW.
-  fabric.io.masters(1) << dBus.toAxi4()
+  private val dPort = fabric.io.masters(1)
+  dPort << dBus.toAxi4()
+  dPort.ar.qos.allowOverride := B(cfg.cpuQos, 4 bits)
+  dPort.aw.qos.allowOverride := B(cfg.cpuQos, 4 bits)
 
   // M2: the host, if this board has one. It arrives already an Axi4, so the
-  // crossbar sees it exactly as it sees the CPU ports.
+  // crossbar sees it exactly as it sees the CPU ports -- including its AXQOS,
+  // which is the host's own business and is not overridden here.
   if (cfg.hostMaster) fabric.io.masters(2) << io.host
 
   // ── S0 — on-chip RAM, preloaded with the boot image ──────────────────────

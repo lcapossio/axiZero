@@ -39,6 +39,7 @@ Hardware-validated on Xilinx Arty A7-100T. 103 SpinalSim + 36 cocotb tests pass.
   - [Benchmark — Dhrystone](#benchmark--dhrystone)
   - [What Dhrystone does not test](#what-dhrystone-does-not-test)
   - [Stress — the crossbar under load](#stress--the-crossbar-under-load)
+  - [QoS, and when it stops working](#qos-and-when-it-stops-working)
   - [A second board — DE25-Nano (Agilex 5)](#a-second-board--de25-nano-agilex-5)
 - [Hardware validation — Arty A7-100T](#hardware-validation--arty-a7-100t)
 - [Port naming](#port-naming)
@@ -71,6 +72,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - VexRiscv example SoC: a RISC-V core booting through the crossbar into a mixed AXI4 / AXI4-Lite address map, in simulation and on an Arty A7-100T
 - Dhrystone 2.1 on that SoC, in simulation and on the board, with per-port AXI latency and occupancy measured at the crossbar
 - A system-level stress test: the same SoC with caches on and a third master saturating the fabric — 99.9% occupied and 60.4% of cycles contended, 971,146 burst beats checked against their expected values while the program on top still passes all 20 of its own self-checks
+- QoS measured where it matters: ranking the masters moves 9.2 points of bus share with 4-beat bursts and 0.3 with 16-beat ones, because the crossbar's anti-starvation age boost erases a priority gap that is smaller than the wait
 - The same SoC on two FPGA families — Xilinx Artix-7 and Altera Agilex 5 — with a JTAG-to-AXI bridge acting as a third bus master on the board that has no UART
 
 **Not yet implemented:**
@@ -732,6 +734,49 @@ Test conditions: SpinalSim + Verilator, 3-master × 4-slave `AxiZeroMixedTop`, r
 on-chip RAM, VexRiscv RV32I with a 4 KiB one-way instruction cache and a 512 B data cache, both
 32-byte lines, Dhrystone 2.1 `-O3`, 200 runs. The host reads the program text back from where it is being fetched and round-trips a pattern
 through the unused top 16 KB of RAM.
+
+### QoS, and when it stops working
+
+QoS only means anything when there is not enough bus to go round, which is what the load above
+supplies. Both masters are given a rank — the CPU's is declared by the SoC (`cpuQos`), because
+VexRiscv has no QoS output of its own — and the same experiment is run with the ranking swapped, so
+nothing but the QoS values can explain the difference.
+
+The result depends on something no unit test surfaces. The crossbar boosts a waiting master's
+effective priority by one per cycle, saturating at 15
+([`Axi4Crossbar.scala:89`](hw/spinal/axizero/crossbar/Axi4Crossbar.scala#L89)), so a master that
+waits longer than its own distance from 15 arrives at the arbiter with the gap already erased:
+
+| Burst | Ranking | CPU grants | Host grants | Host share | Host latency |
+|---|---|---:|---:|---:|---:|
+| 4 beats | CPU 12, host 2 | 22,290 | 58,949 | 72.6% | 11.7 cycles |
+| 4 beats | CPU 2, host 12 | 14,564 | 65,378 | **81.8%** | 11.9 cycles |
+| 16 beats | CPU 12, host 2 | 6,784 | 17,853 | 72.5% | 42.2 cycles |
+| 16 beats | CPU 2, host 12 | 6,702 | 17,867 | **72.7%** | 42.2 cycles |
+
+Swapping the ranking moves **9.2 points** of bus share at 4-beat bursts and **0.3 points** at 16.
+A four-beat read completes in 11.7 cycles end to end, so a master that loses a grant is asking
+again long before the boost has carried it to 15, and the declared ranking decides the split. A
+sixteen-beat read takes 42.2, every wait outlasts the boost, both masters reach an effective 15
+before they are looked at, and the arbiter is round-robin again — the setting is still there and
+it no longer does anything.
+
+That is the anti-starvation mechanism working as specified rather than a defect, and it is worth
+knowing before relying on a QoS number: **a QoS gap survives only while the low-ranked master's
+wait is shorter than its distance from 15.** Rank 2 against 12 and the gap holds for waits up to 13
+cycles. If your masters issue long bursts, rank them further apart, or expect round-robin.
+
+Neither ranking starves anyone in either regime. Demoting the CPU from 12 to 2 costs it a third of
+its grants (22,290 down to 14,564) rather than all of them, and the host's read latency moves by
+0.2 cycles whichever way it is ranked. That is the same age boost, doing the job it is there for.
+
+```
+sbt "vexZero/testOnly *VexZeroStressSpec"    # both the load and the QoS experiment
+```
+
+Test conditions: as above, plus `QosBased` arbitration and a fixed 300,000-cycle window per run
+rather than a whole Dhrystone — the question is how the bus was shared, and the test above already
+establishes that the program finishes correctly under the same load.
 
 ### A second board — DE25-Nano (Agilex 5)
 
