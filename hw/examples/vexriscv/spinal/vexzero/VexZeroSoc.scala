@@ -72,8 +72,16 @@ case class VexZeroSocConfig(
     * uncached, so the same firmware and the same benchmark binaries run either way.
     */
   cachedCpu: Boolean = false,
-  /** Bytes of instruction and data cache, when `cachedCpu`. One way, 32-byte lines. */
-  cacheSize: Int = 4096,
+  /** Bytes of instruction cache, when `cachedCpu`. One way, 32-byte lines. */
+  iCacheSize: Int = 4096,
+  /** Bytes of data cache, when `cachedCpu`. One way, 32-byte lines.
+    *
+    * Worth setting smaller than the instruction cache when the point is to exercise the bus rather
+    * than to go fast: Dhrystone's data working set fits in 4 KiB with room to spare, so a data
+    * cache that size misses 63 times in a whole run and the load/store port effectively stops using
+    * the crossbar. A smaller one keeps it busy with real line refills.
+    */
+  dCacheSize: Int = 4096,
   /** Depth of the benchmark console buffer the host drains over the bus.
     *
     * 0 keeps the console a stream for a UART. Anything else is for a board with no serial port; see
@@ -161,7 +169,8 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
 
   // ── CPU ──────────────────────────────────────────────────────────────────
   val cpuConfig =
-    if (cfg.cachedCpu) VexZeroSoc.cachedCpuConfig(cfg.ramBase, cfg.cacheSize)
+    if (cfg.cachedCpu)
+      VexZeroSoc.cachedCpuConfig(cfg.ramBase, cfg.iCacheSize, cfg.dCacheSize)
     else VexZeroSoc.cpuConfig(cfg.ramBase)
   val cpu = new VexRiscv(cpuConfig)
 
@@ -310,15 +319,24 @@ object VexZeroSoc {
     *
     * Exception catching is off throughout, which is what keeps `CsrPlugin` out of the list: the
     * example has no trap handler to run, and a faulting access would be a test failure anyway.
+    *
+    * The bus stays 32 bits wide. A wider memory side would put the crossbar's width converters
+    * under real CPU traffic, but VexRiscv cannot drive one: `DataCache.toAxi4Shared` builds the bus
+    * at `memDataWidth` and then drives WDATA from a `cpuDataWidth` stage, so anything other than 32
+    * fails to elaborate.
     */
-  def cachedCpuConfig(resetVector: BigInt, cacheSize: Int = 4096): VexRiscvConfig = VexRiscvConfig(
+  def cachedCpuConfig(
+    resetVector: BigInt,
+    iCacheSize: Int = 4096,
+    dCacheSize: Int = 4096
+  ): VexRiscvConfig = VexRiscvConfig(
     plugins = List(
       new IBusCachedPlugin(
         resetVector = resetVector.toLong,
         prediction = NONE,
         compressedGen = false,
         config = InstructionCacheConfig(
-          cacheSize = cacheSize,
+          cacheSize = iCacheSize,
           bytePerLine = 32,
           wayCount = 1,
           addressWidth = 32,
@@ -333,7 +351,7 @@ object VexZeroSoc {
       ),
       new DBusCachedPlugin(
         config = DataCacheConfig(
-          cacheSize = cacheSize,
+          cacheSize = dCacheSize,
           bytePerLine = 32,
           wayCount = 1,
           addressWidth = 32,

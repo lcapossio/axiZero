@@ -28,15 +28,21 @@ import vexzero._
 //
 // Caches invert it. Coverage drops sharply — a hit never leaves the CPU — but
 // every miss becomes an eight-beat INCR read burst and several transactions
-// can be in flight at once. The write path does not change: VexRiscv's data
-// cache is write-through on a bus this width, so every store still leaves as
-// a single beat whether the cache is there or not.
+// can be in flight at once. The write path does not change at all: VexRiscv's
+// data cache has no dirty bit, so it is write-through by construction and
+// every store leaves as a single beat whether the cache is there or not. No
+// configuration of this CPU issues a write burst on AXI.
 //
-// So neither configuration is the answer on its own, and that is the finding.
-// Uncached the fabric is busy but trivial; cached it is interesting but idle
-// 92% of the time, and the two masters collide in 0.0% of cycles. Pressure
-// has to come from somewhere other than this CPU, which is what
-// [[VexZeroStressSpec]] supplies.
+// Cache *size* then decides whether the data port uses the bus at all, which
+// is why three configurations are compared and not two. Dhrystone's data
+// working set fits inside a 4 KiB data cache with room to spare, so that
+// configuration misses 63 times in a whole run and the load/store port very
+// nearly stops existing as a bus master. Sized to miss, the same port issues
+// thousands of line refills instead.
+//
+// None of the three loads the fabric, though — even the busiest leaves the
+// masters colliding in well under 1% of cycles. Pressure has to come from
+// somewhere other than this CPU, which is what [[VexZeroStressSpec]] supplies.
 //
 // The numbers it prints are the ones quoted in the README.
 // ---------------------------------------------------------------------------
@@ -72,11 +78,12 @@ class VexZeroProfileSpec extends AnyFunSuite {
     def contendedPct: Double = 100.0 * contendedCycles / cycles
   }
 
-  private def profile(cached: Boolean, label: String, name: String): Run = {
+  private def profile(cached: Boolean, dCache: Int, label: String, name: String): Run = {
     val socConfig = VexZeroSocConfig(
       ramSize = 32 KiB,
       maxOutstanding = 4,
       cachedCpu = cached,
+      dCacheSize = dCache,
       benchIoBase = Some(benchIoBase),
       bootImage = HexImage.loadWords(hexPath, ramBase)
     )
@@ -136,10 +143,13 @@ class VexZeroProfileSpec extends AnyFunSuite {
       s"$hexPath is missing — run: git submodule update --init third_party/VexRiscv"
     )
 
-    val simple = profile(cached = false, "uncached CPU", "vexzero_profile_uncached")
-    val cached = profile(cached = true, "cached CPU (4 KiB I$ + D$)", "vexzero_profile_cached")
+    val simple = profile(cached = false, 4096, "uncached CPU", "vexzero_profile_uncached")
+    val cached =
+      profile(cached = true, 4096, "cached, 4 KiB I$ + 4 KiB D$", "vexzero_profile_cached")
+    val missing =
+      profile(cached = true, 512, "cached, 4 KiB I$ + 512 B D$", "vexzero_profile_smalld")
 
-    for (run <- Seq(simple, cached)) {
+    for (run <- Seq(simple, cached, missing)) {
       println()
       println(s"  ---- ${run.label} ----")
       println(
@@ -169,6 +179,19 @@ class VexZeroProfileSpec extends AnyFunSuite {
       f"  contended      : ${simple.contendedPct}%.1f%% -> ${cached.contendedPct}%.1f%% of cycles"
     )
     println(f"  DMIPS/MHz      : ${simple.dmipsPerMhz}%.3f -> ${cached.dmipsPerMhz}%.3f")
+    println()
+    println("  ---- Sizing the data cache to miss ----")
+    println(
+      f"  data reads     : ${cached.stats(1).arCount}%,d -> ${missing.stats(1).arCount}%,d, " +
+        f"of which bursts ${cached.stats(1).readLens.getOrElse(7, 0L)}%,d -> " +
+        f"${missing.stats(1).readLens.getOrElse(7, 0L)}%,d"
+    )
+    println(
+      f"  data writes    : ${cached.stats(1).awCount}%,d -> ${missing.stats(1).awCount}%,d, " +
+        f"of which bursts ${cached.stats(1).writeLens.count(_._1 > 0)}%d -> " +
+        f"${missing.stats(1).writeLens.count(_._1 > 0)}%d (write-through: never any)"
+    )
+    println(f"  DMIPS/MHz      : ${cached.dmipsPerMhz}%.3f -> ${missing.dmipsPerMhz}%.3f")
     println()
 
     // -- Uncached: maximum coverage, minimum pressure -------------------------
@@ -225,9 +248,28 @@ class VexZeroProfileSpec extends AnyFunSuite {
     // depth, and cost the fabric almost all of its occupancy. Neither run leaves
     // the crossbar under load, so neither run's score says much about it.
     assert(
-      cached.contendedPct < 1.0,
-      f"cached Dhrystone contended for ${cached.contendedPct}%.1f%% of cycles — if that is no " +
-        "longer negligible, this comparison and the README text around it need revisiting"
+      cached.contendedPct < 1.0 && missing.contendedPct < 1.0,
+      f"cached Dhrystone contended for ${cached.contendedPct}%.1f%% / " +
+        f"${missing.contendedPct}%.1f%% of cycles — if that is no longer negligible, this " +
+        "comparison and the README text around it need revisiting"
+    )
+
+    // -- Sizing the data cache to miss brings the load/store port back --------
+    val mData = missing.stats(1)
+    assert(
+      mData.readLens.getOrElse(7, 0L) > 1000,
+      s"a 512 B data cache should miss constantly, but the port issued only " +
+        s"${mData.readLens.getOrElse(7, 0L)} line refills: ${mData.readSummary}"
+    )
+    assert(
+      mData.arCount > 40 * cData.arCount,
+      s"shrinking the data cache barely changed its traffic (${cData.arCount} -> ${mData.arCount})"
+    )
+    // The point that survives every configuration: no data cache size, and no
+    // cache at all, ever makes this CPU issue a write burst.
+    assert(
+      mData.writeLens.keys.forall(_ == 0) && sData.writeLens.keys.forall(_ == 0),
+      s"a write burst appeared, so VexRiscv is no longer write-through: ${mData.writeSummary}"
     )
   }
 }

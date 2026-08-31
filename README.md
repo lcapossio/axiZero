@@ -70,7 +70,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - Standalone AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster
 - VexRiscv example SoC: a RISC-V core booting through the crossbar into a mixed AXI4 / AXI4-Lite address map, in simulation and on an Arty A7-100T
 - Dhrystone 2.1 on that SoC, in simulation and on the board, with per-port AXI latency and occupancy measured at the crossbar
-- A system-level stress test: the same SoC with caches on and a third master saturating the fabric — 85.7% of cycles contended, 859,209 burst beats checked against their expected values while the program on top still passes all 20 of its own self-checks
+- A system-level stress test: the same SoC with caches on and a third master saturating the fabric — 99.9% occupied and 60.4% of cycles contended, 971,146 burst beats checked against their expected values while the program on top still passes all 20 of its own self-checks
 - The same SoC on two FPGA families — Xilinx Artix-7 and Altera Agilex 5 — with a JTAG-to-AXI bridge acting as a third bus master on the board that has no UART
 
 **Not yet implemented:**
@@ -642,17 +642,17 @@ rather than asserting.
 [`VexZeroProfileSpec`](hw/examples/vexriscv/sim/vexzero/sim/VexZeroProfileSpec.scala) counts what
 the crossbar was actually asked for during a run, at its master ports:
 
-| | Uncached CPU | Cached CPU (4 KiB I$ + D$) |
-|---|---:|---:|
-| Transactions | 189,937 | 21,190 |
-| Beats carried | 189,937 | 37,921 |
-| Instruction fetch | 153,187 × 1-beat | 2,328 × **8-beat** |
-| Data reads | 17,953 × 1-beat | 63 × 8-beat, 2 × 1-beat |
-| Data writes | 18,797 × 1-beat | 18,797 × 1-beat |
-| Peak in flight, any port | 2 | 4 |
-| Cycles with any request | 36.5% | 8.2% |
-| **Cycles with two masters requesting** | **1.1%** | **0.0%** |
-| DMIPS/MHz | 0.347 | 0.687 |
+| | Uncached | Cached, 4 KiB D$ | Cached, 512 B D$ |
+|---|---:|---:|---:|
+| Transactions | 189,937 | 21,190 | 24,454 |
+| Beats carried | 189,937 | 37,921 | 64,033 |
+| Instruction fetch | 153,187 × 1-beat | 2,328 × **8-beat** | 2,328 × **8-beat** |
+| Data reads | 17,953 × 1-beat | 63 × 8-beat | **3,327 × 8-beat** |
+| Data writes | 18,797 × 1-beat | 18,797 × 1-beat | 18,797 × 1-beat |
+| Peak in flight, any port | 2 | 4 | 4 |
+| Cycles with any request | 36.5% | 8.2% | 7.9% |
+| **Cycles with two masters requesting** | **1.1%** | **0.0%** | **0.0%** |
+| DMIPS/MHz | 0.347 | 0.687 | 0.526 |
 
 Coverage is maximal and pressure is minimal. With no caches every instruction and every load or
 store crosses the crossbar — bus traffic *is* the whole program — but all 189,937 transactions are
@@ -663,12 +663,24 @@ under contention are simply not on trial.
 
 Turning the caches on (`cachedCpu = true`) buys the bursts — each miss becomes an 8-beat INCR line
 refill — and nearly doubles DMIPS/MHz, but it makes the *pressure* problem worse, not better: the
-hit rate is so high that the fabric goes idle 92% of the time and contention falls to zero. Writes
-do not change at all, because VexRiscv's data cache is write-through on a 32-bit bus, so every
-store still leaves as a single beat.
+hit rate is so high that the fabric goes idle 92% of the time and contention falls to zero.
 
-So neither configuration loads the interconnect. The pressure has to come from somewhere other than
-this CPU.
+Two things about the load/store port are worth stating plainly, because they bound what any
+workload on this CPU can prove:
+
+- **Cache size decides whether that port is a bus master at all.** Dhrystone's data working set
+  fits inside 4 KiB with room to spare, so a 4 KiB data cache misses 63 times in a whole run.
+  Sized to miss (`dCacheSize = 512`), the same port issues 3,327 line refills instead — a 50×
+  difference in how hard it works the fabric, for a 24% drop in score. The stress test below uses
+  the small one for exactly that reason.
+- **No configuration makes this CPU write in bursts.** VexRiscv's data cache has no dirty bit, so
+  it is write-through by construction, and the write-aggregation buffer that could merge stores
+  exists only on its BMB port and emits one wide beat rather than a burst. All 18,797 stores are
+  single beats in every column above. Write bursts have to come from a different kind of master —
+  in a real system a DMA engine, and here the traffic generator below.
+
+So no configuration of this CPU loads the interconnect. The pressure has to come from somewhere
+else.
 
 ### Stress — the crossbar under load
 
@@ -688,33 +700,37 @@ Every host burst carries the value it expects, so this is a checker and not only
 that mis-routed a beat, dropped one or returned another master's data fails here rather than merely
 running slowly.
 
-| | Dhrystone alone (cached) | Dhrystone + host traffic |
+Both columns below use the 512 B data cache, so the comparison isolates what the third master
+adds rather than mixing in a cache-size change:
+
+| | Dhrystone alone | Dhrystone + host traffic |
 |---|---:|---:|
-| Cycles with any request | 8.2% | **99.8%** |
-| Cycles with two or more masters requesting | 0.0% | **85.7%** |
+| Cycles with any request | 7.9% | **99.9%** |
+| Cycles with two or more masters requesting | 0.0% | **60.4%** |
 | Longest burst | 8 beats | 16 beats |
-| Beats carried | 37,921 | 897,137 |
-| Instruction-fetch latency | 10.0 cycles | 25.0 cycles |
-| Host read-burst latency | — | 42.0 cycles |
-| Host beats checked | — | 859,209, **0 mismatches** |
+| Transactions / beats | 24,454 / 64,033 | 85,153 / 1,035,185 |
+| Instruction-fetch latency | 10.0 cycles | 23.8 cycles |
+| Data-read latency | 10.0 cycles | 34.0 cycles |
+| Host read-burst latency | — | 42.5 cycles |
+| Host beats checked | — | 971,146, **0 mismatches** |
 | Dhrystone self-checks | 20/20 pass | 20/20 pass, exit 0 |
 
-Latency rising from 10 to 25 cycles is the point: under Dhrystone alone the crossbar never queued,
-and here it queues constantly, while the program on top still computes every one of its results
-correctly.
+Latency rising from 10 to 24–34 cycles is the point: under Dhrystone alone the crossbar never
+queued, and here it queues constantly, while the program on top still computes every one of its
+results correctly.
 
-**Pipelined against blocking, under real load.** With the fabric at 99.8% occupancy the two modes
-come out level — 53,700 host transactions in 895,467 cycles pipelined against 52,583 in 880,430
-blocking, a 0.4% difference in transactions per cycle, with Dhrystone itself 2.1% *slower* on the
-pipelined path. That is not a defect: this load is bandwidth-bound at a single RAM slave, and
-allowing more transactions outstanding to one slave reorders who waits rather than creating
-bandwidth that is not there. The pipelined path's advantage is concurrency across *different*
-slaves, which is what
+**Pipelined against blocking, under real load.** With the fabric at 99.9% occupancy the two modes
+come out level — 85,153 transactions in 1,033,503 cycles pipelined against 82,548 in 999,762
+blocking, 0.2% apart in transactions per cycle. How the bandwidth is split differs, though: the
+pipelined path completes 4.5% more host bursts and costs Dhrystone 4.3% in timed cycles. That is
+not a defect. This load is bandwidth-bound at a single RAM slave, and allowing more transactions
+outstanding to one slave reorders who waits rather than creating bandwidth that is not there. The
+pipelined path's advantage is concurrency across *different* slaves, which is what
 [`PipelinedArbitrationSpec`](hw/sim/axizero/sim/PipelinedArbitrationSpec.scala) measures directly.
 
 Test conditions: SpinalSim + Verilator, 3-master × 4-slave `AxiZeroMixedTop`, round-robin, 64 KB
-on-chip RAM, VexRiscv RV32I with 4 KiB one-way 32-byte-line I$ and D$, Dhrystone 2.1 `-O3`, 200
-runs. The host reads the program text back from where it is being fetched and round-trips a pattern
+on-chip RAM, VexRiscv RV32I with a 4 KiB one-way instruction cache and a 512 B data cache, both
+32-byte lines, Dhrystone 2.1 `-O3`, 200 runs. The host reads the program text back from where it is being fetched and round-trips a pattern
 through the unused top 16 KB of RAM.
 
 ### A second board — DE25-Nano (Agilex 5)

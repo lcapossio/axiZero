@@ -27,7 +27,9 @@ import vexzero._
 //
 //   the CPU     runs the same unmodified Dhrystone, with caches on, so its
 //               traffic is line refills — eight-beat INCR bursts — rather than
-//               one transaction per instruction.
+//               one transaction per instruction. The data cache is deliberately
+//               small: Dhrystone's working set fits in 4 KiB, and a data cache
+//               that never misses is a load/store port that never uses the bus.
 //
 //   the host    occupies the SoC's third master port, the one a debug cable
 //               uses on the DE25-Nano, and drives it as hard as it will go:
@@ -100,6 +102,10 @@ class VexZeroStressSpec extends AnyFunSuite {
       ramSize = ramSize,
       maxOutstanding = maxOutstanding,
       cachedCpu = true,
+      // Sized to miss. At 4 KiB this port issues 63 reads in a whole run; at
+      // 512 B it issues thousands, all of them line refills, which is the only
+      // way the load/store port contributes bursts to the load at all.
+      dCacheSize = 512,
       hostMaster = true,
       benchIoBase = Some(benchIoBase),
       bootImage = image
@@ -245,6 +251,13 @@ class VexZeroStressSpec extends AnyFunSuite {
     assert(
       run.stats(0).readLens.contains(7),
       s"${run.label}: instruction fetch issued no line refill: ${run.stats(0).readSummary}"
+    )
+    // Both CPU ports have to be pulling their weight, not just the fetcher.
+    assert(
+      run.stats(1).readLens.getOrElse(7, 0L) > 1000,
+      s"${run.label}: the load/store port issued only " +
+        s"${run.stats(1).readLens.getOrElse(7, 0L)} line refills, so it is barely on the bus: " +
+        s"${run.stats(1).readSummary}"
     )
 
     // 3. And it really was contended, which is what makes 1 mean anything.
