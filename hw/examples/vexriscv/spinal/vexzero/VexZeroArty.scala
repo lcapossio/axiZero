@@ -60,43 +60,16 @@ class VexZeroArty(
     val soc = new VexZeroSoc(socConfig)
     soc.io.switches := BufferCC(io.sw)
 
-    val done = soc.io.status === B(Firmware.doneMarker, 32 bits)
+    // The judging is shared with the DE25-Nano wrapper; this one reports the
+    // answer on a serial line.
+    val checks         = VexZeroChecks(soc, socConfig)
+    val done           = checks.done
+    val resultOk       = checks.resultOk
+    val charsOk        = checks.charsOk
+    val ledsOk         = checks.ledsOk
+    val switchesAtBoot = checks.switchesAtBoot
 
-    // ── Check 1: the value the firmware computed ─────────────────────────
-    // result = Σ RAM words + switches. Hold the switch sample until the
-    // firmware is done, so flipping a switch afterwards cannot fake a
-    // failure — the firmware read them once, early.
-    val switchesAtBoot = Reg(Bits(socConfig.switchWidth bits)) init (0)
-    when(!done) { switchesAtBoot := soc.io.switches }
-
-    val expectedResult =
-      U(Firmware.checksum, 32 bits) + switchesAtBoot.asUInt.resize(32 bits)
-    val resultOk = soc.io.result.asUInt === expectedResult
-
-    // ── Check 2: the character stream ────────────────────────────────────
-    val expectedChars = Vec(Firmware.chars.map(c => B(c.toInt, 8 bits)))
-    val charIndex     = Reg(UInt(2 bits)) init (0)
-    val charSeen      = Reg(Bool()) init (True)
-    when(soc.io.charOut.valid) {
-      when(charIndex === Firmware.chars.length) {
-        charSeen := False // more characters than the program emits
-      } otherwise {
-        when(soc.io.charOut.payload =/= expectedChars(charIndex)) {
-          charSeen := False
-        }
-        charIndex := charIndex + 1
-      }
-    }
-    val charsOk = charSeen && charIndex === Firmware.chars.length
-
-    // ── Check 3: the GPIO LED register the firmware wrote ────────────────
-    val ledsOk =
-      soc.io.leds === B(
-        Firmware.checksum & ((1L << socConfig.ledWidth) - 1),
-        socConfig.ledWidth bits
-      )
-
-    val pass = done && resultOk && charsOk && ledsOk
+    val pass = checks.pass
 
     // ── LEDs ─────────────────────────────────────────────────────────────
     val heartbeat = Reg(UInt(26 bits)) init (0)
