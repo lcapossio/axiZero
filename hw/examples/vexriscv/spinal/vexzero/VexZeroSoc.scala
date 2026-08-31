@@ -5,6 +5,7 @@ package vexzero
 import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba4.axi._
+import vexriscv.ip.{DataCacheConfig, InstructionCacheConfig}
 import vexriscv.plugin._
 import vexriscv.{plugin, VexRiscv, VexRiscvConfig}
 import axizero._
@@ -62,6 +63,17 @@ case class VexZeroSocConfig(
     * exist for the SoC to elaborate.
     */
   hostMaster: Boolean = false,
+  /** Give the CPU caches, which changes the shape of its bus traffic completely.
+    *
+    * Uncached, every instruction and every load is one single-beat transaction, so the crossbar
+    * sees a great many tiny requests and never a burst. Cached, a miss fetches a whole line as one
+    * INCR burst and the two ports run far more independently, which is what a crossbar is actually
+    * built for. The address map is unchanged: the peripheral region is marked as IO and stays
+    * uncached, so the same firmware and the same benchmark binaries run either way.
+    */
+  cachedCpu: Boolean = false,
+  /** Bytes of instruction and data cache, when `cachedCpu`. One way, 32-byte lines. */
+  cacheSize: Int = 4096,
   /** Depth of the benchmark console buffer the host drains over the bus.
     *
     * 0 keeps the console a stream for a UART. Anything else is for a board with no serial port; see
@@ -148,14 +160,20 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   )
 
   // ── CPU ──────────────────────────────────────────────────────────────────
-  val cpuConfig = VexZeroSoc.cpuConfig(cfg.ramBase)
-  val cpu       = new VexRiscv(cpuConfig)
+  val cpuConfig =
+    if (cfg.cachedCpu) VexZeroSoc.cachedCpuConfig(cfg.ramBase, cfg.cacheSize)
+    else VexZeroSoc.cpuConfig(cfg.ramBase)
+  val cpu = new VexRiscv(cpuConfig)
 
   private var iBus: Axi4ReadOnly = null
   private var dBus: Axi4Shared   = null
   for (p <- cpuConfig.plugins) p match {
     case p: IBusSimplePlugin => iBus = p.iBus.toAxi4ReadOnly()
     case p: DBusSimplePlugin => dBus = p.dBus.toAxi4Shared()
+    case p: IBusCachedPlugin => iBus = p.iBus.toAxi4ReadOnly()
+    // stageCmd: the cache's command path is registered before it reaches AXI, which keeps the
+    // combinational ring described above from re-forming through the cache's own hazard logic.
+    case p: DBusCachedPlugin => dBus = p.dBus.toAxi4Shared(true)
     case _                   =>
   }
 
@@ -251,6 +269,85 @@ object VexZeroSoc {
         catchAccessFault = false,
         earlyInjection = false
       ),
+      new DecoderSimplePlugin(catchIllegalInstruction = false),
+      new RegFilePlugin(
+        regFileReadyKind = plugin.SYNC,
+        zeroBoot = true,
+        writeRfInMemoryStage = false
+      ),
+      new IntAluPlugin,
+      new SrcPlugin(separatedAddSub = false, executeInsertion = false),
+      new LightShifterPlugin,
+      new HazardSimplePlugin(
+        bypassExecute = true,
+        bypassMemory = true,
+        bypassWriteBack = true,
+        bypassWriteBackBuffer = true,
+        pessimisticUseSrc = false,
+        pessimisticWriteRegFile = false,
+        pessimisticAddressMatch = false
+      ),
+      new BranchPlugin(earlyBranch = false, catchAddressMisaligned = false)
+    )
+  )
+
+  /** The same CPU with an instruction and a data cache in front of the bus.
+    *
+    * This is not here to make the example faster — it is here so the example asks the crossbar for
+    * something a crossbar is built to answer. Uncached, VexRiscv issues one single-beat transaction
+    * per instruction and never has more than one read in flight, so a run says nothing about burst
+    * handling, response routing or arbitration under load. Cached:
+    *
+    *   - a miss fetches a whole 32-byte line as one 8-beat INCR read burst;
+    *   - dirty lines leave as 8-beat write bursts, and `DataCache.toAxi4Shared` allows seven writes
+    *     outstanding rather than one;
+    *   - the two ports decouple, because neither one stalls the pipeline on every access any more.
+    *
+    * The address map does not change. `StaticMemoryTranslatorPlugin` marks everything at 0xF???????
+    * as IO, so the GPIO, system-control and benchmark-console accesses bypass the cache and reach
+    * their slaves as ordinary single beats — the same firmware and the same prebuilt benchmark
+    * binaries run unmodified either way.
+    *
+    * Exception catching is off throughout, which is what keeps `CsrPlugin` out of the list: the
+    * example has no trap handler to run, and a faulting access would be a test failure anyway.
+    */
+  def cachedCpuConfig(resetVector: BigInt, cacheSize: Int = 4096): VexRiscvConfig = VexRiscvConfig(
+    plugins = List(
+      new IBusCachedPlugin(
+        resetVector = resetVector.toLong,
+        prediction = NONE,
+        compressedGen = false,
+        config = InstructionCacheConfig(
+          cacheSize = cacheSize,
+          bytePerLine = 32,
+          wayCount = 1,
+          addressWidth = 32,
+          cpuDataWidth = 32,
+          memDataWidth = 32,
+          catchIllegalAccess = false,
+          catchAccessFault = false,
+          asyncTagMemory = false,
+          twoCycleRam = false,
+          twoCycleCache = true
+        )
+      ),
+      new DBusCachedPlugin(
+        config = DataCacheConfig(
+          cacheSize = cacheSize,
+          bytePerLine = 32,
+          wayCount = 1,
+          addressWidth = 32,
+          cpuDataWidth = 32,
+          memDataWidth = 32,
+          catchAccessError = false,
+          catchIllegal = false,
+          catchUnaligned = false
+        )
+      ),
+      // Everything in the peripheral window is IO, so it is never cached. The window is the top
+      // nibble rather than the three individual slaves because that is what the address map
+      // already reserves, and a cached peripheral write is a silent failure rather than a loud one.
+      new StaticMemoryTranslatorPlugin(ioRange = _(31 downto 28) === 0xf),
       new DecoderSimplePlugin(catchIllegalInstruction = false),
       new RegFilePlugin(
         regFileReadyKind = plugin.SYNC,
