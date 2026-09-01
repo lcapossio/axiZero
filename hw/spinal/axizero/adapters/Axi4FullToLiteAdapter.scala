@@ -55,7 +55,14 @@ class Axi4FullToLiteAdapter(fullCfg: Axi4Config, liteCfg: Axi4Config) extends Co
     // ── B ───────────────────────────────────────────────────────────────────
     io.full.b.valid := io.lite.b.valid
     io.full.b.payload.clearAll()
-    io.full.b.id.allowOverride                                           := pendingWrId
+    // A Lite slave may answer in the same cycle it accepts the address -- AXI
+    // permits BVALID with AWREADY -- and then the register above has not
+    // updated yet and still holds the previous transaction's ID. Responses are
+    // routed back to masters by ID, so using the stale one delivers the
+    // response to the wrong master. Take the live ID whenever AW is firing;
+    // the single-outstanding assert above rules out any ambiguity between the
+    // two sources.
+    io.full.b.id.allowOverride := Mux(io.full.aw.fire, io.full.aw.id, pendingWrId)
     if (fullCfg.useResp && liteCfg.useResp) io.full.b.resp.allowOverride := io.lite.b.resp
     io.lite.b.ready                                                      := io.full.b.ready
   } else {
@@ -95,8 +102,10 @@ class Axi4FullToLiteAdapter(fullCfg: Axi4Config, liteCfg: Axi4Config) extends Co
     // ── R ───────────────────────────────────────────────────────────────────
     io.full.r.valid := io.lite.r.valid
     io.full.r.payload.clearAll()
-    io.full.r.id.allowOverride                                           := pendingRdId
-    io.full.r.data.allowOverride                                         := io.lite.r.data.resized
+    // Same race as B above, and this one is not theoretical: a register file
+    // that registers ARREADY and RVALID together answers on the cycle AR fires.
+    io.full.r.id.allowOverride   := Mux(io.full.ar.fire, io.full.ar.id, pendingRdId)
+    io.full.r.data.allowOverride := io.lite.r.data.resized
     if (fullCfg.useResp && liteCfg.useResp) io.full.r.resp.allowOverride := io.lite.r.resp
     if (fullCfg.useLast) io.full.r.last.allowOverride := True // Lite is always single-beat
     io.lite.r.ready                                   := io.full.r.ready

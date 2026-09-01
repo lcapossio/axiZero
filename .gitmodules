@@ -5,3 +5,7 @@
 [submodule "third_party/VexRiscv"]
 	path = third_party/VexRiscv
 	url = https://github.com/SpinalHDL/VexRiscv.git
+[submodule "third_party/vtpgZero"]
+	path = third_party/vtpgZero
+	url = https://github.com/lcapossio/vtpgZero.git
+	branch = main

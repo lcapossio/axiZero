@@ -40,6 +40,7 @@ Hardware-validated on Xilinx Arty A7-100T. 103 SpinalSim + 36 cocotb tests pass.
   - [What Dhrystone does not test](#what-dhrystone-does-not-test)
   - [Stress — the crossbar under load](#stress--the-crossbar-under-load)
   - [QoS, and when it stops working](#qos-and-when-it-stops-working)
+  - [Video — a third-party IP core writing frames to RAM](#video--a-third-party-ip-core-writing-frames-to-ram)
   - [A second board — DE25-Nano (Agilex 5)](#a-second-board--de25-nano-agilex-5)
 - [Hardware validation — Arty A7-100T](#hardware-validation--arty-a7-100t)
 - [Port naming](#port-naming)
@@ -73,6 +74,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - Dhrystone 2.1 on that SoC, in simulation and on the board, with per-port AXI latency and occupancy measured at the crossbar
 - A system-level stress test: the same SoC with caches on and a third master saturating the fabric — 99.9% occupied and 60.4% of cycles contended, 971,146 burst beats checked against their expected values while the program on top still passes all 20 of its own self-checks
 - QoS measured where it matters: ranking the masters moves 9.2 points of bus share with 4-beat bursts and 0.3 with 16-beat ones, because the crossbar's anti-starvation age boost erases a priority gap that is smaller than the wait
+- A third-party video IP core (vtpgZero) as a fourth master, writing real 16-beat frames into RAM while the CPU runs from it — the only bursting write master in the design, and the one that found a response-routing bug in the Lite adapter
 - The same SoC on two FPGA families — Xilinx Artix-7 and Altera Agilex 5 — with a JTAG-to-AXI bridge acting as a third bus master on the board that has no UART
 
 **Not yet implemented:**
@@ -777,6 +779,78 @@ sbt "vexZero/testOnly *VexZeroStressSpec"    # both the load and the QoS experim
 Test conditions: as above, plus `QosBased` arbitration and a fixed 300,000-cycle window per run
 rather than a whole Dhrystone — the question is how the bus was shared, and the test above already
 establishes that the program finishes correctly under the same load.
+
+### Video — a third-party IP core writing frames to RAM
+
+Every write in the sections above is a single beat, and that is a property of VexRiscv rather than
+of the crossbar: its data cache has no dirty bit, so it is write-through by construction and no
+setting makes it burst. The only bursting write master so far has been `HostTraffic`, which is
+Scala and exists only in simulation.
+
+[vtpgZero](https://github.com/lcapossio/vtpgZero) is neither. It is a synthesizable video test
+pattern generator, carried as a pinned submodule, and it joins the SoC as **two** ports at once: a
+write-only AXI4 master that fills a framebuffer in RAM, and the AXI4-Lite slave that programs it.
+Putting the control window on the fabric rather than beside it means configuring the generator is
+itself arbitrated bus traffic.
+
+```
+  vtpgz_axilite_top ──AXI4-Stream──> axis_to_ddr_writer ──AXI4 write bursts──> crossbar ──> RAM
+         ▲
+         └── AXI4-Lite, a slave on the same crossbar
+```
+
+Both modules are plain Verilog-2001 with no vendor primitives, so unlike the JTAG bridge this
+blackbox **simulates**: Verilator compiles the submodule's own sources, and the traffic in the test
+is the traffic the board would produce. A 32×32 frame becomes:
+
+| | |
+|---|---|
+| Write bursts | 64 |
+| Write beats | 1,024 |
+| Burst lengths | 16-beat × 64 |
+| Read commands | **0** — the writer's read channel is tied off |
+| Pixels verified | 1,024 of 1,024 |
+
+Three things here are new to this interconnect: write bursts from real hardware, a **write-only
+master** (a port shape nothing else here has), and a burst length that varies, since the writer
+flushes a short burst at the end of a frame rather than only full ones.
+
+```
+git submodule update --init third_party/vtpgZero
+sbt "vexZero/testOnly *VexZeroVideoSpec"
+```
+
+Test conditions: SpinalSim + Verilator, 4-master × 4-slave `AxiZeroMixedTop`, round-robin,
+`maxOutstanding = 4`, 64 KB on-chip RAM, framebuffer at RAM + 0xC000, 32×32 solid-colour frame at
+one pixel per clock. Solid colour is deliberate: every pixel of every frame is then the same
+predictable `{R,G,B,0xFF}` word, so the read-back checks all 1,024 exactly and a burst landing at
+the wrong address fails rather than merely looking wrong.
+
+vtpgZero is Apache-2.0; it is referenced as a submodule, not vendored into this MIT-licensed tree.
+Initialise it non-recursively — it carries its own `fcapz` submodule pointing at the same
+fpgacapZero this repository already pins at v0.4.9, and a recursive init would clone a second copy
+at a different commit.
+
+#### What integrating it found
+
+A third-party core is worth more than a testbench precisely because it does not do what your
+testbench does. This one answers reads **in the same cycle it accepts the address** — it raises
+ARREADY and RVALID from one register, which AXI permits and small register files commonly do.
+
+`Axi4FullToLiteAdapter` could not carry that. It returned each response with an ID captured into a
+register on the address handshake, and a register updates at the end of the cycle, so a same-cycle
+response went out tagged with the *previous* transaction's ID. The pipelined crossbar routes
+responses to masters by ID, so the answer never reached the master that asked and that master
+waited forever. The adapter now takes the live ID whenever the address is firing in that cycle, on
+both the read and the write path.
+
+Two things kept it hidden. It needs the pipelined crossbar — the blocking path remembers which
+master it granted and never consults the ID — and it needs a slave that answers this fast, where
+every other Lite slave here holds READY combinationally and answers a cycle later.
+[`LiteSameCycleResponseSpec`](hw/sim/axizero/sim/LiteSameCycleResponseSpec.scala) now pins it with
+a slave modelled on the one that found it. Revert the fix and it reports the failure exactly:
+master 1's read is answered to master 0, whose ID is the zero the register resets to. A test using
+only master 0 would have passed throughout.
 
 ### A second board — DE25-Nano (Agilex 5)
 

@@ -27,6 +27,12 @@ import axizero._
 // reads the very registers the firmware wrote, arbitrated against the CPU by
 // the crossbar under test. See [[JtagAxi]].
 //
+// `videoBase` adds a fourth: a video test pattern generator that writes frames
+// into the same RAM the CPU runs from, and the AXI4-Lite slave that programs
+// it. It is the only master here that produces write bursts -- VexRiscv cannot
+// -- and it is a third-party Verilog core rather than something written for
+// this example. See [[VtpgZero]].
+//
 // Response ordering
 // ─────────────────
 // maxOutstanding > 1 selects the pipelined crossbar, which routes B/R by ID.
@@ -65,6 +71,16 @@ case class VexZeroSocConfig(
   cpuQos: Int = 0,
   /** Boot image words. Empty means "assemble Firmware for this memory map". */
   bootImage: Seq[Long] = Nil,
+  /** Base of the video generator's control window, or None to leave the video path out entirely.
+    *
+    * Setting this adds two ports at once: a write-only AXI4 master that fills a framebuffer in RAM,
+    * and the AXI4-Lite slave that programs it. See [[VtpgZero]] for why a video core is the only
+    * master here that produces write bursts.
+    */
+  videoBase: Option[BigInt] = None,
+  /** Frame geometry, burst length and AXQOS of the video path. Ignored unless `videoBase` is set.
+    */
+  videoConfig: VtpgZeroConfig = VtpgZeroConfig(),
   /** Base of the benchmark console, or None to leave it out of the crossbar.
     *
     * Set it to run a prebuilt VexRiscv regression binary (Dhrystone among them): the address is
@@ -136,8 +152,14 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   // host bridge drive a constant), so AxiZeroMixedTop's effective master ID
   // width is 1 and the slave side widens by the master index: 2 masters give
   // slaveIdW 2, and 3 masters give 3.
-  private val masterCount = if (cfg.hostMaster) 3 else 2
-  private val masterCfg   = VexZeroSoc.masterCfg
+  private val hasVideo    = cfg.videoBase.isDefined
+  private val masterCount = 2 + (if (cfg.hostMaster) 1 else 0) + (if (hasVideo) 1 else 0)
+
+  // Masters are added in a fixed order so an index never moves under a config
+  // that leaves one of them out: fetch, load/store, then the host, then video.
+  private val hostIndex  = Option.when(cfg.hostMaster)(2)
+  private val videoIndex = Option.when(hasVideo)(2 + (if (cfg.hostMaster) 1 else 0))
+  private val masterCfg  = VexZeroSoc.masterCfg
   private val fullSlaveCfg =
     Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = masterCfg.idWidth + log2Up(masterCount))
   private val liteSlaveCfg = Axi4Config(
@@ -171,6 +193,8 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
       MasterPort(masterCfg, FullAxi4, regSlice = true)  // M1 — load / store
     ) ++ Option.when(cfg.hostMaster)(
       MasterPort(masterCfg, FullAxi4, regSlice = true) // M2 — debug cable
+    ) ++ Option.when(hasVideo)(
+      MasterPort(masterCfg, FullAxi4, regSlice = true) // M3 — video writer
     ),
     slaves = Seq(
       SlavePort(fullSlaveCfg, FullAxi4, cfg.ramBase, cfg.ramSize),
@@ -178,6 +202,8 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
       SlavePort(liteSlaveCfg, LiteAxi4, cfg.sysCtrlBase, cfg.peripheralSize)
     ) ++ cfg.benchIoBase.map(
       SlavePort(liteSlaveCfg, LiteAxi4, _, VexZeroBenchIo.windowSize)
+    ) ++ cfg.videoBase.map(
+      SlavePort(liteSlaveCfg, LiteAxi4, _, VtpgZero.windowSize)
     ),
     arbitration = cfg.arbitration,
     maxOutstanding = cfg.maxOutstanding
@@ -271,6 +297,32 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
     io.bench.done     := peripheral.io.done
     io.bench.exitCode := peripheral.io.exitCode
     peripheral
+  }
+
+  // ── The video path — one master and one slave ────────────────────────────
+  // The generator's control window sits on the fabric rather than beside it,
+  // so programming it is bus traffic too: the CPU's configuration writes are
+  // arbitrated against the frames the same core is writing back into RAM.
+  val video = cfg.videoBase.map { _ =>
+    val core = new VtpgZeroVideo(cfg.videoConfig, masterCfg, liteSlaveCfg)
+    fabric.io.masters(videoIndex.get) << core.io.mem
+    core.io.ctrl <> fabric.io.slaves(3 + (if (cfg.benchIoBase.isDefined) 1 else 0))
+    core.io.frameSync := False
+    core
+  }
+
+  // The framebuffer has to land somewhere the writer can actually reach, and a
+  // frame that runs off the end of RAM would be silently dropped by the
+  // crossbar's decode rather than reported.
+  if (hasVideo) {
+    val vc  = cfg.videoConfig
+    val end = vc.frameBase + vc.frameBytes
+    require(
+      vc.frameBase >= cfg.ramBase && end <= cfg.ramBase + cfg.ramSize,
+      s"a ${vc.width}x${vc.height} frame at 0x${vc.frameBase.toString(16)} runs from " +
+        s"0x${vc.frameBase.toString(16)} to 0x${end.toString(16)}, which is not inside the " +
+        s"${cfg.ramSize} byte RAM at 0x${cfg.ramBase.toString(16)}"
+    )
   }
 }
 
