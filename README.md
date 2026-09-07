@@ -1144,16 +1144,33 @@ All 3 tests pass (g\_fail=0, g\_pass=3).
 Topology: MicroBlaze QoS=15 plus 3 hardware traffic generators (QoS=8/4/0) → axiZero 4M×4S QoS → same slaves as base test.
 Each generator issues 512 words × 8 passes per iteration with intentionally different patterns:
 
-- **G0** (QoS=8): sequential writes to BRAM0
-- **G1** (QoS=4): reverse-order writes to BRAM1
-- **G2** (QoS=0): LFSR-based random short bursts (len 1–4) to BRAM1
+- **G0** (QoS=8): sequential writes to BRAM0, each word read back and compared in hardware
+- **G1** (QoS=4): reverse-order writes to BRAM1, each word read back and compared in hardware
+- **G2** (QoS=0): saturating generator on a 128-word BRAM1 window, 64 passes — bursts of 1, 2, 4 and 8 beats (one length per pass) with up to 4 outstanding, every word read back and compared. Fewer words and more passes than the other two, chosen so its beat count matches theirs even though bursts retire faster
+
+The generators drive the read address channel as well as the write one, so AR
+arbitration sees generated traffic at each generator's own QoS rather than the
+CPU alone, and G2 keeps several bursts in flight at once, which is the case the
+crossbar's per-slave W-route FIFO exists for. Each generator ends its run by
+writing a status word of its own:
+
+```
+status = TAG | (resp_errors << 8) | data_errors
+```
+
+so a clean run leaves the bare tag, and the firmware can tell "never finished"
+apart from "finished and found errors". A read beat that is dropped or
+mis-routed therefore fails on hardware, not only in simulation.
 
 `run_qos_stress_test.py` monitors the board continuously for 10 minutes and fails if:
 - `g_fail` becomes non-zero,
 - heartbeat (`g_heartbeat`) stops advancing for 30 seconds,
-- no stress iteration (`g_iteration`) completes.
+- no stress iteration (`g_iteration`) completes,
+- `g_pass` does not match the number of completed iterations (one sanity check
+  at startup plus a fixed 6 sub-tests per iteration, so a build where they
+  silently stopped running can no longer pass on a live heartbeat alone).
 
-Result: 14 000+ iterations, 70 000+ passes, 0 failures over 10 minutes.
+Result over a 10-minute continuous run on an Arty A7-100T at 100 MHz (Vivado 2025.2, `xc7a100tcsg324-1`): **12,734 iterations, 76,400 sub-test checks, 0 failures**, with all three generators reporting a clean read-back status on every iteration. The load is deterministic now that no generator randomises its addresses or data — two consecutive runs reach the same iteration count and agree at every 5-second sample — so a change in the numbers is a change in the design, not in the weather.
 
 ### AXI3 adapter test (1M×4S, AXI3 bridge in data path)
 

@@ -29,6 +29,12 @@ BIT_FILE = PROJ_DIR / "axizero_arty_qos_stress.runs" / "impl_1" / "system_wrappe
 ELF_FILE = SW_DIR / "build" / "main_qos_stress_le.elf"
 
 CREATE_TCL = SCRIPT_DIR / "create_project_qos_stress.tcl"
+# Sub-tests that call pass() once per completed iteration of the firmware's
+# stress loop, and the one-off sanity test it runs before entering the loop.
+# Kept in step with main_qos_stress.c.
+CHECKS_PER_ITER = 6
+CHECKS_ONCE = 1
+
 RUN_SECONDS = 10 * 60
 POLL_SECONDS = 5
 STUCK_SECONDS = 30
@@ -249,6 +255,14 @@ if {{$it_end == 0 && $status == "PASS"}} {{
     set status "FAIL_NO_PROGRESS"
 }}
 
+set checks_per_iter {CHECKS_PER_ITER}
+set checks_once    {CHECKS_ONCE}
+set pass_lo [expr {{$checks_once + ($it_end - 1) * $checks_per_iter}}]
+set pass_hi [expr {{$checks_once + $it_end * $checks_per_iter}}]
+if {{$status == "PASS" && ($pass_end < $pass_lo || $pass_end > $pass_hi)}} {{
+    set status "FAIL_PASS_COUNT"
+}}
+
 puts "\n=========================================="
 puts "  QoS Stress HW Test Results"
 puts "=========================================="
@@ -257,11 +271,13 @@ puts "  g_iteration = $it_end   (@ 0x{g_iteration_addr:08X})"
 puts "  g_heartbeat = $hb_end   (@ 0x{g_heartbeat_addr:08X})"
 puts "  g_pass      = $pass_end (@ 0x{g_pass_addr:08X})"
 puts "  g_fail      = $fail_end (@ 0x{g_fail_addr:08X})"
+puts "  expected    = g_fail 0, g_pass between $pass_lo and $pass_hi for $it_end iterations"
 
 set ftest_val [read_word $ftest_addr]
 set fgot_val  [read_word $fgot_addr]
 set fexp_val  [read_word $fexp_addr]
-puts "  fail_test   = $ftest_val (1=T1a 2=T1b 3=T2prog 4/5/6=sent 7=MB 8=G0 9=G1 10=GPIO 11=G2mix)"
+puts "  fail_test   = $ftest_val (1=T1a 2=T1b 3=T2prog 4/5/6=status timeout"
+puts "                 7=MB 8=G0 9=G1 10=G2 verify, 12/13/14=G0/G1/G2 read-back)"
 puts [format "  fail_got    = 0x%08X" $fgot_val]
 puts [format "  fail_exp    = 0x%08X" $fexp_val]
 set pgpio_val [read_word $pgpio_addr]
@@ -272,8 +288,7 @@ puts "  --- generator probes (diagnostic only, not checked) ---"
 puts [format "  probe_gpio  = 0x%08X (trigger mask, nominally 0x0000000F)" $pgpio_val]
 puts [format "  probe_g0    = 0x%08X (tag 0xB1, bits 23:16 = pass index)" $pg0_val]
 puts [format "  probe_g1    = 0x%08X (tag 0xB2, bits 23:16 = pass index)" $pg1_val]
-puts [format "  probe_g2    = 0x%08X (no fixed value: G2 data is LFSR-randomised" $pg2_val]
-puts "                             per beat, so word 0 is nondeterministic)"
+puts [format "  probe_g2    = 0x%08X (tag 0xB3, bits 23:16 = pass index)" $pg2_val]
 puts "=========================================="
 puts "RESULT=$status"
 puts ""
