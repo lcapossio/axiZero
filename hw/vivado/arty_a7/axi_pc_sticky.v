@@ -15,22 +15,23 @@
 //   view[31:0]    - software-readable compressed view, exposed via AXI GPIO
 //                   ch2 at 0xC0020008.  Bit assignment:
 //
-//     view[15:0]  = chunk OR — bit i = OR of sticky_full[10*i +: 10]
-//                   chunk 0 covers rules 0..9, chunk 1 covers rules 10..19,
-//                   ..., chunk 15 covers rules 150..159.
-//     view[30:16] = reserved (read 0)
+//     view[29:0]  = sticky_full[59:30]: one bit per rule, rule i visible
+//                   at view[i-30], so view[0] is rule 30 and view[29] is
+//                   rule 59.  Rules 0..29 and 60..159 are NOT exposed
+//                   here; only the any_violation bit reflects them.
+//     view[30]    = reserved (read 0)
 //     view[31]    = any_violation (== |sticky_full).  Sanity bit so software
-//                   can confirm the readback path is alive even if every
-//                   chunk is empty (i.e., a glitch flagged a high-numbered
-//                   rule we missed).
+//                   can confirm the readback path is alive even when
+//                   bits 29..0 are all clear (i.e. the violated rule is
+//                   one this view does not expose).
 //
 // Decoding workflow:
 //   1. Read view via `mrd 0xC0020008`.
 //   2. If bit 31 is set, a violation occurred.
-//   3. Find which chunks (bits 15..0) are set.  Each chunk corresponds to
-//      a 10-rule range from PG101's AXI_ERRM_*/AXI_ERRS_* rule table.
-//   4. Optional: rebuild with a finer slice over the suspect range to
-//      identify the exact bit.
+//   3. If any of bits 29..0 is set, the rule number is 30 + bit index;
+//      run_base_test.py prints the PG101 name for it.
+//   4. If bit 31 is set but bits 29..0 are all clear, the violated rule
+//      lies outside 30..59: rebuild with a different slice to see it.
 
 module axi_pc_sticky (
     input  wire         clk,

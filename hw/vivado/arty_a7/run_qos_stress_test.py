@@ -268,11 +268,12 @@ set pgpio_val [read_word $pgpio_addr]
 set pg0_val   [read_word $pg0_addr]
 set pg1_val   [read_word $pg1_addr]
 set pg2_val   [read_word $pg2_addr]
-puts "  --- generator probes (after 1M-cycle delay) ---"
-puts [format "  probe_gpio  = 0x%08X (expect trigger mask 0x0000000F)" $pgpio_val]
-puts [format "  probe_g0    = 0x%08X (expect 0xB1000000)" $pg0_val]
-puts [format "  probe_g1    = 0x%08X (expect 0xB20001FF)" $pg1_val]
-puts [format "  probe_g2    = 0x%08X (expect 0xB3005502)" $pg2_val]
+puts "  --- generator probes (diagnostic only, not checked) ---"
+puts [format "  probe_gpio  = 0x%08X (trigger mask, nominally 0x0000000F)" $pgpio_val]
+puts [format "  probe_g0    = 0x%08X (tag 0xB1, bits 23:16 = pass index)" $pg0_val]
+puts [format "  probe_g1    = 0x%08X (tag 0xB2, bits 23:16 = pass index)" $pg1_val]
+puts [format "  probe_g2    = 0x%08X (no fixed value: G2 data is LFSR-randomised" $pg2_val]
+puts "                             per beat, so word 0 is nondeterministic)"
 puts "=========================================="
 puts "RESULT=$status"
 puts ""

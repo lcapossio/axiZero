@@ -48,6 +48,35 @@ def run(cmd, cwd=None, timeout=None, desc="", env=None):
     return result
 
 
+def run_capture(cmd, cwd=None, timeout=None, desc="", env=None):
+    """Like run(), but returns the output as well as echoing it.
+
+    The verdict lives in xsdb's stdout, not in its exit status: xsdb exits 0
+    whether the test passed, failed or never ran, so the caller has to read
+    what it printed.
+    """
+    bar = "=" * 60
+    print("")
+    print(bar)
+    print(f"  {desc}")
+    print(f"  cmd: {' '.join(str(c) for c in cmd)}")
+    print(bar)
+    print("")
+    result = subprocess.run(
+        [str(c) for c in cmd],
+        cwd=str(cwd) if cwd else None,
+        timeout=timeout,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    print(result.stdout)
+    if result.returncode != 0:
+        print(f"*** FAILED (rc={result.returncode}): {desc}")
+        sys.exit(result.returncode)
+    return result.stdout
+
+
 def step_vivado():
     if BIT_FILE.exists():
         print(f"[skip] Bitstream already exists: {BIT_FILE}")
@@ -110,8 +139,29 @@ def find_symbols():
 
 
 def step_run(addrs):
+    # The AXI protocol checker is optional (enable_axi_pc, default 0) and the
+    # bitstream may have been built by an earlier invocation, so the only
+    # trustworthy source is the block design that produced it. Reporting the
+    # GPIO read unconditionally is worse than not reporting it: with the
+    # checker absent the address decodes to nothing and reads back as 0, which
+    # is indistinguishable from "160 rules, no violations".
+    bd_file = (PROJ_DIR / "axizero_arty.srcs" / "sources_1" / "bd" /
+               "system" / "system.bd")
+    axi_pc_present = (
+        bd_file.exists()
+        and "axi_pc" in bd_file.read_text(encoding="utf-8", errors="replace")
+    )
     g_fail_addr = addrs["g_fail"]
     g_pass_addr = addrs["g_pass"]
+
+    if axi_pc_present:
+        pc_report = 'puts "  axi_pc view = 0x$pc_sticky   (@ 0xC0020008)"'
+    else:
+        pc_report = (
+            'puts "  axi_pc      = NOT BUILT INTO THIS BITSTREAM"' + chr(10) +
+            'puts "                no protocol checking was performed; rebuild"' + chr(10) +
+            'puts "                with -tclargs <jobs> 1 to enable the checker"'
+        )
 
     xsdb_tcl = SCRIPT_DIR / "_base_xsdb_temp.tcl"
     xsdb_tcl.write_text(f"""\
@@ -158,10 +208,12 @@ puts "  Base HW Test Results"
 puts "=========================================="
 puts "  g_fail = $fail_val   (@ 0x{g_fail_addr:08X})"
 puts "  g_pass = $pass_val   (@ 0x{g_pass_addr:08X})"
-puts "  axi_pc view = 0x$pc_sticky   (@ 0xC0020008)"
+{pc_report}
 puts "=========================================="
 
-if {{$fail_val == 0}} {{
+puts "  expected    = g_fail 0, g_pass 10"
+
+if {{$fail_val == 0 && $pass_val == 10}} {{
     puts "  *** ALL BASE TESTS PASSED ***"
 }} else {{
     puts "  *** BASE FAILURES DETECTED ***"
@@ -227,7 +279,7 @@ disconnect
 exit
 """, encoding="utf-8")
 
-    run(
+    output = run_capture(
         [XSDB_BIN, str(xsdb_tcl)],
         cwd=SCRIPT_DIR,
         timeout=120,
@@ -235,6 +287,19 @@ exit
     )
 
     xsdb_tcl.unlink(missing_ok=True)
+
+    # xsdb exits 0 whether the test passed, failed or never ran, so the
+    # verdict has to be read out of what it printed. A wedged bus leaves
+    # g_fail = 0 and g_pass = 0, which the banner used to report as success.
+    if "no targets found" in output or "*** BASE FAILURES DETECTED ***" in output:
+        print("")
+        print("*** FAILED: BASE hardware test did not pass")
+        sys.exit(1)
+    if "*** ALL BASE TESTS PASSED ***" not in output:
+        print("")
+        print("*** FAILED: BASE pass banner was not observed "
+              "(expected g_fail=0 and g_pass=10)")
+        sys.exit(1)
 
 
 def main():
