@@ -21,6 +21,7 @@ Hardware-validated on Xilinx Arty A7-100T. 117 SpinalSim + 36 cocotb tests pass.
 - [Quick start](#quick-start)
   - [Option A — generate from YAML](#option-a--generate-from-yaml)
   - [Option B — use a pre-built Verilog file](#option-b--use-a-pre-built-verilog-file)
+  - [Option C — instantiate it from Scala](#option-c--instantiate-it-from-scala)
 - [YAML configuration reference](#yaml-configuration-reference)
   - [Top-level keys](#top-level-keys)
   - [Master port keys](#master-port-keys)
@@ -211,6 +212,83 @@ Every file in the table is reproducible from the generators, and CI regenerates
 and compares them on each run, so the table cannot drift from the RTL unnoticed.
 
 If none of these match your topology, generate a custom one with Option A.
+
+### Option C — instantiate it from Scala
+
+The YAML flow is a front end: it emits Scala that calls the same API described here, so anything the
+generator can build can be built directly, and a few things it cannot — an `Axi4Config` with an
+unusual combination of optional signals, for instance — can only be built this way. If your design
+is already SpinalHDL, this is the shorter path, because the crossbar becomes an ordinary `Component`
+you wire up rather than a Verilog file you instantiate.
+
+There are three tops, all taking the same `AxiZeroConfig`: `AxiZeroLiteTop` when every port is
+AXI4-Lite, `AxiZeroFullTop` when every port is full AXI4, and `AxiZeroMixedTop` for any mixture,
+which inserts the Full↔Lite adapters and width converters for you. The mixed top is the general
+case and the other two are narrower, cheaper specialisations.
+
+```scala
+import spinal.core._
+import spinal.lib.bus.amba4.axi.Axi4Config
+import axizero._
+
+object MyFabric extends App {
+
+  val cpuCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 4)
+  val ramCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 5)
+
+  // An AXI4-Lite port is a full config with the optional signals turned off.
+  val regCfg = Axi4Config(
+    addressWidth = 32, dataWidth = 32,
+    useId = false, useRegion = false, useBurst = false, useLock = false,
+    useCache = false, useSize = false, useQos = false, useLen = false,
+    useLast = false, useResp = true, useProt = true, useStrb = true
+  )
+
+  val cfg = AxiZeroConfig(
+    masters = Seq(
+      MasterPort(cpuCfg, FullAxi4, regSlice = true),
+      MasterPort(cpuCfg, FullAxi4)
+    ),
+    slaves = Seq(
+      SlavePort(ramCfg, FullAxi4, baseAddress = 0x80000000L, size = 64 KiB),
+      SlavePort(regCfg, LiteAxi4, baseAddress = 0xf0000000L, size = 4 KiB)
+    ),
+    arbitration    = QosBased,
+    maxOutstanding = 4
+  )
+
+  SpinalConfig(targetDirectory = "generated")
+    .generateVerilog(new AxiZeroMixedTop(cfg))
+}
+```
+
+Slave-side ID width must leave room for the originating master index — `slaveSideIdWidth` on the
+config gives the rule, which is why `ramCfg` above is one bit wider than `cpuCfg`. The constructor
+checks the address map for overlap, power-of-two sizes and alignment, so a bad map fails at
+elaboration with a message rather than in simulation.
+
+To wire it into a design instead of emitting Verilog, the ports are plain `Vec[Axi4]`, named from
+the crossbar's point of view: `io.masters` are slave interfaces you drive from your masters, and
+`io.slaves` are master interfaces you connect to your slaves.
+
+```scala
+val fabric = new AxiZeroMixedTop(cfg)
+fabric.io.masters(0) << cpu.iBus          // your master drives the fabric
+fabric.io.masters(1) << cpu.dBus
+ram.io.axi           << fabric.io.slaves(0).toShared()   // fabric drives your slave
+regBlock.io.ctrl     << fabric.io.slaves(1)
+```
+
+[`VexZeroSoc`](hw/examples/vexriscv/spinal/vexzero/VexZeroSoc.scala) is a worked example of exactly
+this: a four-master SoC built around `AxiZeroMixedTop` in Scala, with a VexRiscv on two of the
+ports. The AXI4-Stream cores in `axizero.stream` and the standalone adapters in `axizero.adapters`
+— AXI3→AXI4, Full→Lite, register slices, width converters — are instantiated the same way.
+
+**Getting the dependency.** axiZero is not published to a public repository yet, so there is no
+coordinate to depend on. Until there is, use it as a source dependency, or run `sbt publishLocal`
+and depend on `"io.axizero" %% "axizero" % "0.1.0"` from the local Ivy cache. Note that
+`AxiZeroUserGen.scala` in `hw/spinal/axizero/gen/` is written by `scripts/axizero.py` and
+overwritten on every YAML run — it is the generator's output, not a file to edit or copy from.
 
 ---
 
