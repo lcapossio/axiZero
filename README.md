@@ -186,19 +186,20 @@ worst-case path Vivado reports under those conditions, so treat it as an upper
 bound rather than a closed-timing figure. `n/a` means the design had no
 internal path for Vivado to rank. Regenerate the whole table with
 `vivado -mode batch -source hw/vivado/synth_resource_usage.tcl`. No BRAM or DSP
-is used by any configuration.
+is used by any configuration. The memory-mapped configurations include the decode-error
+responder, which is on by default; the AXI4-Stream cores have no address map and are unaffected.
 
 | File | Description | LUTs | FFs | LUTRAM | Fmax (MHz) |
 |---|---|---:|---:|---:|---:|
-| `MyLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin | 237 | 8 | 0 | 400.0 |
-| `AxiZeroLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin (wider addr) | 237 | 8 | 0 | n/a |
-| `MyLite_2M2S_WRR.v` | 2M×2S AXI4-Lite, weighted round-robin (3:1) | 352 | 286 | 0 | 208.3 |
-| `MyLite_2M4S_FP.v` | 2M×4S AXI4-Lite, fixed priority | 527 | 16 | 0 | 400.0 |
-| `AxiZeroLite_2M4S_RS.v` | 2M×4S AXI4-Lite, register slices on all ports | 656 | 784 | 0 | n/a |
-| `AxiZeroLite_4M4S_FP.v` | 4M×4S AXI4-Lite, fixed priority | 1292 | 24 | 0 | n/a |
-| `MyFull_2M2S.v` | 2M×2S AXI4 Full, 64-bit, round-robin | 582 | 12 | 0 | 384.6 |
-| `MyFull_2M2S_QoS.v` | 2M×2S AXI4 Full, 64-bit, QoS arbitration | 626 | 62 | 4 | 117.6 |
-| `MyMixed_2M3S.v` | 2M×3S mixed (Full + Lite), auto adapters | 421 | 34 | 0 | 312.5 |
+| `MyLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin | 278 | 13 | 0 | 344.8 |
+| `AxiZeroLite_1M4S.v` | 1M×4S AXI4-Lite, round-robin (wider addr) | 278 | 13 | 0 | n/a |
+| `MyLite_2M2S_WRR.v` | 2M×2S AXI4-Lite, weighted round-robin (3:1) | 387 | 301 | 0 | 185.2 |
+| `MyLite_2M4S_FP.v` | 2M×4S AXI4-Lite, fixed priority | 555 | 23 | 0 | 322.6 |
+| `AxiZeroLite_2M4S_RS.v` | 2M×4S AXI4-Lite, register slices on all ports | 668 | 793 | 0 | n/a |
+| `AxiZeroLite_4M4S_FP.v` | 4M×4S AXI4-Lite, fixed priority | 1467 | 33 | 0 | n/a |
+| `MyFull_2M2S.v` | 2M×2S AXI4 Full, 64-bit, round-robin | 644 | 37 | 0 | 227.3 |
+| `MyFull_2M2S_QoS.v` | 2M×2S AXI4 Full, 64-bit, QoS arbitration | 772 | 114 | 6 | 125.0 |
+| `MyMixed_2M3S.v` | 2M×3S mixed (Full + Lite), auto adapters | 580 | 59 | 0 | 263.2 |
 | `MyAxisRegSlice.v` | AXI4-Stream register slice, 32-bit | 2 | 42 | 0 | 500.0 |
 | `MyAxisWidth_8To32.v` | AXI4-Stream width adapter, 8→32-bit | 10 | 44 | 0 | 333.3 |
 | `MyAxisFifo.v` | AXI4-Stream FIFO, 32-bit | 42 | 57 | 28 | 294.1 |
@@ -575,13 +576,13 @@ over AXI4-Lite (all four slide switches up on this run), so the result check ran
 
 | Resource | Used | Available | Utilisation |
 |---|---:|---:|---:|
-| Slice LUTs | 1091 | 63400 | 1.72% |
-| Slice registers | 1142 | 126800 | 0.90% |
+| Slice LUTs | 1140 | 63400 | 1.80% |
+| Slice registers | 1161 | 126800 | 0.92% |
 | Block RAM tiles | 3 | 135 | 2.22% |
 | DSPs | 0 | 240 | 0.00% |
 
 Test conditions: Vivado 2025.2, `xc7a100tcsg324-1` (speed grade -1), default synthesis and
-implementation strategies, one 100 MHz clock domain, WNS **+0.698 ns** (107.5 MHz Fmax). The figures
+implementation strategies, one 100 MHz clock domain, WNS **+0.574 ns** (106.1 MHz Fmax). The figures
 cover the whole SoC — VexRiscv, the axiZero crossbar, the 8 KB RAM, both peripherals and the UART
 reporter — not the crossbar alone; see
 [crossbar-only resource usage](#hardware-validation--arty-a7-100t) for that.
@@ -657,12 +658,12 @@ clock domain, 32 KB on-chip RAM (the benchmark needs more than the 8 KB verdict 
 
 | Resource | Used | Available | Utilisation |
 |---|---:|---:|---:|
-| Slice LUTs | 1213 | 63400 | 1.91% |
-| Slice registers | 1263 | 126800 | 1.00% |
+| Slice LUTs | 1292 | 63400 | 2.04% |
+| Slice registers | 1282 | 126800 | 1.01% |
 | Block RAM tiles | 9 | 135 | 6.67% |
 | DSPs | 0 | 240 | 0.00% |
 
-WNS **+0.521 ns** (105.5 MHz Fmax). The figures cover the whole benchmark SoC — VexRiscv, the
+WNS **+0.593 ns** (106.3 MHz Fmax). The figures cover the whole benchmark SoC — VexRiscv, the
 axiZero crossbar, 32 KB of RAM, three slaves and the UART — not the crossbar alone.
 
 ### What Dhrystone does not test
@@ -945,14 +946,14 @@ Only the wall-clock rate differs, because the DE25-Nano's oscillator is half the
 
 | Resource | Self test | Benchmark | Available |
 |---|---:|---:|---:|
-| ALMs | 4,589 | 4,802 | 46,800 |
-| Registers | 6,618 | 6,861 | — |
+| ALMs | 4,689 | 4,885 | 46,800 |
+| Registers | 6,703 | 6,960 | — |
 | RAM blocks | 6 | 19 | 358 |
 | DSP blocks | 0 | 0 | 376 |
 
 Test conditions: Quartus Prime Pro 26.1, `A5EB013BB23BE4SR1`, default synthesis and fitter settings,
-one 50 MHz clock domain. Worst-case slack **+12.824 ns** (self test) and **+12.631 ns** (benchmark),
-zero failing endpoints in both, with reported Fmax of **139.35 MHz** and **135.70 MHz** on the Slow
+one 50 MHz clock domain. Worst-case slack **+12.830 ns** (self test) and **+11.859 ns** (benchmark),
+zero failing endpoints in both, with reported Fmax of **139.47 MHz** and **122.84 MHz** on the Slow
 0 °C model. The figures cover the whole system — VexRiscv, the axiZero crossbar, the RAM, the
 peripherals *and* the JTAG-to-AXI bridge, which accounts for much of the register count and has no
 counterpart in the Arty builds, so the two boards' numbers are not comparable to each other.
@@ -1096,14 +1097,33 @@ MBGCC_BIN=/opt/Xilinx/2025.2/Vitis/gnu/microblaze/lin64/bin/mb-gcc \
 
 Each runner: (1) creates the Vivado project + bitstream if not already built, (2) compiles MicroBlaze firmware with mb-gcc, (3) programs the FPGA and runs tests via xsdb. The two VexZero runners are the exception: the VexRiscv example SoC carries its firmware inside the bitstream, so they need only Vivado and xsdb, and they read the result off the USB-UART with pyserial. See [example system](#example-system--vexriscv-soc).
 
-**Crossbar-only resource usage** (OOC synthesis, xc7a100t):
+**Crossbar-only resource usage** — the interconnect alone, without the MicroBlaze, the BRAM
+controllers or the traffic generators around it:
 
 | Configuration | LUTs | FFs |
 |---|---:|---:|
-| Base 1M×4S (pipelined, max\_outstanding=4) | 382 | 40 |
-| WRR 2M×4S (weighted round-robin, pipelined) | 818 | 92 |
-| QoS 2M×4S (QoS arbitration, pipelined) | 1011 | 132 |
-| QoS stress 4M×4S (QoS arbitration, pipelined) | 2587 | 208 |
+| Base 2M×4S (round-robin, pipelined, max\_outstanding=4) | 804 | 98 |
+| WRR 3M×4S (weighted round-robin 3:1:1, pipelined) | 1545 | 154 |
+| QoS 3M×4S (QoS arbitration, pipelined) | 2008 | 234 |
+| QoS stress 5M×4S (QoS arbitration, pipelined) | 3814 | 330 |
+
+Test conditions: Vivado 2025.2, `xc7a100tcsg324-1`, out-of-context synthesis with no timing
+constraint applied, `decode_error_response` at its default of on. Every topology counts the fcapz
+debug master alongside the functional ones — for example the base design is the MicroBlaze plus the
+debug port, so it is 2M×4S rather than 1M×4S.
+
+What the decode responder itself costs, measured by regenerating the same four designs with
+`decode_error_response = false` and synthesising them the same way:
+
+| Configuration | LUTs off → on | FFs off → on |
+|---|---:|---:|
+| Base 2M×4S | 706 → 804 (+98) | 68 → 98 (+30) |
+| WRR 3M×4S | 1226 → 1545 (+319) | 120 → 154 (+34) |
+| QoS 3M×4S | 1796 → 2008 (+212) | 176 → 234 (+58) |
+| QoS stress 5M×4S | 3577 → 3814 (+237) | 252 → 330 (+78) |
+
+The responder is one extra slave port on the fabric, so it costs a slave's worth of arbitration and
+routing rather than a fixed adder — which is why the widest topology does not pay the most.
 
 Vivado TCL scripts and MicroBlaze firmware: [`hw/vivado/arty_a7/`](hw/vivado/arty_a7/) and [`sw/arty_a7/`](sw/arty_a7/).
 
