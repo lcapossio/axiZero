@@ -859,6 +859,49 @@ Initialise it non-recursively — it carries its own `fcapz` submodule pointing 
 fpgacapZero this repository already pins at v0.4.9, and a recursive init would clone a second copy
 at a different commit.
 
+#### Can the CPU be ranked above the video core?
+
+The natural thing to want from a SoC like this is maximum priority for processor reads while the
+video path keeps a bounded worst case, and `QosBased` arbitration with `cpu_qos` at 15 looks like
+the lever for it. It is not, and
+[`VexZeroVideoQosSpec`](hw/examples/vexriscv/sim/vexzero/sim/VexZeroVideoQosSpec.scala) exists to
+say so with numbers rather than with an argument. It runs the real CPU against the real video core
+at two burst lengths under both policies:
+
+| Policy | Video burst | ifetch mean/worst | Video write mean/worst | Fetches | Video bursts |
+|---|---:|---:|---:|---:|---:|
+| round-robin | 16 | 0.13 / 2 | 19.00 / 19 | 19,993 | 2,668 |
+| QoS, `cpu_qos = 15` | 16 | 0.13 / 2 | 19.00 / 19 | 19,993 | 2,668 |
+| round-robin | 4 | 0.27 / 2 | 7.00 / 7 | 26,187 | 7,145 |
+| QoS, `cpu_qos = 15` | 4 | 0.27 / 2 | 7.00 / 7 | 26,187 | 7,145 |
+
+The two policies are byte-identical, which is the shape of a lever that does nothing rather than one
+that is merely weak. **AXQOS ranks masters competing for one slave on one channel, and the crossbar
+arbitrates reads and writes independently** — separate grant logic and separate per-slave age state,
+`wrQosAge` for AW and `rdQosAge` for AR. The CPU's active port issues only reads and the video core
+issues only writes, so the two never appear in the same arbiter and no AXQOS value can order them.
+Where they actually meet is the RAM's shared command port: `Axi4SharedOnChipRam` has one address
+channel, so AR and AW are merged by `toShared()` on the crossbar's finished slave port — downstream
+of the arbiter that AXQOS feeds.
+
+The second number worth reading is that there is nothing to arbitrate here anyway. Single-cycle
+on-chip RAM answers a beat per clock; even after tripling the video load the two masters together
+ask for about 63% of it, every video burst is served in exactly its own transfer time, and the worst
+instruction fetch waits two cycles. A mean equal to a maximum is the signature of a queue that never
+forms.
+
+So: QoS between a read stream and a write stream is not expressible in this fabric, and at this
+memory it is also unnecessary. It becomes a real question only if the memory becomes the bottleneck
+— a slower external memory, or a much larger frame — and answering it then would mean QoS-aware
+merging at the shared slave port, which is a fabric feature that does not exist today. What QoS
+*does* rank, today and on hardware, is two masters on the same channel; that is what
+[arbitration modes](#arbitration-modes) and `DecodeErrorSpec`'s QoS tests cover.
+
+Test conditions: SpinalSim + Verilator, 4-master × 4-slave `AxiZeroMixedTop`, `max_outstanding = 4`,
+64 KB on-chip RAM, 32×32 solid-colour frame, `frame_rate = 1200` clocks, 100,000-cycle measurement
+window taken after the generator is programmed and running. Latencies are AR/AW accepted to the last
+response beat, in cycles.
+
 #### What integrating it found
 
 A third-party core is worth more than a testbench precisely because it does not do what your
@@ -1243,8 +1286,9 @@ hw/examples/vexriscv/          # VexRiscv example SoC — separate sbt project `
     VexZeroBenchSpec.scala     #   Dhrystone over the crossbar, pipelined vs blocking
     VexZeroProfileSpec.scala   #   what that run asks of the fabric, uncached vs cached
     VexZeroStressSpec.scala    #   the same SoC with a third master saturating the fabric
+    VexZeroVideoQosSpec.scala  #   why AXQOS cannot rank CPU reads against video writes
     HostTraffic.scala          #   the saturating master: 16-beat bursts, AW ahead of W
-    AxiProfile.scala           #   per-port traffic shape, measured at the master ports
+    AxiProfile.scala           #   per-port traffic shape and latency, measured at the master ports
 third_party/VexRiscv/          # pinned submodule, compiled by `vexZero` only
 sim/cocotb_gen/
   run_all.py                   # Python runner (lite + full + wrr + qos + ipif + axis suites)

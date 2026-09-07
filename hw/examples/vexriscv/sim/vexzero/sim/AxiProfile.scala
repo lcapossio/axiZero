@@ -48,6 +48,12 @@ class AxiProfile(val name: String) {
   private var readsDone   = 0L
   private var writesDone  = 0L
 
+  /** Worst case, not the mean. "Bounded latency" is a claim about this number: a mean stays
+    * comfortable while one starved transaction waits arbitrarily long behind a louder master.
+    */
+  var maxReadLatency  = 0L
+  var maxWriteLatency = 0L
+
   private def issue(): Unit = {
     outstanding += 1
     if (outstanding > maxOutstanding) maxOutstanding = outstanding
@@ -63,7 +69,12 @@ class AxiProfile(val name: String) {
 
   /** Called on the last beat of a read response. */
   def rLast(cycle: Long): Unit = {
-    if (readIssued.nonEmpty) { readCycles += cycle - readIssued.dequeue(); readsDone += 1 }
+    if (readIssued.nonEmpty) {
+      val took = cycle - readIssued.dequeue()
+      readCycles += took
+      readsDone += 1
+      if (took > maxReadLatency) maxReadLatency = took
+    }
     retire()
   }
 
@@ -75,7 +86,12 @@ class AxiProfile(val name: String) {
   }
 
   def bFire(cycle: Long): Unit = {
-    if (writeIssued.nonEmpty) { writeCycles += cycle - writeIssued.dequeue(); writesDone += 1 }
+    if (writeIssued.nonEmpty) {
+      val took = cycle - writeIssued.dequeue()
+      writeCycles += took
+      writesDone += 1
+      if (took > maxWriteLatency) maxWriteLatency = took
+    }
     retire()
   }
 
@@ -163,6 +179,7 @@ object AxiProfile {
       sb ++= f"  ${""}%-18s mean burst ${s.meanReadBurst}%.2f r / ${s.meanWriteBurst}%.2f w beats, " +
         f"peak ${s.maxOutstanding}%d in flight\n"
       sb ++= f"  ${""}%-18s latency ${s.readLatency}%.2f cycles read, ${s.writeLatency}%.2f write\n"
+      sb ++= f"  ${""}%-18s worst   ${s.maxReadLatency}%,d cycles read, ${s.maxWriteLatency}%,d write\n"
     }
     sb.toString
   }
