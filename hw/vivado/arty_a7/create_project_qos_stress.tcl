@@ -560,7 +560,14 @@ if {[info exists argc] && $argc > 0} {
     set jobs 4
 }
 
-launch_runs synth_1 -jobs $jobs
+# Synthesis is deliberately serialized regardless of $jobs. Parallel
+# out-of-context IP runs each load the Vivado tclapp store independently
+# and contend over it; an arbitrary subset then dies with
+#   ERROR: [Common 17-354] Could not open 'C' for writing.
+# in unrelated Xilinx IP. Measured on 2025.2: at -jobs 4 this hit four of
+# five builds, at -jobs 1 none of four. $jobs still applies to
+# implementation below, which does not have the contention.
+launch_runs synth_1 -jobs 1
 wait_on_run synth_1
 launch_runs impl_1 -to_step write_bitstream -jobs $jobs
 wait_on_run impl_1

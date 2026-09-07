@@ -81,7 +81,14 @@ set_property top $top [current_fileset]
 add_files -fileset constrs_1 -norecurse $xdc_file
 
 ## ─── 2. Synthesis and implementation ────────────────────────────────────────
-launch_runs synth_1 -jobs $jobs
+# Synthesis is deliberately serialized regardless of $jobs. Parallel
+# out-of-context IP runs each load the Vivado tclapp store independently
+# and contend over it; an arbitrary subset then dies with
+#   ERROR: [Common 17-354] Could not open 'C' for writing.
+# in unrelated Xilinx IP. Measured on 2025.2: at -jobs 4 this hit four of
+# five builds, at -jobs 1 none of four. $jobs still applies to
+# implementation below, which does not have the contention.
+launch_runs synth_1 -jobs 1
 wait_on_run synth_1
 if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {
     error "Synthesis failed — see $proj_dir/$proj_name.runs/synth_1/runme.log"
