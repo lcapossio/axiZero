@@ -108,7 +108,15 @@ case class AxiZeroConfig(
     * W-route FIFOs and ID-based response routing — better throughput when multiple masters target
     * the same slave). Only affects the full AXI4 crossbar; the Lite crossbar is always blocking.
     */
-  maxOutstanding: Int = 1
+  maxOutstanding: Int = 1,
+  /** Answer an address that decodes to no slave with DECERR instead of leaving it unacknowledged.
+    *
+    * With this off, a master that issues such an address never receives AWREADY/ARREADY and stalls
+    * permanently -- the port is wedged with no error and no diagnostic. With it on, the fabric adds
+    * an internal responder that owns every unclaimed address and completes the transaction with
+    * DECERR, so the master gets its handshake and the CPU sees a bus fault it can report.
+    */
+  decodeErrorResponse: Boolean = true
 ) {
   // ---- basic sanity -------------------------------------------------------
   require(masters.nonEmpty, "At least one master port is required")

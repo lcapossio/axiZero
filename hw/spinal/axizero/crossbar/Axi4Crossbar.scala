@@ -41,6 +41,15 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
   val S             = cfg.numSlaves
   val masterIdxBits = cfg.masterIndexBits
 
+  // The decode-error responder is wired in as one more slave, owning every
+  // address no real slave claimed. Everything downstream -- arbitration, the
+  // W-route FIFO, ID-based B/R routing -- then treats it like any other slave
+  // and needs no special case. Sx counts the slaves the fabric routes to; S
+  // stays the number of ports the user asked for.
+  val decErrEnabled = cfg.decodeErrorResponse
+  val decErrIdx     = S
+  val Sx            = if (decErrEnabled) S + 1 else S
+
   // Derive a common master-side ID width (max across all masters)
   val maxMasterIdW = cfg.masters.map(_.config.idWidth).max
 
@@ -64,15 +73,42 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
   }
 
   // =========================================================================
+  // Decode-error responder — the slave for everything nothing else claimed
+  // =========================================================================
+  // Its config matches the other slave ports the crossbar drives (fabric data
+  // width, expanded IDs) so the same copy helpers and payload assignments work
+  // on it without a special case. The address width is the widest in play;
+  // copyAwToSlave resizes into it either way.
+  val decErrCfg = Axi4Config(
+    addressWidth = (cfg.masters.map(_.config.addressWidth) ++
+      cfg.slaves.map(_.config.addressWidth)).max,
+    dataWidth = cfg.fabricDataWidth,
+    idWidth = slaveIdW
+  )
+  val decErr = if (decErrEnabled) new Axi4DecErrSlave(decErrCfg) else null
+
+  // Slave ports as the routing logic sees them: the real ones, then the
+  // responder. Indexing through these keeps every loop below index-agnostic.
+  val busSlaves: Seq[Axi4] =
+    cfg.slaves.indices.map(io.slaves(_)) ++ (if (decErrEnabled) Seq(decErr.io.axi) else Nil)
+  val busSlaveCfgs: Seq[Axi4Config] =
+    cfg.slaves.map(_.config) ++ (if (decErrEnabled) Seq(decErrCfg) else Nil)
+
+  // =========================================================================
   // Address decode helper — same as Lite crossbar
   // =========================================================================
   def addrDecodeOH(addr: UInt): Bits = {
-    val result = Bits(S bits)
+    // The mapped hits go in their own signal rather than into the result
+    // vector: driving one bit of a Bits from the others reads as a loop to
+    // PhaseCheckCombinationalLoops, which analyses whole signals.
+    val hits = Bits(S bits)
     for (si <- 0 until S) {
       val sp = cfg.slaves(si)
-      result(si) := (addr >= sp.baseAddress) && (addr < (sp.baseAddress + sp.size))
+      hits(si) := (addr >= sp.baseAddress) && (addr < (sp.baseAddress + sp.size))
     }
-    result
+    // The catch-all is the complement of the mapped region, so exactly one bit
+    // is ever set and the vector stays one-hot for the arbiters.
+    if (decErrEnabled) (!hits.orR).asBits ## hits else hits
   }
 
   // =========================================================================
@@ -172,7 +208,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
   // AW/AR field copy helpers (handle id-width mismatch between master/slave)
   // =========================================================================
   def copyAwToSlave(si: Int, mi: Int, grantIdx: UInt): Unit = {
-    val slv  = io.slaves(si)
+    val slv  = busSlaves(si)
     val mCfg = cfg.masters(mi).config
     slv.aw.addr                     := io.masters(mi).aw.addr.resized
     if (mCfg.useProt) slv.aw.prot   := io.masters(mi).aw.prot
@@ -187,7 +223,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
   }
 
   def copyArToSlave(si: Int, mi: Int, grantIdx: UInt): Unit = {
-    val slv  = io.slaves(si)
+    val slv  = busSlaves(si)
     val mCfg = cfg.masters(mi).config
     slv.ar.addr                     := io.masters(mi).ar.addr.resized
     if (mCfg.useProt) slv.ar.prot   := io.masters(mi).ar.prot
@@ -204,8 +240,8 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
   // =========================================================================
   // Shared round-robin pointers
   // =========================================================================
-  val wrRrPtr = Vec(Seq.fill(S)(RegInit(U(0, ptrW bits))))
-  val rdRrPtr = Vec(Seq.fill(S)(RegInit(U(0, ptrW bits))))
+  val wrRrPtr = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
+  val rdRrPtr = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
 
   // ── WRR credit counters (only allocated when WeightedRoundRobin) ────────
   val wrrWeights = cfg.arbitration match {
@@ -217,26 +253,26 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
   val wrCredits = cfg.arbitration match {
     case WeightedRoundRobin(_) =>
       Vec(
-        Seq.tabulate(S)(_ => Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits)))))
+        Seq.tabulate(Sx)(_ => Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits)))))
       )
     case _ => null
   }
   val rdCredits = cfg.arbitration match {
     case WeightedRoundRobin(_) =>
       Vec(
-        Seq.tabulate(S)(_ => Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits)))))
+        Seq.tabulate(Sx)(_ => Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits)))))
       )
     case _ => null
   }
 
   val wrQosAge = cfg.arbitration match {
     case QosBased =>
-      Vec(Seq.tabulate(S)(_ => Vec(Seq.fill(M)(RegInit(U(0, qosAgeW bits))))))
+      Vec(Seq.tabulate(Sx)(_ => Vec(Seq.fill(M)(RegInit(U(0, qosAgeW bits))))))
     case _ => null
   }
   val rdQosAge = cfg.arbitration match {
     case QosBased =>
-      Vec(Seq.tabulate(S)(_ => Vec(Seq.fill(M)(RegInit(U(0, qosAgeW bits))))))
+      Vec(Seq.tabulate(Sx)(_ => Vec(Seq.fill(M)(RegInit(U(0, qosAgeW bits))))))
     case _ => null
   }
 
@@ -279,15 +315,15 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
     io.masters(mi).r.valid  := False
     io.masters(mi).r.payload.clearAll()
   }
-  for (si <- 0 until S) {
-    io.slaves(si).aw.valid := False
-    io.slaves(si).aw.payload.clearAll()
-    io.slaves(si).w.valid := False
-    io.slaves(si).w.payload.clearAll()
-    io.slaves(si).b.ready  := False
-    io.slaves(si).ar.valid := False
-    io.slaves(si).ar.payload.clearAll()
-    io.slaves(si).r.ready := False
+  for (si <- 0 until Sx) {
+    busSlaves(si).aw.valid := False
+    busSlaves(si).aw.payload.clearAll()
+    busSlaves(si).w.valid := False
+    busSlaves(si).w.payload.clearAll()
+    busSlaves(si).b.ready  := False
+    busSlaves(si).ar.valid := False
+    busSlaves(si).ar.payload.clearAll()
+    busSlaves(si).r.ready := False
   }
 
   // =========================================================================
@@ -297,14 +333,14 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
     // =====================================================================
     // BLOCKING mode — one transaction per slave per direction
     // =====================================================================
-    val wrActive  = Vec(Seq.fill(S)(RegInit(False)))
-    val wrGranted = Vec(Seq.fill(S)(RegInit(U(0, ptrW bits))))
-    val rdActive  = Vec(Seq.fill(S)(RegInit(False)))
-    val rdGranted = Vec(Seq.fill(S)(RegInit(U(0, ptrW bits))))
+    val wrActive  = Vec(Seq.fill(Sx)(RegInit(False)))
+    val wrGranted = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
+    val rdActive  = Vec(Seq.fill(Sx)(RegInit(False)))
+    val rdGranted = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
 
     // --- Blocking write path ---
-    for (si <- 0 until S) {
-      val slv = io.slaves(si)
+    for (si <- 0 until Sx) {
+      val slv = busSlaves(si)
 
       when(!wrActive(si)) {
         val requests = Bits(M bits)
@@ -363,8 +399,8 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
     }
 
     // --- Blocking read path ---
-    for (si <- 0 until S) {
-      val slv = io.slaves(si)
+    for (si <- 0 until Sx) {
+      val slv = busSlaves(si)
 
       when(!rdActive(si)) {
         val requests = Bits(M bits)
@@ -407,7 +443,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
             slv.r.ready                                               := io.masters(mi).r.ready
           }
         }
-        if (cfg.slaves(si).config.useLast) {
+        if (busSlaveCfgs(si).useLast) {
           when(slv.r.fire && slv.r.last) { rdActive(si) := False }
         } else {
           when(slv.r.fire) { rdActive(si) := False }
@@ -424,21 +460,21 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
 
     // --- Per-slave write state ---
     val wrOutstanding = Vec(
-      Seq.fill(S)(RegInit(U(0, cntW bits)))
+      Seq.fill(Sx)(RegInit(U(0, cntW bits)))
     ) // AW accepted, B not yet returned
-    val wFifoMem   = (0 until S).map(_ => Mem(UInt(ptrW bits), depth))
-    val wFifoWrPtr = Vec(Seq.fill(S)(RegInit(U(0, log2Up(depth) bits))))
-    val wFifoRdPtr = Vec(Seq.fill(S)(RegInit(U(0, log2Up(depth) bits))))
-    val wFifoCount = Vec(Seq.fill(S)(RegInit(U(0, cntW bits)))) // entries with W pending
+    val wFifoMem   = (0 until Sx).map(_ => Mem(UInt(ptrW bits), depth))
+    val wFifoWrPtr = Vec(Seq.fill(Sx)(RegInit(U(0, log2Up(depth) bits))))
+    val wFifoRdPtr = Vec(Seq.fill(Sx)(RegInit(U(0, log2Up(depth) bits))))
+    val wFifoCount = Vec(Seq.fill(Sx)(RegInit(U(0, cntW bits)))) // entries with W pending
 
     // --- Per-slave read state ---
-    val rdOutstanding = Vec(Seq.fill(S)(RegInit(U(0, cntW bits))))
+    val rdOutstanding = Vec(Seq.fill(Sx)(RegInit(U(0, cntW bits))))
 
     // =================================================================
     // Per-slave AW arbitration + W forwarding
     // =================================================================
-    for (si <- 0 until S) {
-      val slv = io.slaves(si)
+    for (si <- 0 until Sx) {
+      val slv = busSlaves(si)
 
       // -- AW: accept new write addresses while below depth --
       val awCanAccept = wrOutstanding(si) < depth
@@ -503,7 +539,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
 
       // Pop FIFO when last W beat is accepted
       val wPop = Bool()
-      if (cfg.slaves(si).config.useLast) {
+      if (busSlaveCfgs(si).useLast) {
         wPop := slv.w.fire && slv.w.last
       } else {
         wPop := slv.w.fire // Lite-behind-Full or single-beat: every beat is last
@@ -535,18 +571,18 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
     // =================================================================
     for (mi <- 0 until M) {
       // Which slaves have a B response destined for this master?
-      val bHits = Bits(S bits)
-      for (si <- 0 until S) {
-        val slv = io.slaves(si)
+      val bHits = Bits(Sx bits)
+      for (si <- 0 until Sx) {
+        val slv = busSlaves(si)
         bHits(si) := slv.b.valid && (decodeMasterIdx(slv.b.id) === mi)
       }
 
       // Priority: pick lowest-numbered slave with a pending B
       val bGrant = OHMasking.first(bHits)
 
-      for (si <- 0 until S) {
+      for (si <- 0 until Sx) {
         when(bGrant(si)) {
-          val slv = io.slaves(si)
+          val slv = busSlaves(si)
           io.masters(mi).b.valid                                    := True
           if (cfg.masters(mi).config.useResp) io.masters(mi).b.resp := slv.b.resp
           if (cfg.masters(mi).config.useId) io.masters(mi).b.id     := decodeMasterId(slv.b.id)
@@ -558,8 +594,8 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
     // =================================================================
     // Per-slave AR arbitration
     // =================================================================
-    for (si <- 0 until S) {
-      val slv = io.slaves(si)
+    for (si <- 0 until Sx) {
+      val slv = busSlaves(si)
 
       val arCanAccept = rdOutstanding(si) < depth
       val requests    = Bits(M bits)
@@ -591,7 +627,7 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
 
       // Outstanding read counter: inc on AR fire, dec on R last beat
       val rDec = Bool()
-      if (cfg.slaves(si).config.useLast) {
+      if (busSlaveCfgs(si).useLast) {
         rDec := slv.r.fire && slv.r.last
       } else {
         rDec := slv.r.fire
@@ -608,17 +644,17 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
     // Per-master R routing (ID-based)
     // =================================================================
     for (mi <- 0 until M) {
-      val rHits = Bits(S bits)
-      for (si <- 0 until S) {
-        val slv = io.slaves(si)
+      val rHits = Bits(Sx bits)
+      for (si <- 0 until Sx) {
+        val slv = busSlaves(si)
         rHits(si) := slv.r.valid && (decodeMasterIdx(slv.r.id) === mi)
       }
 
       val rGrant = OHMasking.first(rHits)
 
-      for (si <- 0 until S) {
+      for (si <- 0 until Sx) {
         when(rGrant(si)) {
-          val slv = io.slaves(si)
+          val slv = busSlaves(si)
           io.masters(mi).r.valid                                    := True
           io.masters(mi).r.data                                     := slv.r.data.resized
           if (cfg.masters(mi).config.useResp) io.masters(mi).r.resp := slv.r.resp

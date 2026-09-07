@@ -172,6 +172,10 @@ def _validate_design(d: dict, idx: int):
     if not isinstance(mo, int) or mo < 1:
         _err(f"{tag}: 'max_outstanding' must be a positive integer (got {mo!r})")
 
+    der = d.get("decode_error_response", True)
+    if not isinstance(der, bool):
+        _err(f"{tag}: 'decode_error_response' must be true or false (got {der!r})")
+
     fdw = d.get("fabric_data_width")
     if fdw is not None:
         if not isinstance(fdw, int) or fdw <= 0 or (fdw & (fdw - 1)) != 0:
@@ -571,6 +575,12 @@ def _gen_design_block(d: dict) -> str:
     max_outstanding = d.get("max_outstanding", 1)
     mo_line = f",\n  maxOutstanding    = {max_outstanding}" if max_outstanding != 1 else ""
 
+    # Only emitted when turned off; on is the default in Scala too.
+    decerr_line = (
+        ",\n  decodeErrorResponse = false"
+        if d.get("decode_error_response", True) is False else ""
+    )
+
     masters_scala = ",\n    ".join(
         _gen_master_port(m, d, addr_w) for m in d["masters"]
     )
@@ -590,7 +600,7 @@ def _gen_design_block(d: dict) -> str:
             slaves = Seq(
               {slaves_scala}
             ),
-            arbitration = {arb}{fabric_line}{mo_line}
+            arbitration = {arb}{fabric_line}{mo_line}{decerr_line}
           )
           GenHelper.{helper}(cfg, "{name}")
         }}

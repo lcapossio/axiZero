@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 103 SpinalSim + 36 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T. 117 SpinalSim + 36 cocotb tests pass.
 
 ---
 
@@ -28,6 +28,7 @@ Hardware-validated on Xilinx Arty A7-100T. 103 SpinalSim + 36 cocotb tests pass.
   - [Arbitration modes](#arbitration-modes)
   - [Data-width conversion](#data-width-conversion)
   - [Pipelined vs blocking mode](#pipelined-vs-blocking-mode)
+  - [Decode errors](#decode-errors)
   - [AXI4-Stream utility cores](#axi4-stream-utility-cores)
 - [Simulation](#simulation)
   - [SpinalSim (unit tests)](#spinalsim-unit-tests-run-with-sbt)
@@ -66,6 +67,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - QoS arbitration (highest AXQOS wins) with aging-based anti-starvation
 - Pipelined mode (`max_outstanding > 1`) with per-slave W-route FIFOs and ID-based response routing
 - IPIF compatibility — AW and W are presented simultaneously to slaves that require it
+- Decode-error responses — an address that falls outside every slave's range is completed with `DECERR` on B or R instead of being left unacknowledged, so a stray address raises a bus fault rather than wedging the master forever
 - YAML → Verilog generator with port-name post-processing for Vivado AXI naming conventions
 - AXI3-to-AXI4 bridge adapter with WID reorder buffer (write interleaving → strict AW-order), locked access conversion, LEN/LOCK field adaptation
 
@@ -248,6 +250,7 @@ designs:
 | `weights` | list[int] | — | One integer per master. Only used with `weighted_round_robin`. Master *i* receives `weights[i]` grants per round. |
 | `max_outstanding` | int | `1` | Maximum outstanding transactions per slave per direction. See [Pipelined vs blocking mode](#pipelined-vs-blocking-mode). |
 | `fabric_data_width` | int | max of all ports | Override the internal fabric data width. Width converters are inserted automatically at any port whose `data_width` differs. See [Data-width conversion](#data-width-conversion). |
+| `decode_error_response` | bool | `true` | Answer an address that decodes to no slave with `DECERR`. Set `false` to restore the older behaviour, where such an address is never acknowledged. See [Decode errors](#decode-errors). |
 
 ### Master port keys
 
@@ -326,6 +329,28 @@ When a port's `data_width` differs from `fabric_data_width`, the generator inser
 | `> 1` | Pipelined | Per-slave W-route FIFOs, ID-based B/R response routing. Multiple transactions can be in flight simultaneously to different slaves. Required for high-throughput designs. |
 
 Only affects the Full AXI4 crossbar. The Lite-only crossbar is always single-outstanding (blocking).
+
+### Decode errors
+
+An address that falls outside every slave's range belongs to no port, and a crossbar that only drives
+AWREADY/ARREADY for addresses it can place has no way to refuse one it cannot. Left like that, the
+master holds its request waiting for a handshake that never comes and the port is wedged for good —
+no error, no timeout, and nothing in a waveform to say which address did it.
+
+By default the fabric answers instead. An internal responder owns every unmapped address, accepts the
+handshake and completes the transaction with `DECERR`: on B for a write, and on every beat of a read
+(all `len + 1` of them, with RLAST on the last), carrying the requesting master's ID so the response
+routes back the way any other does. The master gets its answer and a CPU sees a bus fault it can
+report. It costs one small state machine per direction, shared across all masters and slaves.
+
+This is not hypothetical. A single corrupted word in the VexRiscv example SoC's boot image made the
+CPU compute a store address of `0x4E4F549B`, which decodes to nothing; without a decode-error path
+the load/store port then sat with AWVALID unaccepted for 19,948,154 of 20,000,000 simulated cycles.
+One bad word became a dead system.
+
+Set `decode_error_response: false` (`decodeErrorResponse = false` in Scala) to restore the older
+behaviour. `DecodeErrorSpec` covers both, including a test that pins the unacknowledged failure mode
+so it stays documented.
 
 ### AXI4-Stream utility cores
 
@@ -408,7 +433,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-96 tests pass across 16 suites:
+117 tests pass across 18 suites:
 
 For the focused AXI4-Stream loop, including lint, YAML generator smoke tests, and cocotbext-axi generated-RTL tests:
 
@@ -419,6 +444,7 @@ python3 scripts/run_sim.py axis
 | Suite | Tests | Description |
 |---|---|---|
 | `LiteCrossbarSpec` | 6 | AXI4-Lite crossbar: arbitration, address decode, WRR |
+| `LiteSameCycleResponseSpec` | 1 | AXI4-Lite slave that raises RVALID in the same cycle as ARREADY, so the Full→Lite adapter cannot capture the response ID a cycle late |
 | `PipelinedCrossbarSpec` | 8 | Full AXI4: bursts, back-pressure, outstanding transactions |
 | `MixedCrossbarSpec` | 4 | Full↔Lite adapters, mixed address maps |
 | `ArtySpec` | 5 | Sequence matching the Arty A7 hardware tests (T4, T5, T6, T9, combined) |
@@ -430,6 +456,7 @@ python3 scripts/run_sim.py axis
 | `PipelinedArbitrationSpec` | 9 | Pipelined FixedPriority, WRR, and QoS: contention, concurrent bursts, data integrity |
 | `NarrowPortSpec` | 6 | Narrow ports: 32→16 downsizing, 16→32 upsizing, mixed Full+Lite concurrent traffic |
 | `QosCrossbarSpec` | 5 | QoS arbitration: higher AWQOS/ARQOS wins (blocking + pipelined), equal-QoS round-robin tie-break, aging anti-starvation |
+| `DecodeErrorSpec` | 13 | Decode errors: DECERR on B and on every read beat, blocking and pipelined, burst reads, W beats sunk, ID routing back to the right master, Lite, all four arbitration policies, two masters erroring at once, AXQOS deciding which of two contending masters the responder serves first (both orderings, reads and writes), and the unacknowledged failure mode with the responder disabled |
 | `QosStressShortSpec` | 1 | Short 4-master QoS stress: distinct patterns (sequential, reverse, sparse, random short bursts), concurrent traffic, end-state validation |
 | `Axi3ToAxi4Spec` | 5 | AXI3→AXI4 bridge: single-beat, INCR burst, write interleaving (WID reorder), locked→SLVERR, multiple outstanding |
 | `Axi3MixedCrossbarSpec` | 5 | Axi3Mode auto-adapter: single-beat to full slave, single-beat to Lite slave, routing to both, 4-beat INCR burst, register-sliced path |
@@ -450,7 +477,7 @@ python3 sim/cocotb_gen/run_all.py ipif     # MyLite_1M4S.v IPIF slave only
 python3 sim/cocotb_gen/run_all.py axis     # generated AXI4-Stream cocotb suite
 ```
 
-34 tests pass across 6 suites:
+36 tests pass across 6 suites:
 
 | Suite | DUT | Tests | Description |
 |---|---|---|---|
@@ -459,7 +486,7 @@ python3 sim/cocotb_gen/run_all.py axis     # generated AXI4-Stream cocotb suite
 | `wrr` | `MyLite_2M2S_WRR.v` | 6 | 2-master WRR crossbar: dual-master R/W, address routing, concurrent bandwidth, no starvation, concurrent different slaves, 80× random |
 | `qos` | `MyFull_2M2S_QoS.v` | 6 | 2-master QoS crossbar: dual-master R/W, address routing, higher QoS wins contention, equal-QoS round-robin, aging anti-starvation, QoS read priority |
 | `ipif` | `MyLite_1M4S.v` | 4 | IPIF slave compatibility: strict IpifRam model requires AWVALID+WVALID simultaneously, routing unaffected |
-| `axis` | generated AXI4-Stream cores | 6 | cocotbext-axi stream BFM tests for reg slice, width adapter, FIFO, arb-mux, demux, broadcaster |
+| `axis` | generated AXI4-Stream cores | 8 | cocotbext-axi stream BFM tests for reg slice, width adapter, FIFO, arb-mux, demux, broadcaster |
 
 ---
 
