@@ -274,7 +274,25 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
     (image ++ Seq.fill(cfg.ramWords - image.length)(0L)).map(w => B(w, 32 bits))
   )
 
-  ram.io.axi << fabric.io.slaves(0).toShared()
+  private val ramBus = fabric.io.slaves(0).toShared()
+  ram.io.axi << ramBus
+
+  // Axi4SharedOnChipRam commits a byte lane whenever its write strobe is set
+  // and its internal stage0 fires; nothing in that condition is qualified by
+  // reset. The valid that drives stage0 comes from the unburstify buffer,
+  // which is a synchronously reset register -- so on the very first clock edge
+  // it still holds its power-up value, and a design that comes up with that
+  // bit set writes one beat of whatever the address, data and strobe lines
+  // happen to carry straight into the RAM. That corrupts the boot image before
+  // the CPU has fetched an instruction, and the same window reopens on any
+  // warm reset asserted mid-write.
+  //
+  // Masking the strobes while reset is asserted closes it. isResetActive is
+  // combinational from the reset input, so unlike a guard register it is
+  // already correct on that first edge.
+  ram.io.axi.w.strb.allowOverride := ramBus.w.strb.andMask(
+    !ClockDomain.current.isResetActive
+  )
 
   // ── S1 — GPIO ────────────────────────────────────────────────────────────
   val gpio = new VexZeroGpio(liteSlaveCfg, cfg.ledWidth, cfg.switchWidth)
