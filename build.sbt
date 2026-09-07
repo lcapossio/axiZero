@@ -3,6 +3,29 @@
 ThisBuild / version      := "0.1.0"
 ThisBuild / scalaVersion := "2.13.12"
 ThisBuild / organization := "io.axizero"
+
+// Publication metadata. Every publish target wants these and Maven Central
+// rejects a POM without them; setting them here commits to no destination and
+// needs no credentials, so `publishLocal` and a future release agree on what
+// the artifact says about itself.
+ThisBuild / description :=
+  "Configurable AXI4 / AXI4-Lite / AXI3 interconnect generator, with AXI4-Stream utility cores, in SpinalHDL"
+ThisBuild / homepage := Some(url("https://github.com/lcapossio/axiZero"))
+ThisBuild / licenses := Seq("MIT" -> url("https://opensource.org/licenses/MIT"))
+ThisBuild / scmInfo := Some(
+  ScmInfo(
+    url("https://github.com/lcapossio/axiZero"),
+    "scm:git:https://github.com/lcapossio/axiZero.git"
+  )
+)
+ThisBuild / developers := List(
+  Developer(
+    id = "lcapossio",
+    name = "Leonardo Capossio",
+    email = "hello@bard0.com",
+    url = url("https://github.com/lcapossio")
+  )
+)
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
