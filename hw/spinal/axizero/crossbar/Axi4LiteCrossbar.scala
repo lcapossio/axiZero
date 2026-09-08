@@ -82,10 +82,7 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
     // vector: driving one bit of a Bits from the others reads as a loop to
     // PhaseCheckCombinationalLoops, which analyses whole signals.
     val hits = Bits(S bits)
-    for (si <- 0 until S) {
-      val sp = cfg.slaves(si)
-      hits(si) := (addr >= sp.baseAddress) && (addr < (sp.baseAddress + sp.size))
-    }
+    for (si <- 0 until S) hits(si) := AddrDecode.hit(addr, cfg.slaves(si))
     // The catch-all is the complement of the mapped region, so exactly one bit
     // is ever set and the vector stays one-hot for the arbiters.
     if (decErrEnabled) (!hits.orR).asBits ## hits else hits

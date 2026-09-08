@@ -533,4 +533,130 @@ class DecodeErrorSpec extends AnyFunSuite {
       )
     }
   }
+
+  // ── Address maps that reach the edges of the bus ───────────────────────────
+  //
+  // Written as a pair of magnitude comparisons, `addr >= base && addr < base +
+  // size` is not always a legal comparator. A region ending at the top of the
+  // bus makes `base + size` equal to 2**addrWidth, one bit too wide; a region
+  // starting above a master's reach makes `base` itself too wide. SpinalHDL
+  // refuses both with "OUT OF RANGE CONSTANT. Operator UInt < UInt", so the
+  // failure is an elaboration error -- there is no bitstream and no waveform to
+  // read, only a config that cannot be built.
+  //
+  // Neither shape is exotic. The first is any map that covers the whole address
+  // space; the second is what a narrow master sees of a slave that a wider
+  // master on the same crossbar reaches, and every master decodes in its own
+  // address width. Both are constants, and the decode returns them as
+  // constants: see AddrDecode in Axi4Crossbar.scala.
+
+  private val halfSpace = BigInt(1) << 31
+
+  test("a map covering the whole address space elaborates and still routes") {
+    val cfg = AxiZeroConfig(
+      masters = Seq.fill(2)(MasterPort(masterCfg, FullAxi4)),
+      slaves = Seq(
+        SlavePort(slaveCfg, FullAxi4, BigInt(0), halfSpace),
+        SlavePort(slaveCfg, FullAxi4, halfSpace, halfSpace)
+      ),
+      maxOutstanding = 4,
+      decodeErrorResponse = true
+    )
+    simCfg.compile(new AxiZeroMixedTop(cfg)).doSim { dut =>
+      SimTimeout(200000)
+      val cd = bringUp(dut)
+
+      // Count what each slave port is handed. Reading back what was written
+      // would prove nothing here: every address is mapped, so a decode that
+      // sent the whole space to slave 0 would store and return the same values
+      // and pass.
+      val seen = Array(0, 0)
+      for (si <- 0 until 2) {
+        val port = dut.io.slaves(si)
+        fork {
+          while (true) {
+            cd.waitSampling()
+            if (port.aw.valid.toBoolean && port.aw.ready.toBoolean) seen(si) += 1
+          }
+        }
+      }
+
+      for ((addr, si) <- Seq(0x0L -> 0, 0x7ffffffcL -> 0, 0x80000000L -> 1, 0xfffffffcL -> 1)) {
+        val before    = (seen(0), seen(1))
+        val (_, resp) = writeResp(dut.io.masters(0), cd, addr)
+        assert(resp == OKAY, f"write to 0x$addr%08x returned $resp, expected OKAY")
+        val delta    = (seen(0) - before._1, seen(1) - before._2)
+        val expected = if (si == 0) (1, 0) else (0, 1)
+        assert(delta == expected, f"write to 0x$addr%08x landed as $delta, expected $expected")
+      }
+    }
+  }
+
+  test("lite: a map covering the whole address space elaborates and still routes") {
+    val liteCfg = AxiZeroConfig.allLite(
+      numMasters = 2,
+      numSlaves = 2,
+      addrWidth = 32,
+      dataWidth = 32,
+      addressMap = Seq(BigInt(0) -> halfSpace, halfSpace -> halfSpace)
+    )
+    simCfg.compile(new AxiZeroLiteTop(liteCfg)).doSim { dut =>
+      SimTimeout(200000)
+      val cd = dut.clockDomain
+      cd.forkStimulus(10)
+      for (m <- dut.io.masters) SimHelpers.initMaster(m)
+      for (s <- dut.io.slaves) SimHelpers.spawnLiteSlave(s, cd)
+      cd.waitSampling(5)
+
+      val (_, lo) = writeResp(dut.io.masters(0), cd, 0x40L)
+      assert(lo == OKAY, s"Lite write at the bottom of a full-space map returned $lo")
+      val (_, hi) = writeResp(dut.io.masters(0), cd, 0xfffffffcL)
+      assert(hi == OKAY, s"Lite write at the top of a full-space map returned $hi")
+    }
+  }
+
+  test("a slave a narrow master cannot reach decodes to a constant, not an error") {
+    val narrowCfg = masterCfg.copy(addressWidth = 16)
+    val cfg = AxiZeroConfig(
+      masters = Seq(MasterPort(narrowCfg, FullAxi4), MasterPort(masterCfg, FullAxi4)),
+      slaves = Seq(
+        SlavePort(slaveCfg, FullAxi4, BigInt(0), BigInt(0x8000)),
+        SlavePort(slaveCfg, FullAxi4, halfSpace, halfSpace)
+      ),
+      maxOutstanding = 4,
+      decodeErrorResponse = true
+    )
+    simCfg.compile(new AxiZeroMixedTop(cfg)).doSim { dut =>
+      SimTimeout(200000)
+      val cd = bringUp(dut)
+
+      // Master 0 addresses 16 bits, so slave 1 is not merely unmapped for it,
+      // it is unreachable -- the comparison that would place it cannot be
+      // built. What master 0 must still get is an ordinary decode error, and
+      // master 1 must still reach the slave that master 0 cannot.
+      val (_, mapped) = writeResp(dut.io.masters(0), cd, 0x1000L)
+      assert(mapped == OKAY, s"narrow master's mapped write returned $mapped")
+
+      val (_, gap) = writeResp(dut.io.masters(0), cd, 0x9000L)
+      assert(gap == DECERR, s"narrow master's unmapped write returned $gap, expected DECERR")
+
+      val (_, wide) = writeResp(dut.io.masters(1), cd, 0x80001000L)
+      assert(wide == OKAY, s"wide master's write to the high slave returned $wide")
+    }
+  }
+
+  test("a slave beyond every master's reach is refused when the config is built") {
+    // Better here than in the decoder: a region no master can address is a map
+    // entry that would silently become a permanent decode error.
+    val e = intercept[IllegalArgumentException] {
+      AxiZeroConfig(
+        masters = Seq(MasterPort(masterCfg, FullAxi4)),
+        slaves = Seq(SlavePort(slaveCfg, FullAxi4, BigInt(1) << 32, slaveSize))
+      )
+    }
+    assert(
+      e.getMessage.contains("master address space"),
+      s"the config was refused for the wrong reason: ${e.getMessage}"
+    )
+  }
 }

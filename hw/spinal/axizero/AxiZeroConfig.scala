@@ -164,6 +164,10 @@ case class AxiZeroConfig(
   def slaveSideIdWidth(masterIdWidth: Int): Int = masterIdWidth + masterIndexBits
 
   // ---- address map validation ----------------------------------------------
+  /** The widest address any master on this crossbar can drive. */
+  private val maxMasterAddrW: Int =
+    if (masters.isEmpty) 0 else masters.map(_.config.addressWidth).max
+
   for (si <- slaves.indices) {
     val sp = slaves(si)
     require(
@@ -174,6 +178,18 @@ case class AxiZeroConfig(
       (sp.baseAddress & (sp.size - 1)) == 0,
       s"Slave $si: baseAddress (0x${sp.baseAddress
           .toString(16)}) must be aligned to size (0x${sp.size.toString(16)})"
+    )
+    // A region past the widest master's reach is one no master can ever
+    // address, so the decoder would turn it into a permanent decode error and
+    // say nothing. Checked against the widest master rather than each one: a
+    // slave above a narrow master but within a wide one is a legitimate
+    // mixed-width map, and the narrow master's decode of it is a constant.
+    // The bound is inclusive, so a map that ends exactly at the top of the
+    // address space is allowed.
+    require(
+      masters.isEmpty || sp.endAddress <= (BigInt(1) << maxMasterAddrW),
+      s"Slave $si [0x${sp.baseAddress.toString(16)}, 0x${sp.endAddress.toString(16)}) is outside " +
+        s"the $maxMasterAddrW-bit master address space, so no master can reach it"
     )
   }
   for (i <- slaves.indices; j <- slaves.indices if i < j) {

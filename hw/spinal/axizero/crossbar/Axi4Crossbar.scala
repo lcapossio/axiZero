@@ -35,6 +35,48 @@ import axizero._
 // On the return path (B/R), the upper bits are stripped and the response
 // is routed to the correct master.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Address decode, shared by both crossbars
+// ---------------------------------------------------------------------------
+object AddrDecode {
+
+  /** Does `addr` fall in this slave's region?
+    *
+    * AxiZeroConfig requires every region to have a power-of-two size and a size-aligned base, which
+    * makes membership an equality on the tag bits above log2(size) rather than a pair of magnitude
+    * comparisons. That is the cheaper decode -- one narrow equality instead of two full-width carry
+    * chains, on a path that feeds the arbiter's grant -- and it is the only one that is always
+    * legal to build.
+    *
+    * The range form is not: `addr < base + size` is an out-of-range constant whenever the region
+    * ends at the top of the bus, because `base + size` is then 2**addrWidth and one bit too wide
+    * for the comparator, and `addr >= base` is out of range whenever the region starts above the
+    * bus. SpinalHDL rejects both with "OUT OF RANGE CONSTANT. Operator UInt < UInt". Neither is
+    * exotic: the first is any map reaching the top of the address space, and the second is what a
+    * narrow master sees of a slave that a wider master on the same crossbar can reach, since each
+    * master decodes in its own address width.
+    *
+    * Both of those are constants, not errors, and this returns them as constants.
+    *
+    * Correctness depends on the alignment require, not merely cost: for an unaligned base the tag
+    * comparison would silently decode a different region than the range form would.
+    */
+  def hit(addr: UInt, sp: SlavePort): Bool = {
+    val addrW = addr.getWidth
+    val lsb   = log2Up(sp.size) // exact -- size is a power of two
+    if (lsb >= addrW) {
+      // The region is at least as large as this master's whole address space.
+      // Based at zero it covers all of it; based anywhere else it is entirely
+      // above it, because alignment puts any non-zero base at or past `size`.
+      if (sp.baseAddress == 0) True else False
+    } else if ((sp.baseAddress >> lsb) >= (BigInt(1) << (addrW - lsb))) {
+      False // starts above what this master can address
+    } else {
+      addr(addrW - 1 downto lsb) === U(sp.baseAddress >> lsb, (addrW - lsb) bits)
+    }
+  }
+}
+
 class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
 
   val M             = cfg.numMasters
@@ -95,17 +137,14 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
     cfg.slaves.map(_.config) ++ (if (decErrEnabled) Seq(decErrCfg) else Nil)
 
   // =========================================================================
-  // Address decode helper — same as Lite crossbar
+  // Address decode helper — shared with the Lite crossbar (see AddrDecode)
   // =========================================================================
   def addrDecodeOH(addr: UInt): Bits = {
     // The mapped hits go in their own signal rather than into the result
     // vector: driving one bit of a Bits from the others reads as a loop to
     // PhaseCheckCombinationalLoops, which analyses whole signals.
     val hits = Bits(S bits)
-    for (si <- 0 until S) {
-      val sp = cfg.slaves(si)
-      hits(si) := (addr >= sp.baseAddress) && (addr < (sp.baseAddress + sp.size))
-    }
+    for (si <- 0 until S) hits(si) := AddrDecode.hit(addr, cfg.slaves(si))
     // The catch-all is the complement of the mapped region, so exactly one bit
     // is ever set and the vector stays one-hot for the arbiters.
     if (decErrEnabled) (!hits.orR).asBits ## hits else hits
