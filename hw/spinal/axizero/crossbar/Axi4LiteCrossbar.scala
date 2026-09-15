@@ -211,7 +211,19 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
   // Write path
   val wrActive  = Vec(Seq.fill(Sx)(RegInit(False)))
   val wrGranted = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
-  val wrRrPtr   = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
+
+  /** Has the write this slave is holding already had its data?
+    *
+    * The Lite crossbar holds a slave from AW until B and forwards the granted master's W for that
+    * whole time. AXI4-Lite writes are one beat, so every beat after the first belongs to the next
+    * write -- and a master may legally present that beat before its AW is accepted, which while B
+    * is outstanding cannot happen anywhere (masterBusy holds the master to one slave). Without this
+    * the beat is taken here and written under the previous address, whichever slave it was meant
+    * for. The bypass below has the same hole before AW: it is open while the AW waits, so a write
+    * whose data arrived early left it open for the beat after it.
+    */
+  val wrDataDone = Vec(Seq.fill(Sx)(RegInit(False)))
+  val wrRrPtr    = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
 
   // Read path
   val rdActive  = Vec(Seq.fill(Sx)(RegInit(False)))
@@ -291,9 +303,13 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
             io.masters(mi).aw.ready := slv.aw.ready
             // Also forward W alongside AW so that IPIF-based AXI4-Lite slaves
             // (which require AWVALID & WVALID simultaneously) can accept AW.
-            slv.w.valid            := io.masters(mi).w.valid
-            slv.w.payload          := io.masters(mi).w.payload
-            io.masters(mi).w.ready := slv.w.ready
+            // Closed again once this write's beat has gone through: the next
+            // beat is the next write's, which may not be for this slave.
+            when(!wrDataDone(si)) {
+              slv.w.valid            := io.masters(mi).w.valid
+              slv.w.payload          := io.masters(mi).w.payload
+              io.masters(mi).w.ready := slv.w.ready
+            }
           }
         }
 
@@ -339,9 +355,11 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
 
       for (mi <- 0 until M) {
         when(gmi === mi) {
-          slv.w.valid            := io.masters(mi).w.valid
-          slv.w.payload          := io.masters(mi).w.payload
-          io.masters(mi).w.ready := slv.w.ready
+          when(!wrDataDone(si)) {
+            slv.w.valid            := io.masters(mi).w.valid
+            slv.w.payload          := io.masters(mi).w.payload
+            io.masters(mi).w.ready := slv.w.ready
+          }
 
           io.masters(mi).b.valid   := slv.b.valid
           io.masters(mi).b.payload := slv.b.payload
@@ -350,6 +368,14 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
       }
 
       when(slv.b.fire) { wrActive(si) := False }
+    }
+
+    // B wins over a beat in the same cycle: that pair ends the write, and the
+    // next one starts with its data still to come.
+    when(slv.b.fire) {
+      wrDataDone(si) := False
+    } elsewhen (slv.w.fire) {
+      wrDataDone(si) := True
     }
   }
 

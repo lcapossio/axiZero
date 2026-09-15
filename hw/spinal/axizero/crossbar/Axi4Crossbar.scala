@@ -480,6 +480,22 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
     // =====================================================================
     val wrActive  = Vec(Seq.fill(Sx)(RegInit(False)))
     val wrGranted = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
+
+    /** Has the write this slave is holding already had all of its data?
+      *
+      * Blocking mode owns a slave from AW until B and forwards the granted master's W for that
+      * whole time -- including after the burst's last beat has already gone through. A master may
+      * legally present the next burst's data before its AW is accepted, and while B is outstanding
+      * that AW cannot be accepted anywhere (masterBusy holds the master to one slave), so those
+      * beats land here, under the previous address, whichever slave the next burst was actually
+      * addressed to. The same happens before AW: the bypass below is open while the AW waits, so a
+      * burst delivered entirely early leaves it open for the beats after it.
+      *
+      * This bit closes W once the data this slave was given is complete, and opens it again when B
+      * retires the transaction. It is the blocking counterpart of wPreLast in the pipelined path.
+      */
+    val wrDataDone = Vec(Seq.fill(Sx)(RegInit(False)))
+
     val rdActive  = Vec(Seq.fill(Sx)(RegInit(False)))
     val rdGranted = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
 
@@ -534,9 +550,13 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
               // (which require AWVALID & WVALID simultaneously before asserting AWREADY)
               // can complete the handshake.  If the slave fires W here the master
               // deasserts wvalid and the 'otherwise' branch below sends nothing.
-              slv.w.valid            := io.masters(mi).w.valid
-              slv.w.payload          := io.masters(mi).w.payload
-              io.masters(mi).w.ready := slv.w.ready
+              // Closed again once this burst's data is all sent: what follows it
+              // belongs to the next burst, which may not be for this slave.
+              when(!wrDataDone(si)) {
+                slv.w.valid            := io.masters(mi).w.valid
+                slv.w.payload          := io.masters(mi).w.payload
+                io.masters(mi).w.ready := slv.w.ready
+              }
             }
           }
           when(slv.aw.fire) {
@@ -552,9 +572,11 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
         val gmi = wrGranted(si)
         for (mi <- 0 until M) {
           when(gmi === mi) {
-            slv.w.valid            := io.masters(mi).w.valid
-            slv.w.payload          := io.masters(mi).w.payload
-            io.masters(mi).w.ready := slv.w.ready
+            when(!wrDataDone(si)) {
+              slv.w.valid            := io.masters(mi).w.valid
+              slv.w.payload          := io.masters(mi).w.payload
+              io.masters(mi).w.ready := slv.w.ready
+            }
 
             io.masters(mi).b.valid                                    := slv.b.valid
             if (cfg.masters(mi).config.useResp) io.masters(mi).b.resp := slv.b.resp
@@ -563,6 +585,15 @@ class Axi4Crossbar(cfg: AxiZeroConfig) extends Component {
           }
         }
         when(slv.b.fire) { wrActive(si) := False }
+      }
+
+      // B wins over a last beat in the same cycle: that pair ends the
+      // transaction, and the next one starts with its data still to come.
+      val wrLastBeat = if (busSlaveCfgs(si).useLast) slv.w.last else True
+      when(slv.b.fire) {
+        wrDataDone(si) := False
+      } elsewhen (slv.w.fire && wrLastBeat) {
+        wrDataDone(si) := True
       }
     }
 
