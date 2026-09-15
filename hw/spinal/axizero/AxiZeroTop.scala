@@ -189,7 +189,16 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
         conv.io.output
       } else afterAdapt
 
-    xbar.io.masters(mi) <> afterWidthConv
+    // A master may declare fewer IDs than the widest master in the design;
+    // the fabric carries the widest, so pad this port's IDs out to it.
+    val afterIdWiden: Axi4 =
+      if (afterWidthConv.config.idWidth != xbarCfg.masters(mi).config.idWidth) {
+        val widen = new Axi4IdWidener(afterWidthConv.config, xbarCfg.masters(mi).config)
+        widen.io.input <> afterWidthConv
+        widen.io.output
+      } else afterWidthConv
+
+    xbar.io.masters(mi) <> afterIdWiden
   }
 
   // ── Slave-side wiring ─────────────────────────────────────────────────────
