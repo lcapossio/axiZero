@@ -180,7 +180,27 @@ case class VexZeroSocConfig(
     * rides along because it needs no CPU and no bus, and a board build has room for it. See
     * [[AxiStreamArtySmoke]].
     */
-  axisSmoke: Boolean = false
+  axisSmoke: Boolean = false,
+  /** A second on-chip RAM, as a second full AXI4 slave.
+    *
+    * One RAM is enough to load the fabric, but not to test how it orders. AXI4's same-ID rule is
+    * about transactions that go to *different* slaves: an ID with work outstanding at one slave may
+    * not be admitted to another until the first has answered, because the fabric cannot otherwise
+    * promise they complete in order. With a single full slave that rule is never asked for
+    * anything. This is the second destination, and [[multiIdGens]] is what drives an ID between the
+    * two.
+    */
+  ram2Base: Option[BigInt] = None,
+  ram2Size: BigInt = 4 KiB,
+  /** Self-checking generators that vary their transaction ID across both RAMs.
+    *
+    * Every other master here drives a constant ID -- VexRiscv included -- so the ordering table has
+    * only ever been exercised in its degenerate shape. These are the ones that make it work: each
+    * runs several IDs at once and sends one ID's consecutive bursts to different RAMs, and each
+    * checks in hardware that every response came back under the right ID and in the right order.
+    * See [[AxiMultiIdGen]]. Needs [[ram2Base]].
+    */
+  multiIdGens: Seq[AxiMultiIdGenConfig] = Nil
 ) {
   require(ramSize >= (8 KiB), "the boot firmware keeps its data at RAM + 0x1000")
   require(cpuQos >= 0 && cpuQos <= 15, s"cpuQos must fit AXQOS's four bits, not $cpuQos")
@@ -204,6 +224,44 @@ case class VexZeroSocConfig(
           other.baseAddr + other.windowBytes <= g.baseAddr,
         f"traffic generators $j and $i overlap at 0x${g.baseAddr}%x; each one owns its window"
       )
+    }
+  }
+
+  require(
+    multiIdGens.isEmpty || ram2Base.isDefined,
+    "multiIdGens need ram2Base: driving one ID between two slaves needs a second slave"
+  )
+  for ((g, i) <- multiIdGens.zipWithIndex) {
+    require(
+      g.regionABase >= firmwareTop && g.regionABase + g.windowBytes <= ramBase + ramSize,
+      f"multi-ID generator $i covers 0x${g.regionABase}%x..0x${g.regionABase + g.windowBytes}%x in " +
+        f"the first RAM, which is not inside it above the firmware " +
+        f"(0x$firmwareTop%x..0x${ramBase + ramSize}%x)"
+    )
+    for (base2 <- ram2Base) {
+      require(
+        g.regionBBase >= base2 && g.regionBBase + g.windowBytes <= base2 + ram2Size,
+        f"multi-ID generator $i covers 0x${g.regionBBase}%x..0x${g.regionBBase + g.windowBytes}%x " +
+          f"in the second RAM, which is not inside it (0x$base2%x..0x${base2 + ram2Size}%x)"
+      )
+    }
+    // Both halves of a generator's window are its own, as for the saturating
+    // generators: it predicts what every word holds, so a second writer looks
+    // exactly like the fabric losing a beat.
+    for (t <- trafficGens) {
+      require(
+        g.regionABase + g.windowBytes <= t.baseAddr || t.baseAddr + t.windowBytes <= g.regionABase,
+        f"multi-ID generator $i and a traffic generator overlap at 0x${g.regionABase}%x"
+      )
+    }
+    for (j <- 0 until i) {
+      val other = multiIdGens(j)
+      for ((a, b) <- Seq((g.regionABase, other.regionABase), (g.regionBBase, other.regionBBase))) {
+        require(
+          a + g.windowBytes <= b || b + other.windowBytes <= a,
+          f"multi-ID generators $j and $i overlap at 0x$a%x; each one owns its windows"
+        )
+      }
     }
   }
 }
@@ -231,12 +289,13 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
       * stall term does the same for one that got going and then hung: its errors stay zero and its
       * lap count stays non-zero for ever, so without it a deadlocked fabric reads as a pass.
       */
-    val genOk = cfg.trafficGens.nonEmpty generate out(Bool())
+    val genOk = (cfg.trafficGens.nonEmpty || cfg.multiIdGens.nonEmpty) generate out(Bool())
 
     /** One bit per generator that has miscompared, seen a bad response or stalled, so a failure
       * names the window it happened in rather than the whole fabric.
       */
-    val genFault = cfg.trafficGens.nonEmpty generate out(Bits(cfg.trafficGens.size bits))
+    val genFault = (cfg.trafficGens.nonEmpty || cfg.multiIdGens.nonEmpty) generate
+      out(Bits(cfg.trafficGens.size + cfg.multiIdGens.size bits))
 
     /** The AXI4-Stream island passed every one of its checks. Only with `axisSmoke`. */
     val axisOk = cfg.axisSmoke generate out(Bool())
@@ -259,20 +318,43 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   // host bridge drive a constant), so AxiZeroMixedTop's effective master ID
   // width is 1 and the slave side widens by the master index: 2 masters give
   // slaveIdW 2, and 3 masters give 3.
-  private val hasVideo = cfg.videoBase.isDefined
-  private val genCount = cfg.trafficGens.size
+  private val hasVideo     = cfg.videoBase.isDefined
+  private val genCount     = cfg.trafficGens.size
+  private val multiIdCount = cfg.multiIdGens.size
   private val masterCount =
-    2 + (if (cfg.hostMaster) 1 else 0) + (if (hasVideo) 1 else 0) + genCount
+    2 + (if (cfg.hostMaster) 1 else 0) + (if (hasVideo) 1 else 0) + genCount + multiIdCount
 
   // Masters are added in a fixed order so an index never moves under a config
-  // that leaves one of them out: fetch, load/store, the host, video, then the
-  // traffic generators.
-  private val hostIndex  = Option.when(cfg.hostMaster)(2)
-  private val videoIndex = Option.when(hasVideo)(2 + (if (cfg.hostMaster) 1 else 0))
-  private val genIndex0  = 2 + (if (cfg.hostMaster) 1 else 0) + (if (hasVideo) 1 else 0)
-  private val masterCfg  = VexZeroSoc.masterCfg
-  private val fullSlaveCfg =
-    Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = masterCfg.idWidth + log2Up(masterCount))
+  // that leaves one of them out: fetch, load/store, the host, video, the
+  // traffic generators, then the multi-ID generators.
+  private val hostIndex     = Option.when(cfg.hostMaster)(2)
+  private val videoIndex    = Option.when(hasVideo)(2 + (if (cfg.hostMaster) 1 else 0))
+  private val genIndex0     = 2 + (if (cfg.hostMaster) 1 else 0) + (if (hasVideo) 1 else 0)
+  private val multiIdIndex0 = genIndex0 + genCount
+  private val hasAnyGen     = cfg.trafficGens.nonEmpty || cfg.multiIdGens.nonEmpty
+
+  // Slaves: RAM, GPIO, system control, then the optional bench IO, video and
+  // second RAM, each appended in that order.
+  private val ram2Index =
+    3 + (if (cfg.benchIoBase.isDefined) 1 else 0) + (if (hasVideo) 1 else 0)
+  private val masterCfg = VexZeroSoc.masterCfg
+
+  /** The multi-ID generators' own port config: the same bus with an ID field wide enough for the
+    * IDs they use. Only their ports are widened, so every other design generates exactly the
+    * netlist it did before this option existed.
+    */
+  private val multiIdW =
+    if (cfg.multiIdGens.isEmpty) masterCfg.idWidth
+    else cfg.multiIdGens.map(g => log2Up(g.idCount)).max
+  private val multiIdMasterCfg = masterCfg.copy(idWidth = multiIdW)
+
+  // The slave side carries the widest master ID plus the index bits the
+  // crossbar adds to tell the masters apart.
+  private val fullSlaveCfg = Axi4Config(
+    addressWidth = 32,
+    dataWidth = 32,
+    idWidth = (masterCfg.idWidth max multiIdW) + log2Up(masterCount)
+  )
   private val liteSlaveCfg = Axi4Config(
     addressWidth = 32,
     dataWidth = 32,
@@ -333,6 +415,13 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
         regSlice = true,
         regSliceSkid = cfg.masterRegSliceSkid
       ) // traffic generators
+    ) ++ Seq.fill(multiIdCount)(
+      MasterPort(
+        multiIdMasterCfg,
+        FullAxi4,
+        regSlice = true,
+        regSliceSkid = cfg.masterRegSliceSkid
+      ) // multi-ID generators
     ),
     slaves = Seq(
       SlavePort(fullSlaveCfg, FullAxi4, cfg.ramBase, cfg.ramSize, cfg.slaveRegSlices),
@@ -342,6 +431,10 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
       SlavePort(liteSlaveCfg, LiteAxi4, _, VexZeroBenchIo.windowSize, cfg.slaveRegSlices)
     ) ++ cfg.videoBase.map(
       SlavePort(liteSlaveCfg, LiteAxi4, _, VtpgZero.windowSize, cfg.slaveRegSlices)
+    ) ++ cfg.ram2Base.map(
+      // Appended last on purpose: every existing slave keeps the index it had,
+      // so a design without a second RAM decodes exactly as it did before.
+      SlavePort(fullSlaveCfg, FullAxi4, _, cfg.ram2Size, cfg.slaveRegSlices)
     ),
     arbitration = cfg.arbitration,
     maxOutstanding = cfg.maxOutstanding
@@ -494,13 +587,50 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
       gen
   }
 
-  if (trafficGens.nonEmpty) {
-    io.genFault := Cat(
-      trafficGens.map(g => g.io.dataErrors =/= 0 || g.io.respErrors =/= 0 || g.io.stalled)
+  // ── Second on-chip RAM ───────────────────────────────────────────────────
+  // The multi-ID generators' other destination. It holds no firmware and comes
+  // up zeroed: everything in it is written and read back by the generators.
+  val ram2 = cfg.ram2Base.map { _ =>
+    val r = Axi4SharedOnChipRam(
+      dataWidth = 32,
+      byteCount = cfg.ram2Size,
+      idWidth = fullSlaveCfg.idWidth
     )
-    io.genOk := trafficGens
-      .map(g => g.io.dataErrors === 0 && g.io.respErrors === 0 && g.io.laps =/= 0 && !g.io.stalled)
-      .reduce(_ && _)
+    r.setWeakName("ram2")
+    r.ram.init(Seq.fill((cfg.ram2Size / 4).toInt)(B(0, 32 bits)))
+    r.io.axi << fabric.io.slaves(ram2Index).toShared()
+    r
+  }
+
+  // ── Multi-ID generators ──────────────────────────────────────────────────
+  // What makes the ordering table do anything: several IDs in flight at once,
+  // and one ID's consecutive bursts aimed at different RAMs, which is what the
+  // single-slave-per-ID rule exists to hold back. Each one checks in hardware
+  // that every response came back under the right ID and in the right order.
+  val multiIdGens = cfg.multiIdGens.zipWithIndex.map {
+    case (genCfg, i) =>
+      val gen = new AxiMultiIdGen(multiIdMasterCfg, genCfg)
+      gen.setWeakName(s"multiIdGen$i")
+      fabric.io.masters(multiIdIndex0 + i) << gen.io.axi
+      gen
+  }
+
+  private def satGenOk(g: AxiSatGen): Bool =
+    g.io.dataErrors === 0 && g.io.respErrors === 0 && g.io.laps =/= 0 && !g.io.stalled
+
+  // A multi-ID generator has to have done the work as well as got it right:
+  // without both IDs in flight at once and an ID asking to move between the
+  // RAMs, a clean run says nothing about ordering and must not read as a pass.
+  private def multiIdGenOk(g: AxiMultiIdGen): Bool =
+    g.io.dataErrors === 0 && g.io.respErrors === 0 && g.io.orderErrors === 0 &&
+      g.io.laps =/= 0 && !g.io.stalled && g.io.multiIdSeen && g.io.crossSlaveTried
+
+  if (trafficGens.nonEmpty || multiIdGens.nonEmpty) {
+    io.genFault := Cat(
+      trafficGens.map(g => g.io.dataErrors =/= 0 || g.io.respErrors =/= 0 || g.io.stalled) ++
+        multiIdGens.map(g => !multiIdGenOk(g))
+    )
+    io.genOk := (trafficGens.map(satGenOk) ++ multiIdGens.map(multiIdGenOk)).reduce(_ && _)
   }
 
   // ── AXI4-Stream island ───────────────────────────────────────────────────
@@ -562,13 +692,13 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   private val verdict = Bits(32 bits)
   verdict                                 := 0
   verdict(VexZeroSysCtrl.busViolationBit) := (if (cfg.protocolCheck) busCheck.get.any else False)
-  verdict(VexZeroSysCtrl.genOkBit)        := (if (trafficGens.nonEmpty) io.genOk else True)
+  verdict(VexZeroSysCtrl.genOkBit)        := (if (hasAnyGen) io.genOk else True)
   verdict(VexZeroSysCtrl.axisOkBit)       := (if (cfg.axisSmoke) io.axisOk else True)
   verdict(VexZeroSysCtrl.hasCheckersBit)  := Bool(cfg.protocolCheck)
-  verdict(VexZeroSysCtrl.hasGensBit)      := Bool(trafficGens.nonEmpty)
+  verdict(VexZeroSysCtrl.hasGensBit)      := Bool(hasAnyGen)
   verdict(VexZeroSysCtrl.hasIslandBit)    := Bool(cfg.axisSmoke)
-  if (trafficGens.nonEmpty) {
-    verdict(VexZeroSysCtrl.genFaultShift, trafficGens.size bits) := io.genFault
+  if (hasAnyGen) {
+    verdict(VexZeroSysCtrl.genFaultShift, trafficGens.size + multiIdGens.size bits) := io.genFault
   }
   sysCtrl.io.verdict := verdict
 

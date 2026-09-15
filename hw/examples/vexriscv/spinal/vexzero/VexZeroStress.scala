@@ -4,7 +4,7 @@ package vexzero
 
 import spinal.core._
 import axizero._
-import axizero.verif.AxiSatGenConfig
+import axizero.verif.{AxiMultiIdGenConfig, AxiSatGenConfig}
 
 // ---------------------------------------------------------------------------
 // VexZeroStress  —  the loaded configurations, defined once
@@ -102,7 +102,16 @@ object VexZeroStress {
   /** Round-robin, but with the CPU's load/store port routed through AXI3 and back. */
   case object Axi3 extends Policy { val name = "axi3" }
 
-  val policies: Seq[Policy] = Seq(Rr, Wrr, Qos, Axi3)
+  /** Round-robin, with a second RAM and two multi-ID generators driving IDs between the two.
+    *
+    * The other four builds say what the fabric does under load. This one says what it does about
+    * *order*: every other master on this board, VexRiscv included, drives one constant ID, so until
+    * this build the ordering table went to hardware having only ever been exercised in simulation.
+    * See [[AxiMultiIdGen]] for what is checked and how.
+    */
+  case object Ids extends Policy { val name = "ids" }
+
+  val policies: Seq[Policy] = Seq(Rr, Wrr, Qos, Axi3, Ids)
 
   def policyOf(name: String): Policy =
     policies
@@ -131,6 +140,42 @@ object VexZeroStress {
     *   add the debug-cable master port. The DE25-Nano reports over it and so needs it; the Arty
     *   reports over its UART and does not.
     */
+  /** The second RAM, and the windows the multi-ID generators own in each.
+    *
+    * 4 KiB is one BRAM on either board and far more than the generators need: each one owns 128
+    * words of each RAM, which at four beats a burst is 32 bursts a pass per region.
+    */
+  val ram2Base: BigInt = BigInt("90000000", 16)
+  val ram2Size: BigInt = 4 KiB
+
+  private val idWindowWords = 128
+  private val idWindowBytes = idWindowWords * 4
+
+  /** The two multi-ID generators. Four IDs each -- twice the crossbar's default of two threads per
+    * master per direction, so an ID that finds no free thread has to wait for one, which is its own
+    * case and one no constant-ID master can produce.
+    */
+  def multiIdGenerators: Seq[AxiMultiIdGenConfig] = Seq(
+    AxiMultiIdGenConfig(
+      regionABase = ramBase + 0x6000,
+      regionBBase = ram2Base,
+      windowWords = idWindowWords,
+      idCount = 4,
+      dataPattern = 0xd1000000L,
+      outstandingPerId = 2,
+      respStall = 3
+    ),
+    AxiMultiIdGenConfig(
+      regionABase = ramBase + 0x6000 + idWindowBytes,
+      regionBBase = ram2Base + idWindowBytes,
+      windowWords = idWindowWords,
+      idCount = 4,
+      dataPattern = 0xd2000000L,
+      outstandingPerId = 2,
+      respStall = 5
+    )
+  )
+
   def socConfig(
     policy: Policy,
     switchWidth: Int = 4,
@@ -149,6 +194,7 @@ object VexZeroStress {
       case Wrr  => WeightedRoundRobin(weights(hostMaster))
       case Qos  => QosBased
       case Axi3 => RoundRobin
+      case Ids  => RoundRobin
     }
 
     VexZeroSocConfig(
@@ -163,7 +209,13 @@ object VexZeroStress {
       protocolCheck = true,
       trafficGens = generators(qos0, qos1),
       axi3DataPath = policy == Axi3,
-      axisSmoke = true
+      axisSmoke = true,
+      // The ordering build carries the second RAM and the multi-ID generators
+      // on top of everything the others carry, so what it adds is the ordering
+      // traffic and not a different design.
+      ram2Base = Option.when(policy == Ids)(ram2Base),
+      ram2Size = ram2Size,
+      multiIdGens = if (policy == Ids) multiIdGenerators else Nil
     )
   }
 }

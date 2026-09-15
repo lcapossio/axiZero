@@ -8,7 +8,7 @@ import spinal.core._
 import spinal.core.sim._
 import axizero.verif.Axi4ProtocolChecker
 import vexzero._
-import vexzero.VexZeroStress.{Axi3, Qos, Rr, Wrr}
+import vexzero.VexZeroStress.{Axi3, Ids, Qos, Rr, Wrr}
 
 // ---------------------------------------------------------------------------
 // VexZeroGenStressSpec  —  arbitration, judged on a loaded crossbar
@@ -69,6 +69,17 @@ class VexZeroGenStressSpec extends AnyFunSuite {
 
   private val switchValue = 0x5
 
+  /** One multi-ID generator's own verdict, read out of the DUT at the end of a run. */
+  private case class MultiIdReport(
+    dataErrors: Int,
+    respErrors: Int,
+    orderErrors: Int,
+    laps: Int,
+    stalled: Boolean,
+    multiIdSeen: Boolean,
+    crossSlaveTried: Boolean
+  )
+
   /** What one run measured, so a test can assert on the parts it cares about. */
   private case class Run(
     stats: Seq[AxiProfile],
@@ -86,7 +97,13 @@ class VexZeroGenStressSpec extends AnyFunSuite {
       * then the firmware has finished and is spinning in place -- it issues no loads or stores at
       * all. Anything that wants to claim the load/store path carried real traffic has to look here.
       */
-    bootStoreLoads: Long
+    bootStoreLoads: Long,
+    /** What the multi-ID generators reported, empty in the builds that have none. Each entry is one
+      * generator: data, response and ordering error counts, laps, and the two pieces of evidence
+      * that the traffic was what it claims -- more than one ID in flight at once, and an ID asking
+      * to move to the other RAM while it was still live at one.
+      */
+    multiId: Seq[MultiIdReport] = Nil
   ) {
     def contendedFraction: Double = contendedCycles.toDouble / cycles
 
@@ -117,6 +134,15 @@ class VexZeroGenStressSpec extends AnyFunSuite {
         AxiProfile.publishRequests(dut.fabric.xbar.io.masters)
         dut.busCheck.foreach { bc =>
           bc.checkers.foreach { c => c.sticky.simPublic(); c.overflow.simPublic() }
+        }
+        dut.multiIdGens.foreach { g =>
+          g.io.dataErrors.simPublic()
+          g.io.respErrors.simPublic()
+          g.io.orderErrors.simPublic()
+          g.io.laps.simPublic()
+          g.io.stalled.simPublic()
+          g.io.multiIdSeen.simPublic()
+          g.io.crossSlaveTried.simPublic()
         }
         dut
       }
@@ -164,12 +190,9 @@ class VexZeroGenStressSpec extends AnyFunSuite {
 
         // ── Measure ─────────────────────────────────────────────────────
         val ports = dut.fabric.io.masters
-        val stats =
-          Seq("m0 fetch", "m1 load/store", "m2 gen0", "m3 gen1")
-            .take(ports.length)
-            .map(
-              new AxiProfile(_)
-            )
+        val names = Seq("m0 fetch", "m1 load/store", "m2 gen0", "m3 gen1") ++
+          (4 until ports.length).map(i => s"m$i multiId${i - 4}")
+        val stats = names.take(ports.length).map(new AxiProfile(_))
 
         var cycle     = 0L
         var contended = 0L
@@ -200,7 +223,18 @@ class VexZeroGenStressSpec extends AnyFunSuite {
           overflow = overflow,
           axisOk = dut.io.axisOk.toBoolean,
           axisStatus = dut.io.axisStatus.toLong,
-          bootStoreLoads = bootStoreLoads
+          bootStoreLoads = bootStoreLoads,
+          multiId = dut.multiIdGens.map { g =>
+            MultiIdReport(
+              dataErrors = g.io.dataErrors.toInt,
+              respErrors = g.io.respErrors.toInt,
+              orderErrors = g.io.orderErrors.toInt,
+              laps = g.io.laps.toInt,
+              stalled = g.io.stalled.toBoolean,
+              multiIdSeen = g.io.multiIdSeen.toBoolean,
+              crossSlaveTried = g.io.crossSlaveTried.toBoolean
+            )
+          }
         )
       }
     result
@@ -239,6 +273,51 @@ class VexZeroGenStressSpec extends AnyFunSuite {
     print(AxiProfile.report(r.stats))
     println(f"  gen0/gen1 beats ${r.beats(genMaster0)}%,d / ${r.beats(genMaster1)}%,d")
     println(f"  load/store transactions during boot ${r.bootStoreLoads}%,d")
+    for ((g, i) <- r.multiId.zipWithIndex) {
+      println(
+        f"  multiId$i%d laps ${g.laps}%,d, errors ${g.dataErrors}%d data / ${g.respErrors}%d resp " +
+          f"/ ${g.orderErrors}%d order, several IDs in flight ${g.multiIdSeen}%s, " +
+          f"live ID asked to cross ${g.crossSlaveTried}%s"
+      )
+    }
+  }
+
+  // ── Multi-ID ordering ─────────────────────────────────────────────────────
+  test("multi-ID: several IDs cross two RAMs and every answer comes back in order") {
+    // What this build adds to the other four: masters that vary their ID. The
+    // other four load the fabric with constant-ID traffic, so they say what it
+    // does about arbitration and nothing about order -- and AXI4's ordering
+    // rule is the one part of the design whose correctness depends on a master
+    // using more than one ID. The generators check that in hardware, so this
+    // test is asking the same question the bitstream will.
+    val r = run(VexZeroStress.socConfig(Ids), "vexzero_gen_ids")
+    report("multi-ID", r)
+    assertHealthy(r, "multi-ID")
+
+    assert(r.multiId.size == 2, s"expected two multi-ID generators, got ${r.multiId.size}")
+    for ((g, i) <- r.multiId.zipWithIndex) {
+      // Order first: it is the one these generators exist for, and a data
+      // error is how a response that overtook another one shows up.
+      assert(
+        g.orderErrors == 0,
+        s"multi-ID generator $i saw ${g.orderErrors} responses under an ID with nothing " +
+          "outstanding, or a burst of the wrong length"
+      )
+      assert(g.dataErrors == 0, s"multi-ID generator $i read back ${g.dataErrors} wrong words")
+      assert(g.respErrors == 0, s"multi-ID generator $i saw ${g.respErrors} bad responses")
+      assert(!g.stalled, s"multi-ID generator $i stopped getting answers")
+      assert(g.laps > 0, s"multi-ID generator $i never completed a lap, so it proved nothing")
+
+      // And the evidence that the run was the run it claims to be. Without
+      // these a clean result would be indistinguishable from a generator that
+      // quietly issued one ID at a time to one RAM.
+      assert(g.multiIdSeen, s"multi-ID generator $i never had two IDs outstanding at once")
+      assert(
+        g.crossSlaveTried,
+        s"multi-ID generator $i never asked to move a live ID to the other RAM, so the " +
+          "single-slave-per-ID rule was never put under load"
+      )
+    }
   }
 
   // ── Round robin ───────────────────────────────────────────────────────────
