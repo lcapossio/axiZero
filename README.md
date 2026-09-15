@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 160 SpinalSim + 36 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 165 SpinalSim + 36 cocotb tests pass.
 
 ---
 
@@ -275,6 +275,11 @@ config gives the rule, which is why `ramCfg` above is one bit wider than `cpuCfg
 checks the address map for overlap, power-of-two sizes and alignment, so a bad map fails at
 elaboration with a message rather than in simulation.
 
+Master ports need not agree on their ID width: the fabric carries the widest of them and a narrower
+port has its IDs zero-extended on the way in and truncated on the way back, so a CPU with a single
+ID can sit next to a master that runs four. A design whose masters all declare the same width gets
+exactly the netlist it did before — the padding is only inserted where the widths differ.
+
 To wire it into a design instead of emitting Verilog, the ports are plain `Vec[Axi4]`, named from
 the crossbar's point of view: `io.masters` are slave interfaces you drive from your masters, and
 `io.slaves` are master interfaces you connect to your slaves.
@@ -536,7 +541,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-160 tests pass across 24 suites:
+165 tests pass across 25 suites:
 
 For the focused AXI4-Stream loop, including lint, YAML generator smoke tests, and cocotbext-axi generated-RTL tests:
 
@@ -551,6 +556,7 @@ python3 scripts/run_sim.py axis
 | `PipelinedCrossbarSpec` | 8 | Full AXI4: bursts, back-pressure, outstanding transactions |
 | `ChannelSkewSpec` | 3 | The channel skews AXI4 permits and no other slave model here produces: a slave that raises WREADY before AWREADY, so a W beat reaches it ahead of its address; a burst whose data all arrives early, where the forwarding path has to close again so the *next* burst's data is not swallowed by the slave still holding the first address; and a Lite slave whose answer lands on the cycle the next address is accepted |
 | `BlockingWriteBoundarySpec` | 3 | Where one write's data ends and the next begins in the blocking engines, which both crossbars carry their own copy of: a slave holding a write whose data is complete while its response is still outstanding, and a write whose data reached the slave before its address. In both the master may legally offer the next write's data, and the forwarding path has to be shut or that data is written under the previous address — at a slave it was never addressed to |
+| `AxiMultiIdGenSpec` | 5 | The synthesizable multi-ID generator that goes on the boards, checked against a crossbar with two RAMs: that a clean run really did have several IDs in flight and really did ask to move a live ID between slaves, that it catches a dropped byte lane, and — with a deliberately reordering RAM model — that it catches two same-ID reads answered out of order. A self-checking generator that cannot fail is worth nothing on hardware, so each of its checks is shown failing |
 | `MultiIdOrderingSpec` | 1 | Randomised multi-ID traffic — four IDs, two slaves, both directions, random response latency and master back-pressure — against a per-ID scoreboard. The only coverage of a master that varies its ID; every other master here, VexRiscv included, drives a constant one |
 | `MixedCrossbarSpec` | 4 | Full↔Lite adapters, mixed address maps |
 | `ArtySpec` | 5 | Sequence matching the Arty A7 hardware tests (T4, T5, T6, T9, combined) |
@@ -1088,7 +1094,8 @@ before a generator stopped: one that deadlocks after its first lap keeps zero er
 lap count for ever, and would otherwise read as a pass. Burst length varies per pass, `1 << (p % 4)` beats, because long bursts are what
 make an arbitration ranking decay while short ones make the arbiter choose often.
 
-Four builds put this on both boards, differing in one field — how the crossbar chooses:
+Five builds put this on both boards, four of them differing in one field — how the crossbar chooses
+— and the fifth in what the masters do:
 
 | Build | Arbitration | Asks |
 |---|---|---|
@@ -1096,6 +1103,27 @@ Four builds put this on both boards, differing in one field — how the crossbar
 | `stress_wrr` | weighted 3:1 | do the weights move the split, without starving the lower one? |
 | `stress_qos` | QoS 12 / 6 / 2 | does ranking hold across three levels at once? |
 | `stress_axi3` | round robin | does the [AXI3 adapter](#axi3-adapter-test-1m4s-axi3-bridge-in-data-path) carry a CPU's whole load/store path under that load? |
+| `stress_ids` | round robin | does the fabric keep AXI4's **ordering** promise — same-ID responses in issue order, one slave per live ID — with masters that actually vary their ID across two RAMs? |
+
+`stress_ids` is the one that is not about arbitration. Every other master in this repository —
+VexRiscv included, and `AxiSatGen` — drives a **constant** transaction ID, so until this build every
+bitstream exercised the crossbar's ordering machinery in its degenerate shape: one thread per
+master, nothing to order and nothing to hold back. It adds a second 4 KiB on-chip RAM at
+`0x9000_0000` and two [`AxiMultiIdGen`](hw/spinal/axizero/verif/AxiMultiIdGen.scala) masters, each
+running four IDs with two read bursts in flight per ID and sending one ID's *consecutive* bursts to
+*different* RAMs. That is the single-slave-per-ID rule's own case: the fabric may not admit the
+second burst until the first has retired, and a fabric that admits it anyway answers out of order.
+
+The generators check that themselves, in hardware, with no scoreboard in Scala: each ID owns a queue
+of the bursts issued under it and every R beat is compared against the head of the queue its RID
+names, so a same-ID response that overtook an earlier one, a response returned under the wrong RID
+and a burst answered with the wrong number of beats all land as errors. They also report two pieces
+of evidence that the run was the run it claims — that more than one ID really was outstanding at
+once, and that an ID really did ask to move to the other RAM while it was still live at one — and a
+run without both is a *failure*, because a clean result from a generator that quietly issued one ID
+at a time to one slave proves nothing. `AxiMultiIdGenSpec` shows the data check failing against a
+RAM that drops a byte lane and the ordering check failing against a RAM model that deliberately
+answers two same-ID reads out of order, before any of it goes to a board.
 
 Each also runs the firmware self test, so the program on top still has to compute the right
 checksum, LEDs and characters while the generators compete with it for the RAM it fetches from; each
@@ -1107,9 +1135,9 @@ and the two board generators build from it — a hardware run confirms a simulat
 were the same design.
 
 ```bash
-sbt "vexZero/testOnly *VexZeroGenStressSpec"                 # all four, in simulation
-python hw/vivado/arty_a7/run_vexzero_test.py --design all    # all four, on the Arty
-python hw/quartus/de25_nano/run_vexzero_de25.py --design all # all four, on the DE25-Nano
+sbt "vexZero/testOnly *VexZeroGenStressSpec"                 # all five, in simulation
+python hw/vivado/arty_a7/run_vexzero_test.py --design all    # all five, on the Arty
+python hw/quartus/de25_nano/run_vexzero_de25.py --design all # all five, on the DE25-Nano
 ```
 
 What simulation measured, per policy, over a 60,000-cycle window after boot with two identical
@@ -1122,6 +1150,14 @@ RAM:
 | weighted 3:1 | 34,235 : 19,187 (1.78:1) | 97.5% | skewed, neither starved |
 | QoS 6 vs 2, CPU 12 | 31,092 : 20,581 (1.51:1) | 97.2% | ranked, neither starved |
 | AXI3, round robin | 25,943 : 25,873 (1.00:1) | 98.2% | the adapter does not change the split |
+
+`stress_ids` is not in that table because it is not measuring a split. What it measures is that
+nothing came back in the wrong order: over the same 60,000-cycle window, **100.0% contended**, its
+two multi-ID generators completed 10 and 9 full laps of both windows — 9,753 read bursts and 9,940
+write bursts between them — with **zero data, response and ordering errors**, and both reported
+having had several IDs outstanding at once and having asked to move a live ID to the other RAM. The
+saturating generators and the CPU are running underneath all of it, so the ordering traffic is being
+held up against real contention rather than against an idle fabric.
 
 A 3:1 weight does not produce a 3:1 throughput and is not meant to: the generators are closed-loop,
 each waiting on its own responses, so a weight buys a share of the grants rather than a share of the
@@ -1381,7 +1417,7 @@ SpinalHDL source.
 
 ### The current suites
 
-Five builds of the [VexRiscv example SoC](#example-system--vexriscv-soc), each built for both
+Six builds of the [VexRiscv example SoC](#example-system--vexriscv-soc), each built for both
 boards from the same configuration object:
 
 | Build | What it adds | Replaces |
@@ -1391,9 +1427,10 @@ boards from the same configuration object:
 | `stress_wrr` | the same, weighted 3:1 | wrr |
 | `stress_qos` | the same, QoS across three ranks | qos, qos_stress |
 | `stress_axi3` | the same, CPU load/store routed through AXI3 | axi3 |
+| `stress_ids` | a second RAM and two multi-ID generators driving IDs between the two | — |
 
 Every one of them carries a [protocol checker](#protocol-checking) on each fabric port and the
-AXI4-Stream smoke island, so the stream components are covered by all four stress builds rather than
+AXI4-Stream smoke island, so the stream components are covered by all five stress builds rather than
 by a build of their own — that is what replaces the axis suite. See [loading the crossbar on
 hardware](#loading-the-crossbar-on-hardware) for what the generators do and why.
 
@@ -1436,7 +1473,7 @@ The path was 78–82% routing, not logic, so cutting it at its origin left the s
 the die with one fewer level of logic to hide it. The register had to go mid-haul, which is what the
 master-side skid does.
 
-Final builds, all five programmed and verified on the board:
+Final builds, all six programmed and verified on the board:
 
 | Build | LUTs | FFs | BRAM | WNS | Fmax |
 |---|---:|---:|---:|---:|---:|
@@ -1445,9 +1482,18 @@ Final builds, all five programmed and verified on the board:
 | `stress_wrr` | 3662 | 4560 | 9 | +0.750 ns | 108.1 MHz |
 | `stress_qos` | 3726 | 4608 | 9 | +0.044 ns | 100.4 MHz |
 | `stress_axi3` | 4178 | 5047 | 9 | +0.506 ns | 105.3 MHz |
+| `stress_ids` | 9152 | 7993 | 11 | +0.311 ns | 103.2 MHz |
 
 Those are whole-SoC figures — VexRiscv, 8 KB RAM, peripherals, two traffic generators, a protocol
 checker on every fabric port and the AXI4-Stream island — not the crossbar alone.
+
+`stress_ids` is more than twice the size of the others, and the reason is worth being explicit
+about: it is a bigger *system*, not a more expensive crossbar. It carries six masters instead of
+four and five slaves instead of three, and the crossbar's cost is roughly the product of the two —
+every extra master-slave pair is another arbiter input, another decode and another ordering-table
+entry. On top of that its two multi-ID generators each carry four per-ID expectation queues and the
+comparison logic that checks every R beat against one, and two more protocol checkers come with the
+two extra ports. It is the price of the *test*, paid once in a build that exists to run it.
 
 Test conditions: Vivado 2025.2, `xc7a100tcsg324-1` (speed grade −1), 100 MHz target, Vivado
 Implementation Defaults strategy with no directives, and implementation at `--jobs 8` (the
@@ -1474,7 +1520,7 @@ The ordering table added for the AXI4 same-ID rule costs roughly 80-160 LUTs per
 masters, `idThreads = 2`, four slaves plus the decode-error responder), and the write-data skew
 tracking that goes with it a further handful of registers per slave. No build came out of closure.
 
-The same five builds on the DE25-Nano, where the 50 MHz clock leaves far more margin and timing was
+The same six builds on the DE25-Nano, where the 50 MHz clock leaves far more margin and timing was
 never the constraint:
 
 | Build | ALMs | Registers | Block memory | Worst setup slack | Verdict word |
@@ -1484,9 +1530,13 @@ never the constraint:
 | `stress_wrr` | 7840.2 (16%) | 12072 | 264,464 bits | +12.024 ns | `0x00000706` |
 | `stress_qos` | 7989.1 (17%) | 12189 | 264,464 bits | +9.640 ns | `0x00000706` |
 | `stress_axi3` | 7897.3 (16%) | 12253 | 265,216 bits | +12.504 ns | `0x00000706` |
+| `stress_ids` | 12932.5 (27%) | 18970 | 297,232 bits | +9.280 ns | `0x00000706` |
 
-The ordering matches the Arty: `stress_qos` is the tightest of the five on both boards, for the same
-reason. The verdict word is read back over JTAG-AXI *across the crossbar under test*, because the
+The ordering matches the Arty: `stress_qos` is the tightest of the four arbitration builds on both
+boards, for the same reason, and `stress_ids` is the largest on both for the reason given above —
+six masters and five slaves, plus the checking hardware inside the generators themselves.
+
+The verdict word is read back over JTAG-AXI *across the crossbar under test*, because the
 board has no serial link to a host — a fabric broken badly enough to hide its own verdict cannot
 report a pass either.
 
@@ -1759,9 +1809,11 @@ hw/spinal/axizero/
     Axi4DownsizerExt.scala     # fork of SpinalHDL Axi4Downsizer; FIXED/WRAP flattened, INCR multi-beat
     Axi3ToAxi4Adapter.scala    # AXI3→AXI4 bridge: WID reorder buffer, locked access conversion
     Axi4ToAxi3.scala           # the other direction, as wires: an AXI4 master presented on AXI3
+    Axi4IdWidener.scala        # pads a narrow master's ID to the fabric width, truncates it back
   verif/
     Axi4ProtocolChecker.scala  # passive synthesizable AXI4 checker, 19 rules, one sticky bit each
     AxiSatGen.scala            # saturating self-checking AXI4 master — the synthesizable load
+    AxiMultiIdGen.scala        # multi-ID self-checking AXI4 master — the synthesizable order check
   stream/
     AxiStreamCores.scala       # AXI4-Stream reg slice, width adapter, FIFO, arb-mux, demux, broadcaster
   gen/
@@ -1782,7 +1834,7 @@ hw/examples/vexriscv/          # VexRiscv example SoC — separate sbt project `
     VexZeroChecks.scala        # the self test's verdict, shared by the board wrappers
     VexZeroDe25.scala          # DE25-Nano board wrapper: verdict over JTAG-AXI
     VexZeroBenchDe25.scala     # DE25-Nano board wrapper: Dhrystone over JTAG-AXI
-    VexZeroStress.scala        # the four loaded configurations, shared by sim and both boards
+    VexZeroStress.scala        # the five loaded configurations, shared by sim and both boards
     JtagAxi.scala              # fpgacapZero JTAG-to-AXI bridge as an axiZero master
     HexImage.scala             # Intel HEX reader for prebuilt firmware images
     gen/VexZeroSocGen.scala    # -> generated/vexriscv/VexZeroSoc.v
@@ -1794,7 +1846,7 @@ hw/examples/vexriscv/          # VexRiscv example SoC — separate sbt project `
     VexZeroBenchSpec.scala     #   Dhrystone over the crossbar, pipelined vs blocking
     VexZeroProfileSpec.scala   #   what that run asks of the fabric, uncached vs cached
     VexZeroStressSpec.scala    #   the same SoC with a third master saturating the fabric
-    VexZeroGenStressSpec.scala #   the four board builds: arbitration judged under 97% contention
+    VexZeroGenStressSpec.scala #   the five board builds: arbitration under 97% contention, and ordering
     VexZeroProtocolSpec.scala  #   the protocol checkers on every fabric port, in the SoC
     VexZeroVideoQosSpec.scala  #   why AXQOS cannot rank CPU reads against video writes
     HostTraffic.scala          #   the saturating master: 16-beat bursts, AW ahead of W
