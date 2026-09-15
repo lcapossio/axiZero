@@ -21,12 +21,22 @@ case class VexZeroChecks(
   resultOk: Bool,
   charsOk: Bool,
   ledsOk: Bool,
+  /** No fabric port was ever seen breaking AXI4. Constantly true when the SoC was built without
+    * `protocolCheck`, so the verdict has the same shape either way.
+    */
+  busOk: Bool,
+  /** Every traffic generator read back what it wrote, and got onto the bus at all. Constantly true
+    * when the SoC was built without generators.
+    */
+  gensOk: Bool,
+  /** The AXI4-Stream island passed. Constantly true when the SoC was built without it. */
+  axisOk: Bool,
   /** The switch nibble the firmware read back over AXI4-Lite, held from before it finished. */
   switchesAtBoot: Bits
 ) {
 
   /** Everything passed and the program actually finished. */
-  def pass: Bool = done && resultOk && charsOk && ledsOk
+  def pass: Bool = done && resultOk && charsOk && ledsOk && busOk && gensOk && axisOk
 }
 
 object VexZeroChecks {
@@ -73,6 +83,23 @@ object VexZeroChecks {
         cfg.ledWidth bits
       )
 
-    VexZeroChecks(done, resultOk, charsOk, ledsOk, switchesAtBoot)
+    // ── Check 4: the bus protocol itself ─────────────────────────────────
+    // The three checks above are value-based, and a value-based check only
+    // sees a broken bus when the breakage happens to change an answer. This
+    // one watches the traffic instead, so a crossbar that returns the right
+    // data while violating AXI4 does not pass.
+    val busOk = if (cfg.protocolCheck) !soc.io.busViolation else True
+
+    // ── Check 5: the load the generators put on the fabric ───────────────
+    // A crossbar only has to arbitrate when two masters want the same slave
+    // at once, and this CPU alone barely makes that happen. The generators
+    // do, and they check their own data, so this is the one check that says
+    // anything about the fabric under contention rather than at rest.
+    val gensOk = if (cfg.trafficGens.nonEmpty) soc.io.genOk else True
+
+    // ── Check 6: the stream island ───────────────────────────────────────
+    val axisOk = if (cfg.axisSmoke) soc.io.axisOk else True
+
+    VexZeroChecks(done, resultOk, charsOk, ledsOk, busOk, gensOk, axisOk, switchesAtBoot)
   }
 }

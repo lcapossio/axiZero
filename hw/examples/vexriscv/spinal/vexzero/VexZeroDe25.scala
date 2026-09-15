@@ -23,6 +23,9 @@ import spinal.lib._
 //        VexRiscv DBus ── M1 ───┘
 //
 //   LEDR   LD0 done · LD1 pass · LD2 fail · LD3 heartbeat  (active low)
+//          LD4 bus protocol · LD5 traffic generators · LD6 stream island
+//            -- lit only on failure, so a board with the cable unplugged still
+//            says which part gave up rather than only that something did
 //   KEY0   reset, active low
 //
 // The board also judges itself on the LEDs, using the same checks the Arty
@@ -44,7 +47,8 @@ object VexZeroDe25 {
   val ledsActiveLow = true
 
   /** The self-test SoC, plus the host master the report travels over. */
-  def socConfig: VexZeroSocConfig = VexZeroSocConfig(switchWidth = 4, hostMaster = true)
+  def socConfig: VexZeroSocConfig =
+    VexZeroSocConfig(switchWidth = 4, hostMaster = true, protocolCheck = true)
 }
 
 class VexZeroDe25(
@@ -88,6 +92,9 @@ class VexZeroDe25(
     lit(1) := checks.pass
     lit(2) := checks.done && !checks.pass
     lit(3) := heartbeat.msb
+    lit(4) := !checks.busOk
+    lit(5) := !checks.gensOk
+    lit(6) := !checks.axisOk
 
     io.LEDR := (if (VexZeroDe25.ledsActiveLow) ~lit else lit)
   }

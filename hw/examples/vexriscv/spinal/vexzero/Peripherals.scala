@@ -155,6 +155,14 @@ class VexZeroSysCtrl(axiCfg: Axi4Config) extends Component {
     val charOut = master Flow (Bits(8 bits))
     val status  = out Bits (axiCfg.dataWidth bits)
     val result  = out Bits (axiCfg.dataWidth bits)
+
+    /** The hardware self checks, as a word a host can read over the bus.
+      *
+      * The Arty puts these on its serial line, but a board whose only link to a host is a debug
+      * cable has no serial line -- so they are published here as well, and the host reads them
+      * through the very crossbar they are judging. See [[VexZeroSysCtrl.verdict]] for the layout.
+      */
+    val verdict = in Bits (axiCfg.dataWidth bits)
   }
 
   private val cycles    = Reg(UInt(axiCfg.dataWidth bits)) init (0)
@@ -165,14 +173,15 @@ class VexZeroSysCtrl(axiCfg: Axi4Config) extends Component {
   io.status := statusReg
   io.result := resultReg
 
-  private val bus = LiteRegBus(io.axi, wordCount = 4)
+  private val bus = LiteRegBus(io.axi, wordCount = 8)
 
   bus.readData := bus.readIndex.muxListDc(
     Seq(
       0 -> cycles.asBits,
       1 -> B(0, axiCfg.dataWidth bits), // charOut is write-only; read back as 0
       2 -> statusReg,
-      3 -> resultReg
+      3 -> resultReg,
+      4 -> io.verdict
     )
   )
 
@@ -207,6 +216,31 @@ class VexZeroSysCtrl(axiCfg: Axi4Config) extends Component {
 // store is held until the character is taken. Nothing in the timed part of a
 // benchmark prints, so this does not touch the measurement.
 // ---------------------------------------------------------------------------
+object VexZeroSysCtrl {
+
+  /** Word offset of the hardware verdict register, read-only.
+    *
+    * The three verdict bits are the same ones the Arty prints as B, G and S. Each has a matching
+    * "present" bit, because a design built without protocol checkers reports a clean bus for the
+    * same reason a design with a working one does, and a host that could not tell those apart would
+    * read far too much into a pass.
+    *
+    * bit 0 a fabric port has been seen breaking AXI4 bit 1 every traffic generator read back what
+    * it wrote, and got onto the bus bit 2 the AXI4-Stream island passed bit 8 this build has
+    * protocol checkers bit 9 this build has traffic generators bit 10 this build has the stream
+    * island bits 23:16 which generators failed, one bit each
+    */
+  val verdictWord = 0x10 / 4
+
+  val busViolationBit = 0
+  val genOkBit        = 1
+  val axisOkBit       = 2
+  val hasCheckersBit  = 8
+  val hasGensBit      = 9
+  val hasIslandBit    = 10
+  val genFaultShift   = 16
+}
+
 object VexZeroBenchIo {
   val charWord  = 0xf00 / 4
   val clockWord = 0xf10 / 4

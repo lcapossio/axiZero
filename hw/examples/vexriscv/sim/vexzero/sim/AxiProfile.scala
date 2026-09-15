@@ -138,6 +138,28 @@ object AxiProfile {
       port.w.last.simPublic()
     }
 
+  /** Make just the address-channel valids of these ports visible.
+    *
+    * For the contention probe, which is placed on the crossbar's own master inputs rather than on
+    * the external ports; see `contending`.
+    */
+  def publishRequests(ports: collection.Seq[Axi4]): Unit =
+    for (port <- ports) {
+      port.ar.valid.simPublic()
+      port.aw.valid.simPublic()
+    }
+
+  /** How many of these ports are asking for something this cycle.
+    *
+    * Point this at the crossbar's master inputs, not at the external ports. A register slice
+    * accepts an address beat into its own storage the cycle it appears, so at the external port the
+    * master's VALID drops again immediately and the request looks over when in fact it is only
+    * beginning; the arbiter still has it, and still has to choose. Measured outside the slices, a
+    * fully saturated fabric reads as barely contended.
+    */
+  def contending(ports: collection.Seq[Axi4]): Int =
+    ports.count(p => p.ar.valid.toBoolean || p.aw.valid.toBoolean)
+
   /** Sample one cycle of every port. Call from `onSamplings` with a monotonic cycle count.
     *
     * Returns how many ports had a request up this cycle, which is what says whether the arbiter had

@@ -14,15 +14,23 @@ import spinal.lib.com.uart._
 // ways:
 //
 //   LEDs     LD4 done · LD5 pass · LD6 fail · LD7 heartbeat (~1.5 Hz)
-//   UART     one 9-byte line every ~0.67 s, 115200 8N1 on the USB-UART
+//   UART     one 12-byte line every ~0.67 s, 115200 8N1 on the USB-UART
 //
-//              V Z <verdict> <done> <result> <chars> <leds> <switches> \n
+//              V Z <verdict> <done> <result> <chars> <leds> <bus> <gens>
+//                  <stream> <switches> \n
 //
 //            upper case = that check passed, lower case = it did not, and
 //            the last byte is the switch nibble the firmware read back
 //            over AXI4-Lite:
-//              VZPDRCL5\n  everything passed, switches read back as 0x5
-//              VZFdrcl0\n  the CPU never finished (still in reset, or hung)
+//              VZPDRCLBGS5\n  everything passed, switches read back as 0x5
+//              VZFdrclBGS0\n  the CPU never finished (still in reset, or hung)
+//              VZFDRCLbGS5\n  the program was right and the bus was not
+//              VZFDRCLBgS5\n  a traffic generator read back the wrong data
+//
+//            <bus>, <gens> and <stream> are the protocol checker, the traffic
+//            generators and the AXI4-Stream island. Each reads upper case on a
+//            build that leaves that part out, so the line has the same shape
+//            whatever the configuration -- one parser reads every variant.
 //
 // The line repeats forever so a reader can attach at any time — nothing is
 // lost by opening the serial port after the bitstream is already running.
@@ -31,7 +39,11 @@ import spinal.lib.com.uart._
 // clocked or is held in reset, which is a different fault from a failing test.
 // ---------------------------------------------------------------------------
 class VexZeroArty(
-  socConfig: VexZeroSocConfig = VexZeroSocConfig(switchWidth = 4),
+  // protocolCheck is on for the board on purpose. A bitstream runs the same
+  // traffic for hours at 100 MHz, which is orders of magnitude more of it than
+  // any simulation, and the checkers turn all of that into one reported letter
+  // instead of leaving it unjudged.
+  socConfig: VexZeroSocConfig = VexZeroSocConfig(switchWidth = 4, protocolCheck = true),
   clkFrequency: HertzNumber = 100 MHz,
   baudRate: HertzNumber = 115200 Hz,
   /** Report period, as a counter width: one line every 2^n clocks. The default is ~0.67 s on a 100
@@ -67,6 +79,9 @@ class VexZeroArty(
     val resultOk       = checks.resultOk
     val charsOk        = checks.charsOk
     val ledsOk         = checks.ledsOk
+    val busOk          = checks.busOk
+    val gensOk         = checks.gensOk
+    val axisOk         = checks.axisOk
     val switchesAtBoot = checks.switchesAtBoot
 
     val pass = checks.pass
@@ -99,6 +114,9 @@ class VexZeroArty(
       verdict(resultOk, 'R', 'r'),
       verdict(charsOk, 'C', 'c'),
       verdict(ledsOk, 'L', 'l'),
+      verdict(busOk, 'B', 'b'),
+      verdict(gensOk, 'G', 'g'),
+      verdict(axisOk, 'S', 's'),
       swHex,
       B('\n'.toInt, 8 bits)
     )

@@ -5,16 +5,28 @@
 ##
 ## Targets: xc7a100tcsg324-1
 ##
-## Two designs share this script and the same XDC, because they have the same
-## pin-out:
+## Every VexZero design shares this script and the same XDC, because they all
+## have the same pin-out:
 ##
-##   verdict  VexZeroArty       the SoC's self test, reported on LEDs and UART
-##   bench    VexZeroBenchArty  a prebuilt RISC-V benchmark, console on the UART
+##   verdict      VexZeroArty              the SoC's self test, on LEDs and UART
+##   bench        VexZeroBenchArty         a prebuilt RISC-V benchmark, console
+##                                         on the UART
+##   stress_rr    VexZeroStressArty_rr     the self test with two saturating
+##   stress_wrr   VexZeroStressArty_wrr    generators loading the crossbar, one
+##   stress_qos   VexZeroStressArty_qos    build per arbitration policy, plus
+##   stress_axi3  VexZeroStressArty_axi3   one with the load/store port routed
+##                                         through AXI3
+##
+## The four stress builds replace the retired MicroBlaze wrr, qos, qos_stress,
+## axi3 and axis suites. They carry the AXI4-Stream smoke test as well, which
+## is why there is no separate stream build: the island shares nothing with the
+## bus, so it costs a bitstream almost nothing to bring along.
 ##
 ## Prerequisite
 ## ────────────
-##   sbt "vexZero/runMain vexzero.gen.VexZeroArtyGen"        ;# verdict
-##   sbt "vexZero/runMain vexzero.gen.VexZeroBenchArtyGen"   ;# bench
+##   sbt "vexZero/runMain vexzero.gen.VexZeroArtyGen"          ;# verdict
+##   sbt "vexZero/runMain vexzero.gen.VexZeroBenchArtyGen"     ;# bench
+##   sbt "vexZero/runMain vexzero.gen.VexZeroStressArtyGen"    ;# all four stress
 ##   (writes generated/vexriscv/<top>.v, ROM inlined)
 ##
 ## Usage
@@ -22,6 +34,7 @@
 ##   vivado -mode batch -source hw/vivado/arty_a7/create_project_vexzero.tcl
 ##   vivado -mode batch -source ... -tclargs 8            ;# 8 parallel jobs
 ##   vivado -mode batch -source ... -tclargs 8 bench      ;# the benchmark build
+##   vivado -mode batch -source ... -tclargs 8 stress_qos ;# one stress build
 ##
 ## Unlike the other Arty projects here there is no block design and no
 ## MicroBlaze: the whole SoC — VexRiscv, the axiZero crossbar, the RAM and the
@@ -55,8 +68,15 @@ switch -- $design {
         set proj_name vexzero_bench
         set gen_main  vexzero.gen.VexZeroBenchArtyGen
     }
+    stress_rr - stress_wrr - stress_qos - stress_axi3 {
+        set policy    [string range $design 7 end]
+        set top       VexZeroStressArty_$policy
+        set proj_name vexzero_stress_$policy
+        set gen_main  "vexzero.gen.VexZeroStressArtyGen $policy"
+    }
     default {
-        error "unknown design '$design' — expected 'verdict' or 'bench'"
+        error "unknown design '$design' — expected verdict, bench, or one of\
+               stress_rr / stress_wrr / stress_qos / stress_axi3"
     }
 }
 
@@ -135,5 +155,18 @@ puts "\[vexZero\]   Block RAM Tiles : [util_row $util {Block RAM Tile}]"
 puts "\[vexZero\]   DSPs            : [util_row $util {DSPs}]"
 puts [format "\[vexZero\]   WNS             : %.3f ns at 100 MHz" $wns]
 puts [format "\[vexZero\]   Fmax            : %.1f MHz" $fmax]
+
+# Record the closure result where the Python runner can read it without having
+# to scrape this log. A bitstream that misses timing still gets written, because
+# it is useful for investigating the path that failed -- but the runner refuses
+# to report a board result from it, so it can never be mistaken for evidence.
+set tfh [open "$proj_dir/vexzero_timing.txt" w]
+puts $tfh [format "wns %.3f" $wns]
+puts $tfh [format "period %.3f" $clk_period]
+puts $tfh "strategy [get_property strategy [get_runs impl_1]]"
+close $tfh
+if {$wns < 0} {
+    puts [format "\[vexZero\] *** TIMING NOT MET: WNS %.3f ns at 100 MHz ***" $wns]
+}
 puts "\[vexZero\] Bitstream: $proj_dir/$proj_name.runs/impl_1/$top.bit"
 puts ""

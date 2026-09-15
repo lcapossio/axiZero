@@ -1,30 +1,42 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
 # SPDX-License-Identifier: MIT
-"""Build, program, and run the VexZero example SoC on an Arty A7-100T.
+"""Build, program, and run a VexZero design on an Arty A7-100T.
 
 The SoC boots VexRiscv out of on-chip RAM, drives the axiZero crossbar with a
 mixed AXI4 / AXI4-Lite address map, and the board wrapper (``VexZeroArty``)
 checks the results in hardware.  A board has no wires back to a test runner, so
-the verdict comes out of the USB-UART as one 9-byte line, repeated forever::
+the verdict comes out of the USB-UART as one 12-byte line, repeated forever::
 
-    VZPDRCL5    every check passed, switches read back as 0x5
-    VZFdrcl0    the CPU never finished (held in reset, or hung)
+    VZPDRCLBGS5    every check passed, switches read back as 0x5
+    VZFdrclBGS0    the CPU never finished (held in reset, or hung)
+    VZFDRCLbGS5    the program was right and the bus broke AXI4 while it ran
+    VZFDRCLBgS5    a traffic generator read back data it had not written
 
 Upper case means that check passed: P/F overall, D done, R result, C chars,
-L leds.  The last byte is the switch nibble the firmware read back over
-AXI4-Lite -- the result check is ``checksum + switches``, so a non-zero nibble
-is what tells a working Lite read from one that always returns zero.  The same
-verdict is on LD4-LD7 (done, pass, fail, heartbeat) for anyone watching the
-board itself.
+L leds, B bus protocol, G traffic generators, S stream island.  A check the
+build leaves out reads upper case, so one parser reads every variant.  The last
+byte is the switch nibble the firmware read back over AXI4-Lite -- the result
+check is ``checksum + switches``, so a non-zero nibble is what tells a working
+Lite read from one that always returns zero.  The same verdict is on LD4-LD7
+(done, pass, fail, heartbeat) for anyone watching the board itself.
+
+Five designs share this runner.  ``verdict`` is the plain self test; the four
+``stress_*`` builds add two saturating self-checking traffic generators that
+load the crossbar for the whole run, one per arbitration policy, and carry the
+AXI4-Stream smoke test along with them.  Between them they replace the retired
+MicroBlaze base, wrr, qos, qos_stress, axi3 and axis suites, and unlike those
+they build for Altera as well -- see ``hw/quartus/de25_nano``.
 
 Steps: generate RTL with sbt, build with Vivado, program with xsdb, then read
 the serial line.  Each step can be skipped when it has already been done::
 
-    python run_vexzero_test.py                 # build if needed, program, check
-    python run_vexzero_test.py --force-build   # rebuild the bitstream
-    python run_vexzero_test.py --skip-build    # program the existing bitstream
-    python run_vexzero_test.py --port COM4     # skip serial port autodetection
+    python run_vexzero_test.py                     # build if needed, program, check
+    python run_vexzero_test.py --design stress_qos # the QoS-arbitrated build
+    python run_vexzero_test.py --design all        # every design, in turn
+    python run_vexzero_test.py --force-build       # rebuild the bitstream
+    python run_vexzero_test.py --skip-build        # program the existing bitstream
+    python run_vexzero_test.py --port COM4         # skip serial port autodetection
 """
 
 import argparse
@@ -42,12 +54,49 @@ SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[2]
 
 CREATE_TCL = SCRIPT_DIR / "create_project_vexzero.tcl"
-PROJ_DIR = SCRIPT_DIR / "vexzero_arty"
-BIT_FILE = PROJ_DIR / "vexzero_arty.runs" / "impl_1" / "VexZeroArty.bit"
-RTL_FILE = REPO_ROOT / "generated" / "vexriscv" / "VexZeroArty.v"
 
-GEN_MAIN = "vexzero.gen.VexZeroArtyGen"
-REPORT_RE = re.compile(r"^VZ([PF])([Dd])([Rr])([Cc])([Ll])([0-9A-F])$")
+# design name -> (top module, Vivado project directory, sbt main and its args).
+# The names match create_project_vexzero.tcl's -tclargs, so the two cannot
+# drift apart without one of them failing loudly.
+DESIGNS = {
+    "verdict": ("VexZeroArty", "vexzero_arty", ["vexzero.gen.VexZeroArtyGen"]),
+    "stress_rr": (
+        "VexZeroStressArty_rr",
+        "vexzero_stress_rr",
+        ["vexzero.gen.VexZeroStressArtyGen", "rr"],
+    ),
+    "stress_wrr": (
+        "VexZeroStressArty_wrr",
+        "vexzero_stress_wrr",
+        ["vexzero.gen.VexZeroStressArtyGen", "wrr"],
+    ),
+    "stress_qos": (
+        "VexZeroStressArty_qos",
+        "vexzero_stress_qos",
+        ["vexzero.gen.VexZeroStressArtyGen", "qos"],
+    ),
+    "stress_axi3": (
+        "VexZeroStressArty_axi3",
+        "vexzero_stress_axi3",
+        ["vexzero.gen.VexZeroStressArtyGen", "axi3"],
+    ),
+}
+
+REPORT_RE = re.compile(r"^VZ([PF])([Dd])([Rr])([Cc])([Ll])([Bb])([Gg])([Ss])([0-9A-F])$")
+
+
+class Design:
+    """Where one design's netlist, project and bitstream live."""
+
+    def __init__(self, name):
+        top, proj, gen_main = DESIGNS[name]
+        self.name = name
+        self.top = top
+        self.proj_dir = SCRIPT_DIR / proj
+        self.bit_file = self.proj_dir / f"{proj}.runs" / "impl_1" / f"{top}.bit"
+        self.rtl_file = REPO_ROOT / "generated" / "vexriscv" / f"{top}.v"
+        self.gen_main = gen_main
+        self.timing_file = self.proj_dir / "vexzero_timing.txt"
 
 # FT2232H on the Arty: channel A is the JTAG bridge, channel B the USB-UART,
 # and Digilent gives the two channels one serial number with an A/B suffix.
@@ -86,58 +135,68 @@ def wsl_path(path):
     return f"/mnt/{drive}/{rest}"
 
 
-def step_generate_rtl():
+def step_generate_rtl(design):
+    main = " ".join(design.gen_main)
     sbt = os.environ.get("SBT_BIN") or shutil.which("sbt") or shutil.which("sbt.bat")
     if sbt:
-        cmd = [sbt, f"vexZero/runMain {GEN_MAIN}"]
+        cmd = [sbt, f"vexZero/runMain {main}"]
     elif sys.platform == "win32" and shutil.which("wsl"):
         cmd = [
             "wsl",
             "-e",
             "bash",
             "-lc",
-            f"cd {wsl_path(REPO_ROOT)} && sbt 'vexZero/runMain {GEN_MAIN}'",
+            f"cd {wsl_path(REPO_ROOT)} && sbt 'vexZero/runMain {main}'",
         ]
     else:
         print("*** ERROR: sbt not found. Set SBT_BIN or install sbt on PATH.")
         sys.exit(1)
 
-    run(cmd, cwd=REPO_ROOT, timeout=1800, desc="sbt: generate VexZeroArty.v")
-    if not RTL_FILE.exists():
-        print(f"*** ERROR: netlist not found at {RTL_FILE}")
+    run(cmd, cwd=REPO_ROOT, timeout=1800, desc=f"sbt: generate {design.top}.v")
+    if not design.rtl_file.exists():
+        print(f"*** ERROR: netlist not found at {design.rtl_file}")
         sys.exit(1)
-    print(f"[ok] Netlist: {RTL_FILE} ({RTL_FILE.stat().st_size} bytes)")
+    print(f"[ok] Netlist: {design.rtl_file} ({design.rtl_file.stat().st_size} bytes)")
 
 
-def step_vivado(force_build, jobs):
-    if BIT_FILE.exists() and not force_build:
-        print(f"[skip] Bitstream already exists: {BIT_FILE}")
+def step_vivado(design, force_build, jobs):
+    if design.bit_file.exists() and not force_build:
+        print(f"[skip] Bitstream already exists: {design.bit_file}")
         return
     run(
-        [VIVADO_BIN, "-mode", "batch", "-source", str(CREATE_TCL), "-tclargs", str(jobs)],
+        [
+            VIVADO_BIN,
+            "-mode",
+            "batch",
+            "-source",
+            str(CREATE_TCL),
+            "-tclargs",
+            str(jobs),
+            design.name,
+        ],
         cwd=REPO_ROOT,
         timeout=7200,
-        desc="Vivado: create project + synth + impl + bitstream",
+        desc=f"Vivado: create project + synth + impl + bitstream ({design.name})",
         env=vivado_env(),
     )
-    if not BIT_FILE.exists():
-        print(f"*** ERROR: bitstream not found at {BIT_FILE}")
+    if not design.bit_file.exists():
+        print(f"*** ERROR: bitstream not found at {design.bit_file}")
         sys.exit(1)
-    print(f"[ok] Bitstream: {BIT_FILE}")
+    print(f"[ok] Bitstream: {design.bit_file}")
 
 
-def step_program():
+def step_program(design):
     """Configure the Arty over JTAG.
 
     The name filter matters: other AMD boards may be attached to the same
     hw_server, and only the Artix-7 on the Arty answers to ``xc7a100t``.
     """
-    if not BIT_FILE.exists():
-        print(f"*** ERROR: bitstream not found at {BIT_FILE} (build it first)")
+    if not design.bit_file.exists():
+        print(f"*** ERROR: bitstream not found at {design.bit_file} (build it first)")
         sys.exit(1)
 
     xsdb_tcl = SCRIPT_DIR / "_vexzero_xsdb_temp.tcl"
-    bit_path = str(BIT_FILE).replace("\\", "/")
+    bit_path = str(design.bit_file).replace("\\", "/")
     xsdb_tcl.write_text(
         "# Auto-generated by run_vexzero_test.py\n"
         "connect\n"
@@ -190,7 +249,7 @@ def find_serial_port():
     sys.exit(1)
 
 
-def step_serial(port, seconds):
+def step_serial(design, port, seconds):
     import serial
 
     print(f"\n{'=' * 60}")
@@ -224,10 +283,11 @@ def step_serial(port, seconds):
         sys.exit(1)
 
     latest = reports[-1]
-    overall, done, result, chars, leds, switches = REPORT_RE.match(latest).groups()
-    print("=" * 42)
-    print("  VexZero SoC hardware test -- Arty A7-100T")
-    print("=" * 42)
+    groups = REPORT_RE.match(latest).groups()
+    overall, done, result, chars, leds, bus, gens, stream, switches = groups
+    print("=" * 46)
+    print(f"  VexZero hardware test -- Arty A7-100T ({design.name})")
+    print("=" * 46)
     print(f"  report line   = {latest}")
     for name, flag, ok_char in (
         ("overall", overall, "P"),
@@ -235,10 +295,13 @@ def step_serial(port, seconds):
         ("result", result, "R"),
         ("chars", chars, "C"),
         ("leds", leds, "L"),
+        ("bus protocol", bus, "B"),
+        ("generators", gens, "G"),
+        ("stream island", stream, "S"),
     ):
         print(f"  {name:<13} = {'PASS' if flag == ok_char else 'FAIL'}")
     print(f"  switches      = 0x{switches}")
-    print("=" * 42)
+    print("=" * 46)
 
     if overall != "P":
         print("\n*** FAILED: the board reported a failing check\n")
@@ -255,6 +318,15 @@ def parse_args():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
+        "--design",
+        default="verdict",
+        choices=sorted(DESIGNS) + ["all"],
+        help=(
+            "Which VexZero design to build and run (default: verdict). "
+            "'all' runs every one of them in turn."
+        ),
+    )
+    parser.add_argument(
         "--force-build",
         action="store_true",
         help="Run Vivado even when the bitstream already exists.",
@@ -268,6 +340,12 @@ def parse_args():
         "--skip-program",
         action="store_true",
         help="Do not reconfigure the FPGA; only read the serial line.",
+    )
+    parser.add_argument(
+        "--allow-timing-failure",
+        action="store_true",
+        help="Program and read a bitstream that misses timing. For debugging a "
+        "failing path only: the board result it produces is not evidence.",
     )
     parser.add_argument(
         "--jobs",
@@ -289,18 +367,80 @@ def parse_args():
     return parser.parse_args()
 
 
+def step_timing(design, allow_failure):
+    """Refuse to report a board result from a bitstream that misses timing.
+
+    Vivado writes a bitstream whether or not the design closes, and such a
+    bitstream will usually still program, boot and print a passing report line --
+    setup violations show up as occasional wrong bits, not as an obvious halt.
+    A suite that accepted that would be certifying the report rather than the
+    design, so closure is checked here and a miss stops the run.
+
+    The file is written by create_project_vexzero.tcl. An older project directory
+    built before this check existed will not have one; that is reported rather
+    than passed over, because "no evidence of a problem" and "evidence of no
+    problem" are not the same thing.
+    """
+    if not design.timing_file.exists():
+        print(f"*** ERROR: no timing record at {design.timing_file}")
+        print("    Rebuild with --force-build; closure cannot be confirmed without it.")
+        sys.exit(1)
+
+    values = {}
+    for line in design.timing_file.read_text().splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            values[parts[0]] = float(parts[1])
+
+    wns = values.get("wns")
+    period = values.get("period", 10.0)
+    if wns is None:
+        print(f"*** ERROR: no WNS in {design.timing_file}")
+        sys.exit(1)
+
+    fmax = 1000.0 / (period - wns)
+    clk = 1000.0 / period
+    if wns < 0:
+        print(f"  timing       = FAIL (WNS {wns:+.3f} ns at {clk:.0f} MHz, Fmax {fmax:.1f} MHz)")
+        if not allow_failure:
+            print("")
+            print(f"*** TIMING NOT MET: {design.name} does not close at {clk:.0f} MHz.")
+            print("    The board result from this bitstream is not evidence and was not read.")
+            print("    Re-run with --allow-timing-failure to program it anyway for debugging.")
+            sys.exit(1)
+        print("  (--allow-timing-failure given: continuing, result is not evidence)")
+    else:
+        print(f"  timing       = PASS (WNS {wns:+.3f} ns at {clk:.0f} MHz, Fmax {fmax:.1f} MHz)")
+
+
+def run_design(design, args, port):
+    print(f"\n#### {design.name} " + "#" * (60 - len(design.name)))
+    if not args.skip_build:
+        step_generate_rtl(design)
+        step_vivado(design, args.force_build, args.jobs)
+    step_timing(design, args.allow_timing_failure)
+    if not args.skip_program:
+        step_program(design)
+    step_serial(design, port, args.seconds)
+
+
 def main():
     args = parse_args()
-    print("VexZero example SoC hardware test -- Arty A7-100T")
+    names = sorted(DESIGNS) if args.design == "all" else [args.design]
+    print("VexZero hardware test -- Arty A7-100T")
+    print(f"  designs: {', '.join(names)}")
     print(f"  Vivado: {VIVADO_BIN}")
     print(f"  xsdb:   {XSDB_BIN}")
 
-    if not args.skip_build:
-        step_generate_rtl()
-        step_vivado(args.force_build, args.jobs)
-    if not args.skip_program:
-        step_program()
-    step_serial(args.port or find_serial_port(), args.seconds)
+    # One serial port for all of them: the board is the same board, and
+    # autodetecting once keeps a multi-design run from re-enumerating USB
+    # between bitstreams.
+    port = args.port or find_serial_port()
+    for name in names:
+        run_design(Design(name), args, port)
+
+    if len(names) > 1:
+        print(f"  *** ALL {len(names)} VEXZERO HW TESTS PASSED ***\n")
 
 
 if __name__ == "__main__":

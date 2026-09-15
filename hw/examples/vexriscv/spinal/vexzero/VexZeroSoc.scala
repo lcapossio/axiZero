@@ -9,6 +9,9 @@ import vexriscv.ip.{DataCacheConfig, InstructionCacheConfig}
 import vexriscv.plugin._
 import vexriscv.{plugin, VexRiscv, VexRiscvConfig}
 import axizero._
+import axizero.adapters.{Axi3Config, Axi3ToAxi4Adapter, Axi4ToAxi3}
+import axizero.stream.AxiStreamArtySmoke
+import axizero.verif._
 
 // ---------------------------------------------------------------------------
 // VexZeroSoc  —  a minimal RISC-V system built around the axiZero interconnect
@@ -61,6 +64,25 @@ case class VexZeroSocConfig(
     * transfer without starving it, because the crossbar boosts a waiting master's effective
     * priority until it reaches parity.
     */
+  /** Insert a register slice between the fabric and every slave.
+    *
+    * The master side always has one (see `interconnectConfig`); the slave side does not, so without
+    * this the arbiter's grant reaches the RAM's address port through the address mux in the same
+    * cycle. On the loaded Arty builds that is the critical path once the protocol checkers are off
+    * it: master register slice, address decode, arbiter, mux, BRAM address -- eleven levels of
+    * logic and, because the endpoints sit far apart, four fifths of the delay in routing.
+    *
+    * It costs a cycle of latency to every slave access and one payload register per port, which is
+    * why it is off by default: the unloaded designs close comfortably without it and would only be
+    * paying. The loaded ones need it.
+    */
+  slaveRegSlices: Boolean = false,
+  /** Make the master-side register slices full pipes, so the READY the CPU and the generators see
+    * is registered rather than combinational back through the arbiter. On the loaded builds the
+    * critical path is the arbiter's grant reaching the CPU's pipeline in one cycle; this is what
+    * cuts it. Costs registers, not cycles.
+    */
+  masterRegSliceSkid: Boolean = false,
   arbitration: ArbitrationPolicy = RoundRobin,
   /** AXQOS the CPU's two master ports present to the crossbar.
     *
@@ -118,11 +140,72 @@ case class VexZeroSocConfig(
     * 0 keeps the console a stream for a UART. Anything else is for a board with no serial port; see
     * [[VexZeroBenchIo]].
     */
-  benchHostDrain: Int = 0
+  benchHostDrain: Int = 0,
+  /** Watch every fabric port with a passive AXI4 protocol checker.
+    *
+    * Off by default because it is real logic on the die and a design that is not being validated
+    * should not carry it. On, it judges the interconnect against the protocol continuously, in
+    * simulation and on the board alike, rather than only against the handful of values the firmware
+    * happens to compute. See [[Axi4ProtocolChecker]].
+    */
+  protocolCheck: Boolean = false,
+  /** Which rules the checkers enforce, and how much tracking state they carry. Ignored unless
+    * `protocolCheck` is set.
+    */
+  protocolCheckerConfig: Axi4ProtocolCheckerConfig = Axi4ProtocolCheckerConfig(),
+  /** Saturating self-checking traffic generators, one master port each.
+    *
+    * These are what put the crossbar under load. VexRiscv on its own cannot: it keeps one or two
+    * reads in flight and, being write-through, never produces a write burst at all, so arbitration,
+    * the per-slave W route and response routing barely get exercised. A generator keeps several
+    * bursts in flight and reads back everything it wrote, so a mis-route fails on the board rather
+    * than only in simulation. See [[AxiSatGen]].
+    *
+    * Each generator owns its window exclusively -- it predicts what every word in it holds -- so
+    * the windows must not overlap each other, the firmware's region, or a framebuffer.
+    */
+  trafficGens: Seq[AxiSatGenConfig] = Nil,
+  /** Route the CPU's load/store port through AXI3 on its way to the crossbar.
+    *
+    * The port is narrowed to an AXI3 bus and brought back by [[Axi3ToAxi4Adapter]], so the adapter
+    * carries every load, store and cache refill the program makes. A working boot is then evidence
+    * about the adapter and not only about the fabric, which is what the retired MicroBlaze AXI3
+    * suite was for -- except that this one builds for both vendors.
+    */
+  axi3DataPath: Boolean = false,
+  /** Include the AXI4-Stream smoke test as an island beside the bus.
+    *
+    * It shares nothing with the crossbar but the clock: three sources through arbitration,
+    * buffering, register slicing, width conversion, demux and broadcast, checking themselves. It
+    * rides along because it needs no CPU and no bus, and a board build has room for it. See
+    * [[AxiStreamArtySmoke]].
+    */
+  axisSmoke: Boolean = false
 ) {
   require(ramSize >= (8 KiB), "the boot firmware keeps its data at RAM + 0x1000")
   require(cpuQos >= 0 && cpuQos <= 15, s"cpuQos must fit AXQOS's four bits, not $cpuQos")
   val ramWords: Int = (ramSize / 4).toInt
+
+  // A generator that shares a word with anything else reports a data error the
+  // moment the other writer touches it, and the failure would look like the
+  // crossbar losing a beat. Catch the overlap at elaboration instead.
+  private val firmwareTop = ramBase + 0x2000
+  for ((g, i) <- trafficGens.zipWithIndex) {
+    require(
+      g.baseAddr >= firmwareTop && g.baseAddr + g.windowBytes <= ramBase + ramSize,
+      f"traffic generator $i covers 0x${g.baseAddr}%x..0x${g.baseAddr + g.windowBytes}%x, which " +
+        f"is not inside the RAM above the firmware " +
+        f"(0x$firmwareTop%x..0x${ramBase + ramSize}%x)"
+    )
+    for (j <- 0 until i) {
+      val other = trafficGens(j)
+      require(
+        g.baseAddr + g.windowBytes <= other.baseAddr ||
+          other.baseAddr + other.windowBytes <= g.baseAddr,
+        f"traffic generators $j and $i overlap at 0x${g.baseAddr}%x; each one owns its window"
+      )
+    }
+  }
 }
 
 class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
@@ -136,6 +219,30 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
 
     /** The third master port, present only with `hostMaster`. */
     val host = cfg.hostMaster generate slave(Axi4(VexZeroSoc.masterCfg))
+
+    /** High once any fabric port has been seen breaking AXI4. Only with `protocolCheck`. */
+    val busViolation = cfg.protocolCheck generate out(Bool())
+
+    /** Every traffic generator has read back what it wrote, has completed at least one lap, and has
+      * not stopped making progress.
+      *
+      * The lap term is what makes a green result mean something: a generator that never got onto
+      * the bus also never miscompares, and would otherwise report success by doing nothing. The
+      * stall term does the same for one that got going and then hung: its errors stay zero and its
+      * lap count stays non-zero for ever, so without it a deadlocked fabric reads as a pass.
+      */
+    val genOk = cfg.trafficGens.nonEmpty generate out(Bool())
+
+    /** One bit per generator that has miscompared, seen a bad response or stalled, so a failure
+      * names the window it happened in rather than the whole fabric.
+      */
+    val genFault = cfg.trafficGens.nonEmpty generate out(Bits(cfg.trafficGens.size bits))
+
+    /** The AXI4-Stream island passed every one of its checks. Only with `axisSmoke`. */
+    val axisOk = cfg.axisSmoke generate out(Bool())
+
+    /** The stream island's raw sticky status word, for a board that can show it. */
+    val axisStatus = cfg.axisSmoke generate out(Bits(32 bits))
 
     /** Present only with a benchmark console configured. */
     val bench = cfg.benchIoBase.isDefined generate new Bundle {
@@ -152,13 +259,17 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   // host bridge drive a constant), so AxiZeroMixedTop's effective master ID
   // width is 1 and the slave side widens by the master index: 2 masters give
   // slaveIdW 2, and 3 masters give 3.
-  private val hasVideo    = cfg.videoBase.isDefined
-  private val masterCount = 2 + (if (cfg.hostMaster) 1 else 0) + (if (hasVideo) 1 else 0)
+  private val hasVideo = cfg.videoBase.isDefined
+  private val genCount = cfg.trafficGens.size
+  private val masterCount =
+    2 + (if (cfg.hostMaster) 1 else 0) + (if (hasVideo) 1 else 0) + genCount
 
   // Masters are added in a fixed order so an index never moves under a config
-  // that leaves one of them out: fetch, load/store, then the host, then video.
+  // that leaves one of them out: fetch, load/store, the host, video, then the
+  // traffic generators.
   private val hostIndex  = Option.when(cfg.hostMaster)(2)
   private val videoIndex = Option.when(hasVideo)(2 + (if (cfg.hostMaster) 1 else 0))
+  private val genIndex0  = 2 + (if (cfg.hostMaster) 1 else 0) + (if (hasVideo) 1 else 0)
   private val masterCfg  = VexZeroSoc.masterCfg
   private val fullSlaveCfg =
     Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = masterCfg.idWidth + log2Up(masterCount))
@@ -189,21 +300,48 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
     // in the same cycle. They are what you would want for timing closure on
     // real silicon anyway.
     masters = Seq(
-      MasterPort(masterCfg, FullAxi4, regSlice = true), // M0 — instruction fetch
-      MasterPort(masterCfg, FullAxi4, regSlice = true)  // M1 — load / store
+      MasterPort(
+        masterCfg,
+        FullAxi4,
+        regSlice = true,
+        regSliceSkid = cfg.masterRegSliceSkid
+      ), // M0 — instruction fetch
+      MasterPort(
+        masterCfg,
+        FullAxi4,
+        regSlice = true,
+        regSliceSkid = cfg.masterRegSliceSkid
+      ) // M1 — load / store
     ) ++ Option.when(cfg.hostMaster)(
-      MasterPort(masterCfg, FullAxi4, regSlice = true) // M2 — debug cable
+      MasterPort(
+        masterCfg,
+        FullAxi4,
+        regSlice = true,
+        regSliceSkid = cfg.masterRegSliceSkid
+      ) // M2 — debug cable
     ) ++ Option.when(hasVideo)(
-      MasterPort(masterCfg, FullAxi4, regSlice = true) // M3 — video writer
+      MasterPort(
+        masterCfg,
+        FullAxi4,
+        regSlice = true,
+        regSliceSkid = cfg.masterRegSliceSkid
+      ) // M3 — video writer
+    ) ++ Seq.fill(genCount)(
+      MasterPort(
+        masterCfg,
+        FullAxi4,
+        regSlice = true,
+        regSliceSkid = cfg.masterRegSliceSkid
+      ) // traffic generators
     ),
     slaves = Seq(
-      SlavePort(fullSlaveCfg, FullAxi4, cfg.ramBase, cfg.ramSize),
-      SlavePort(liteSlaveCfg, LiteAxi4, cfg.gpioBase, cfg.peripheralSize),
-      SlavePort(liteSlaveCfg, LiteAxi4, cfg.sysCtrlBase, cfg.peripheralSize)
+      SlavePort(fullSlaveCfg, FullAxi4, cfg.ramBase, cfg.ramSize, cfg.slaveRegSlices),
+      SlavePort(liteSlaveCfg, LiteAxi4, cfg.gpioBase, cfg.peripheralSize, cfg.slaveRegSlices),
+      SlavePort(liteSlaveCfg, LiteAxi4, cfg.sysCtrlBase, cfg.peripheralSize, cfg.slaveRegSlices)
     ) ++ cfg.benchIoBase.map(
-      SlavePort(liteSlaveCfg, LiteAxi4, _, VexZeroBenchIo.windowSize)
+      SlavePort(liteSlaveCfg, LiteAxi4, _, VexZeroBenchIo.windowSize, cfg.slaveRegSlices)
     ) ++ cfg.videoBase.map(
-      SlavePort(liteSlaveCfg, LiteAxi4, _, VtpgZero.windowSize)
+      SlavePort(liteSlaveCfg, LiteAxi4, _, VtpgZero.windowSize, cfg.slaveRegSlices)
     ),
     arbitration = cfg.arbitration,
     maxOutstanding = cfg.maxOutstanding
@@ -246,8 +384,23 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   iPort.b.ready := False
 
   // M1: the shared AR/AW command channel is split back into AXI4 AR + AW.
+  //
+  // With `axi3DataPath` it takes a detour on the way: the port is narrowed to
+  // AXI3 and brought back by Axi3ToAxi4Adapter, so every load, store and cache
+  // refill the program makes crosses the adapter. That is a harder test of it
+  // than a traffic generator is, because the CPU stalls on the answer -- a lost
+  // or mis-ordered response hangs the boot rather than being counted.
   private val dPort = fabric.io.masters(1)
-  dPort << dBus.toAxi4()
+  private val dAxi4 = dBus.toAxi4()
+  if (cfg.axi3DataPath) {
+    val axi3 = Axi4ToAxi3(dAxi4, VexZeroSoc.axi3Cfg)
+    val adapter =
+      new Axi3ToAxi4Adapter(VexZeroSoc.axi3Cfg, masterCfg, maxOutstanding = cfg.maxOutstanding)
+    adapter.io.axi3 <> axi3
+    dPort << adapter.io.axi4
+  } else {
+    dPort << dAxi4
+  }
   dPort.ar.qos.allowOverride := B(cfg.cpuQos, 4 bits)
   dPort.aw.qos.allowOverride := B(cfg.cpuQos, 4 bits)
 
@@ -329,6 +482,96 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
     core
   }
 
+  // ── Traffic generators ───────────────────────────────────────────────────
+  // Each one owns a window of RAM and hammers it, several bursts in flight, so
+  // the crossbar has to arbitrate between them and the CPU for the whole run
+  // rather than only when the program happens to miss its cache.
+  val trafficGens = cfg.trafficGens.zipWithIndex.map {
+    case (genCfg, i) =>
+      val gen = new AxiSatGen(masterCfg, genCfg)
+      gen.setWeakName(s"trafficGen$i")
+      fabric.io.masters(genIndex0 + i) << gen.io.axi
+      gen
+  }
+
+  if (trafficGens.nonEmpty) {
+    io.genFault := Cat(
+      trafficGens.map(g => g.io.dataErrors =/= 0 || g.io.respErrors =/= 0 || g.io.stalled)
+    )
+    io.genOk := trafficGens
+      .map(g => g.io.dataErrors === 0 && g.io.respErrors === 0 && g.io.laps =/= 0 && !g.io.stalled)
+      .reduce(_ && _)
+  }
+
+  // ── AXI4-Stream island ───────────────────────────────────────────────────
+  // Shares nothing with the bus but the clock. It is here so a board build can
+  // cover the stream components in the same bitstream as the crossbar rather
+  // than needing one of its own.
+  val axisIsland = Option.when(cfg.axisSmoke) {
+    val smoke = new AxiStreamArtySmoke
+    io.axisStatus := smoke.io.status
+    // status(0) done, status(1) pass, status(2) fail; see AxiStreamArtySmoke.
+    io.axisOk := smoke.io.status(0) && smoke.io.status(1) && !smoke.io.status(2)
+    smoke
+  }
+
+  // ── Bus protocol checking ────────────────────────────────────────────────
+  // Every fabric port is watched, master side and slave side, because the two
+  // answer different questions: a master-side port says whether the CPU and
+  // the video core keep the protocol, and a slave-side port says whether the
+  // crossbar does. Only the second one is this project under test, but a
+  // checker that fires on the first is worth just as much -- it means the
+  // stimulus was not what the test thought it was.
+  //
+  // The checkers are passive, so this whole block can be removed by config
+  // without changing a single wire of the design it watches.
+  val busCheck = Option.when(cfg.protocolCheck) {
+    new Area {
+      private val ports =
+        fabric.io.masters.zipWithIndex.map { case (bus, i) => (s"m$i", bus) } ++
+          fabric.io.slaves.zipWithIndex.map { case (bus, i) => (s"s$i", bus) }
+
+      val checkers = ports.map {
+        case (portName, bus) =>
+          Axi4ProtocolChecker(bus, portName, cfg.protocolCheckerConfig)
+      }
+
+      /** The names of the ports being watched, in the order `checkers` holds them. */
+      val portNames: Seq[String] = ports.map(_._1).toSeq
+
+      /** Union of every port's rules: one vector saying what was seen anywhere. */
+      val sticky = checkers.map(_.sticky).reduce(_ | _)
+
+      /** One bit per port, so a failure names a port instead of blaming the fabric. */
+      val perPort = Vec(checkers.map(_.any))
+
+      val any = perPort.orR
+
+      /** Any checker lost track. Silence from that port stops being evidence. */
+      val overflow = checkers.map(_.overflow).reduce(_ || _)
+    }
+  }
+  if (cfg.protocolCheck) io.busViolation := busCheck.get.any
+
+  // ── The verdict, as something a host can read over the bus ───────────────
+  // The Arty prints these on its serial line; a board with only a debug cable
+  // has no line to print on, so they are published as a system-control
+  // register too. That the host then reads them across the crossbar under test
+  // is deliberate: a fabric broken enough to hide its own verdict cannot
+  // report a pass either.
+  private val verdict = Bits(32 bits)
+  verdict                                 := 0
+  verdict(VexZeroSysCtrl.busViolationBit) := (if (cfg.protocolCheck) busCheck.get.any else False)
+  verdict(VexZeroSysCtrl.genOkBit)        := (if (trafficGens.nonEmpty) io.genOk else True)
+  verdict(VexZeroSysCtrl.axisOkBit)       := (if (cfg.axisSmoke) io.axisOk else True)
+  verdict(VexZeroSysCtrl.hasCheckersBit)  := Bool(cfg.protocolCheck)
+  verdict(VexZeroSysCtrl.hasGensBit)      := Bool(trafficGens.nonEmpty)
+  verdict(VexZeroSysCtrl.hasIslandBit)    := Bool(cfg.axisSmoke)
+  if (trafficGens.nonEmpty) {
+    verdict(VexZeroSysCtrl.genFaultShift, trafficGens.size bits) := io.genFault
+  }
+  sysCtrl.io.verdict := verdict
+
   // The framebuffer has to land somewhere the writer can actually reach, and a
   // frame that runs off the end of RAM would be silently dropped by the
   // crossbar's decode rather than reported.
@@ -351,6 +594,14 @@ object VexZeroSoc {
     * One ID bit, driven to a constant by all three masters; see the ordering note above.
     */
   val masterCfg: Axi4Config = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
+
+  /** The AXI3 shape the load/store port is narrowed to under `axi3DataPath`.
+    *
+    * It matches `masterCfg` except where the two protocols differ: AXI3 carries four length bits,
+    * so a burst is capped at 16 beats. Nothing on this SoC issues a longer one -- a cache line is
+    * eight beats and a generator burst at most eight.
+    */
+  val axi3Cfg: Axi3Config = Axi3Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
 
   /** The smallest VexRiscv that can run the example firmware and speak AXI4.
     *

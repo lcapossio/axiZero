@@ -9,20 +9,34 @@ design puts fpgacapZero's JTAG-to-AXI bridge on the axiZero crossbar as a
 third master, and everything checked below is fetched through that bridge,
 across the same interconnect the CPU is using at the time.
 
-Two designs share the flow:
+Six designs share the flow:
 
-  verdict   the self-test firmware. The host reads the done marker, the
-            computed result, the GPIO register and the switches, and checks
-            them the same way the Arty's hardware does.
+  verdict      the self-test firmware. The host reads the done marker, the
+               computed result, the GPIO register, the switches and the
+               hardware verdict register, and checks them the same way the
+               Arty's hardware does.
 
-  bench     Dhrystone. The host drains the console out of the benchmark
-            peripheral's buffer, then re-runs Dhrystone's own self-checks on
-            the text and recomputes the score from the cycle count.
+  bench        Dhrystone. The host drains the console out of the benchmark
+               peripheral's buffer, then re-runs Dhrystone's own self-checks
+               on the text and recomputes the score from the cycle count.
+
+  stress_rr    the self test again, but with two saturating self-checking
+  stress_wrr   traffic generators loading the crossbar for the whole run --
+  stress_qos   one build per arbitration policy -- plus one with the CPU's
+  stress_axi3  load/store port routed through AXI3 and back. Each carries the
+               AXI4-Stream smoke test as well.
+
+The four stress builds are the same source, the same configurations and the
+same checks as the Vivado builds in hw/vivado/arty_a7. They replace the
+MicroBlaze wrr, qos, qos_stress, axi3 and axis suites, which were Xilinx-only
+and could never have run on this board at all.
 
 Usage:
-    python run_vexzero_de25.py                  # verdict: generate, build, run
-    python run_vexzero_de25.py --design bench   # Dhrystone instead
-    python run_vexzero_de25.py --skip-build     # reprogram and re-read only
+    python run_vexzero_de25.py                       # verdict: generate, build, run
+    python run_vexzero_de25.py --design bench        # Dhrystone instead
+    python run_vexzero_de25.py --design stress_qos   # the QoS-arbitrated build
+    python run_vexzero_de25.py --design all          # every design bar bench
+    python run_vexzero_de25.py --skip-build          # reprogram and re-read only
 """
 
 from __future__ import annotations
@@ -57,6 +71,21 @@ DESIGNS = {
     },
 }
 
+# The stress builds differ only in which arbitration policy they were built
+# with, so their entries are generated rather than written out four times.
+for _policy in ("rr", "wrr", "qos", "axi3"):
+    DESIGNS[f"stress_{_policy}"] = {
+        "top": f"VexZeroStressDe25_{_policy}",
+        "netlist": f"VexZeroStressDe25_{_policy}.v",
+        "project": f"vexzero_stress_{_policy}_de25",
+        "generator": f"vexzero.gen.VexZeroStressDe25Gen {_policy}",
+    }
+
+# Everything the self-test path can check. bench is excluded from --design all
+# because it is a benchmark rather than a pass/fail test and takes minutes to
+# drain.
+VERDICT_DESIGNS = ["verdict"] + [f"stress_{p}" for p in ("rr", "wrr", "qos", "axi3")]
+
 # ── Address map, as the SoC defines it ─────────────────────────────────────
 RAM_BASE = 0x8000_0000
 GPIO_BASE = 0xF000_0000
@@ -67,6 +96,16 @@ GPIO_LED = GPIO_BASE + 0x00
 GPIO_SWITCH = GPIO_BASE + 0x04
 SYS_STATUS = SYSCTRL_BASE + 0x08
 SYS_RESULT = SYSCTRL_BASE + 0x0C
+# The hardware verdict register; see VexZeroSysCtrl in Peripherals.scala.
+SYS_VERDICT = SYSCTRL_BASE + 0x10
+
+VERDICT_BUS_VIOLATION = 1 << 0
+VERDICT_GEN_OK = 1 << 1
+VERDICT_AXIS_OK = 1 << 2
+VERDICT_HAS_CHECKERS = 1 << 8
+VERDICT_HAS_GENS = 1 << 9
+VERDICT_HAS_ISLAND = 1 << 10
+VERDICT_GEN_FAULT_SHIFT = 16
 
 BENCH_DRAIN = BENCH_BASE + 0x00  # [7:0] character, [8] valid -- reading pops
 BENCH_LEVEL = BENCH_BASE + 0x04
@@ -218,10 +257,27 @@ def check_verdict(axi, switches_expected: int | None) -> bool:
     first = axi.axi_read(RAM_BASE)
     checks.append(("RAM readable", first != 0 and first != 0xFFFF_FFFF, f"0x{first:08X}", "non-trivial"))
 
+    # The parts of the verdict no firmware value can reach: whether the fabric
+    # kept the protocol, whether the traffic generators read back what they
+    # wrote, and whether the stream island passed. Each is only reported when
+    # the build actually contains it -- a design with no protocol checkers
+    # would otherwise "pass" the protocol check by having nobody watching.
+    verdict = axi.axi_read(SYS_VERDICT)
+    if verdict & VERDICT_HAS_CHECKERS:
+        clean = not (verdict & VERDICT_BUS_VIOLATION)
+        checks.append(("bus protocol", clean, "violation seen" if not clean else "clean", "clean"))
+    if verdict & VERDICT_HAS_GENS:
+        gens_ok = bool(verdict & VERDICT_GEN_OK)
+        faults = (verdict >> VERDICT_GEN_FAULT_SHIFT) & 0xFF
+        checks.append(("generators", gens_ok, f"fault mask 0x{faults:02X}", "no faults, laps done"))
+    if verdict & VERDICT_HAS_ISLAND:
+        checks.append(("stream island", bool(verdict & VERDICT_AXIS_OK), "failed", "passed"))
+
     print()
     print("=" * 50)
     print("  VexZero DE25-Nano -- self test")
     print("=" * 50)
+    print(f"  verdict word  = 0x{verdict:08X}")
     for name, ok, got, want in checks:
         state = "PASS" if ok else f"FAIL (got {got}, want {want})"
         print(f"  {name:<14}= {state}")
@@ -336,9 +392,94 @@ def report_bench(text: str, exit_code: int) -> bool:
 
 
 # ── Entry point ────────────────────────────────────────────────────────────
+def check_timing(build_dir: Path, design_name: str, allow_failure: bool) -> None:
+    """Refuse to read a board result from a build that missed timing.
+
+    Quartus writes a .sof whether or not the design closes, and a board loaded
+    with one will usually still boot and report a pass -- setup violations show
+    up as occasional wrong bits, not as an obvious halt. Accepting that would
+    mean certifying the report rather than the design.
+
+    The slack is recorded by build_vexzero_de25.tcl. A build directory produced
+    before this check existed will not have the file; that is reported rather
+    than passed over, because "no evidence of a problem" and "evidence of no
+    problem" are not the same thing.
+    """
+    record = build_dir / "vexzero_timing.txt"
+    if not record.is_file():
+        raise BuildError(
+            f"no timing record at {record} -- rebuild with --force-build; "
+            "closure cannot be confirmed without it"
+        )
+
+    slack = None
+    for line in record.read_text().splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == "slack":
+            try:
+                slack = float(parts[1])
+            except ValueError:
+                slack = None
+
+    if slack is None:
+        raise BuildError(f"no usable setup slack in {record}")
+
+    if slack < 0:
+        print(f"  timing        = FAIL (worst setup slack {slack:+.3f} ns)")
+        if not allow_failure:
+            raise BuildError(
+                f"{design_name} does not meet timing (worst setup slack "
+                f"{slack:+.3f} ns); the board result from this bitstream is not "
+                "evidence and was not read. Re-run with --allow-timing-failure "
+                "to program it anyway for debugging."
+            )
+        print("  (--allow-timing-failure given: continuing, result is not evidence)")
+    else:
+        print(f"  timing        = PASS (worst setup slack {slack:+.3f} ns)")
+
+
+def run_one(name: str, args, quartus_sh: Path, quartus_pgm: Path, quartus_stp: Path) -> bool:
+    """Build if needed, program, and read one design's verdict off the board."""
+    design = DESIGNS[name]
+    build_dir = HERE / design["project"]
+    sof = build_dir / f"{design['project']}.sof"
+
+    banner(f"design: {name}")
+
+    if not args.skip_build and (args.force_build or not sof.is_file()):
+        generate_netlist(design)
+        build_bitstream(quartus_sh, name, build_dir)
+
+    if not sof.is_file():
+        raise BuildError(f"no bitstream at {sof} -- build it first (drop --skip-build)")
+
+    check_timing(build_dir, name, args.allow_timing_failure)
+
+    program(quartus_pgm, sof)
+
+    transport, axi = open_bridge(quartus_stp)
+    try:
+        if name == "bench":
+            text = drain_console(axi, args.seconds)
+            finished = axi.axi_read(BENCH_STATUS) & 1
+            exit_code = axi.axi_read(BENCH_EXIT)
+            if not finished:
+                print("\n  the program had not written its exit register when time ran out")
+            return report_bench(text, exit_code) and bool(finished)
+        return check_verdict(axi, args.switches)
+    finally:
+        transport.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--design", choices=sorted(DESIGNS), default="verdict")
+    parser.add_argument("--design", choices=sorted(DESIGNS) + ["all"], default="verdict")
+    parser.add_argument(
+        "--allow-timing-failure",
+        action="store_true",
+        help="Program and read a bitstream that misses timing. For debugging a "
+        "failing path only: the board result it produces is not evidence.",
+    )
     parser.add_argument("--skip-build", action="store_true", help="reprogram and re-read only")
     parser.add_argument("--force-build", action="store_true", help="rebuild even if a bitstream exists")
     parser.add_argument("--seconds", type=float, default=60.0, help="how long to drain the console")
@@ -346,11 +487,9 @@ def main() -> int:
                         help="switch nibble to expect, e.g. 0xF")
     args = parser.parse_args()
 
-    design = DESIGNS[args.design]
-    build_dir = HERE / design["project"]
-    sof = build_dir / f"{design['project']}.sof"
+    names = VERDICT_DESIGNS if args.design == "all" else [args.design]
 
-    print(f"VexZero on DE25-Nano -- {args.design}")
+    print(f"VexZero on DE25-Nano -- {', '.join(names)}")
 
     if not (FCAPZ / "rtl" / "fcapz_ejtagaxi_intel.v").is_file():
         print("[error] the fpgacapZero submodule is missing.")
@@ -363,30 +502,11 @@ def main() -> int:
         print(f"  quartus_sh : {quartus_sh}")
         print(f"  quartus_stp: {quartus_stp}")
 
-        if not args.skip_build and (args.force_build or not sof.is_file()):
-            generate_netlist(design)
-            build_bitstream(quartus_sh, args.design, build_dir)
-
-        if not sof.is_file():
-            raise BuildError(f"no bitstream at {sof} -- build it first (drop --skip-build)")
-
-        program(quartus_pgm, sof)
-
-        transport, axi = open_bridge(quartus_stp)
-        try:
-            if args.design == "verdict":
-                ok = check_verdict(axi, args.switches)
-            else:
-                text = drain_console(axi, args.seconds)
-                finished = axi.axi_read(BENCH_STATUS) & 1
-                exit_code = axi.axi_read(BENCH_EXIT)
-                if not finished:
-                    print("\n  the program had not written its exit register when time ran out")
-                ok = report_bench(text, exit_code) and bool(finished)
-        finally:
-            transport.close()
-
-        return 0 if ok else 1
+        all_ok = True
+        for name in names:
+            ok = run_one(name, args, quartus_sh, quartus_pgm, quartus_stp)
+            all_ok = all_ok and ok
+        return 0 if all_ok else 1
 
     except BuildError as exc:
         print(f"[error] {exc}")

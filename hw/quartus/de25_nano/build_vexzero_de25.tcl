@@ -5,9 +5,23 @@
 #
 #   quartus_sh -t build_vexzero_de25.tcl <repo_root> <design>
 #
-# where <design> is "verdict" (the self test) or "bench" (Dhrystone). Both top
-# levels present the same pins, so both use the same QSF and SDC and only the
-# top-level entity and the netlist differ.
+# where <design> is one of:
+#
+#   verdict      the self test
+#   bench        Dhrystone
+#   stress_rr    the self test with two saturating self-checking traffic
+#   stress_wrr   generators loading the crossbar, one build per arbitration
+#   stress_qos   policy, plus one with the CPU's load/store port routed
+#   stress_axi3  through AXI3 and back
+#
+# Every top level presents the same pins, so they all use the same QSF and SDC
+# and only the top-level entity and the netlist differ.
+#
+# The four stress builds are the Altera half of what replaced the MicroBlaze
+# wrr, qos, qos_stress, axi3 and axis Arty suites. Those could only ever be
+# built for Xilinx; these are the same source, the same configurations and the
+# same checks as the Vivado builds in hw/vivado/arty_a7, which is the whole
+# reason for having replaced them.
 #
 # The design instantiates fpgacapZero's JTAG-to-AXI bridge as a black box, so
 # the bridge's own sources are compiled alongside the generated netlist. They
@@ -32,7 +46,16 @@ switch -- $design {
         set netlist VexZeroBenchDe25.v
         set project vexzero_bench_de25
     }
-    default { error "unknown design '$design' -- expected 'verdict' or 'bench'" }
+    stress_rr - stress_wrr - stress_qos - stress_axi3 {
+        set policy  [string range $design 7 end]
+        set top     VexZeroStressDe25_$policy
+        set netlist $top.v
+        set project vexzero_stress_${policy}_de25
+    }
+    default {
+        error "unknown design '$design' -- expected verdict, bench, or one of\
+               stress_rr / stress_wrr / stress_qos / stress_axi3"
+    }
 }
 
 set here     [file dirname [info script]]
@@ -94,6 +117,48 @@ proc report_value {path pattern} {
     return "n/a"
 }
 
+# Worst setup slack, read from the Setup Summary table.
+#
+# Three things in the report look like the table and are not:
+#   - the table of contents entry, "  9. Setup Summary", which has no leading
+#     ";" -- matching it and then breaking on " 10. Hold Summary" was how an
+#     earlier version of this proc silently returned "n/a" for every build;
+#   - the pass/fail roll-up, ";  Setup Summary ; Pass ;", which carries a
+#     second column, so the banner is required to end at the first ";";
+#   - the Hold, Recovery, Removal and Minimum Pulse Width tables, which have
+#     the same column layout and would otherwise be read as setup slack.
+#
+# So: match the wide single-column banner, confirm the "Clock ; Slack" column
+# header before trusting a row, and take the smallest slack in the table.
+# Slack is the SECOND column -- the first is the clock name.
+proc worst_setup_slack {path} {
+    if {![file exists $path]} { return "n/a" }
+    set fh [open $path r]
+    set data [read $fh]
+    close $fh
+    set state idle
+    set worst ""
+    foreach line [split $data "\n"] {
+        switch -- $state {
+            idle {
+                if {[regexp {^;\s*Setup Summary\s*;$} $line]} { set state header }
+            }
+            header {
+                if {[regexp {^;\s*Clock\s*;\s*Slack\s*;} $line]} { set state rows }
+            }
+            rows {
+                if {[regexp {^;\s*[^;]+;\s*(-?[0-9]+\.[0-9]+)\s*;} $line -> value]} {
+                    if {$worst eq "" || $value < $worst} { set worst $value }
+                } elseif {[regexp {^\+} $line] && $worst ne ""} {
+                    break
+                }
+            }
+        }
+    }
+    if {$worst eq ""} { return "n/a" }
+    return $worst
+}
+
 set fit_rpt "$project.fit.rpt"
 set sta_rpt "$project.sta.rpt"
 
@@ -105,6 +170,25 @@ puts "  ALMs            : [report_value $fit_rpt {ALMs needed \[=A-B\+C\]\s*;\s*
 puts "  Registers       : [report_value $fit_rpt {Total dedicated logic registers\s*;\s*([^;]+);}]"
 puts "  Block memory    : [report_value $fit_rpt {Total block memory bits\s*;\s*([^;]+);}]"
 puts "  DSP blocks      : [report_value $fit_rpt {Total DSP Blocks\s*;\s*([^;]+);}]"
+
+# Worst-case setup slack, from the STA report the flow just wrote.
+#
+# Quartus writes a .sof whether or not the design closes, and a board loaded
+# with one that misses timing will usually still boot and report a pass --
+# setup violations show up as occasional wrong bits, not as a halt. So the
+# slack is recorded next to the resource numbers, and run_vexzero_de25.py
+# refuses to read a board result from a build that did not close. This is the
+# same gate create_project_vexzero.tcl applies on the Vivado side; a suite that
+# claims to validate on two vendors has to judge both by the same standard.
+set slack [worst_setup_slack $sta_rpt]
+puts "  Worst setup slack: $slack ns"
 puts "===================================================="
+
+set tfh [open "vexzero_timing.txt" w]
+puts $tfh "slack $slack"
+close $tfh
+if {[string is double -strict $slack] && $slack < 0} {
+    puts "*** TIMING NOT MET: worst setup slack $slack ns ***"
+}
 
 project_close

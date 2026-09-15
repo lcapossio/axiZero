@@ -50,7 +50,7 @@ class VexZeroArtySpec extends AnyFunSuite {
       // after configuration, so the external domain is free-running here.
       // The last byte of the line is the switch nibble the firmware read
       // back over AXI4-Lite, so it pins the switch value too.
-      val expected = "VZPDRCL5"
+      val expected = "VZPDRCLBGS5"
       val lines    = mutable.ArrayBuffer[String]()
       var pass     = false
       while (lines.length < 3 && !pass) {

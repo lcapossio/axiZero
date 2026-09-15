@@ -125,6 +125,7 @@ class VexZeroStressSpec extends AnyFunSuite {
     val compiled = simCfg.compile {
       val dut = new VexZeroSoc(socConfig)
       AxiProfile.publish(dut.fabric.io.masters)
+      AxiProfile.publishRequests(dut.fabric.xbar.io.masters)
       dut
     }
 
@@ -149,7 +150,15 @@ class VexZeroStressSpec extends AnyFunSuite {
         if (dut.io.bench.charOut.valid.toBoolean)
           console += dut.io.bench.charOut.payload.toInt.toChar
 
-        val requesting = AxiProfile.sample(dut.fabric.io.masters, stats, cycles)
+        // Per-port traffic is measured at the external ports, because latency
+        // is what the master waited, register slices included. Occupancy and
+        // contention are measured one level in, at the arbiter's own inputs,
+        // because that is where the choice is made -- a register slice accepts
+        // an address beat the cycle it appears, so at the external port the
+        // request looks over when the arbiter has only just received it. See
+        // AxiProfile.contending.
+        AxiProfile.sample(dut.fabric.io.masters, stats, cycles)
+        val requesting = AxiProfile.contending(dut.fabric.xbar.io.masters)
         if (requesting > 0) busy += 1
         if (requesting > 1) contend += 1
       }
@@ -388,6 +397,7 @@ class VexZeroStressSpec extends AnyFunSuite {
     val compiled = simCfg.compile {
       val dut = new VexZeroSoc(socConfig)
       AxiProfile.publish(dut.fabric.io.masters)
+      AxiProfile.publishRequests(dut.fabric.xbar.io.masters)
       dut
     }
 
