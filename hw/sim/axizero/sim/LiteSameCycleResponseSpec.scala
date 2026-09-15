@@ -49,6 +49,10 @@ class LiteSameCycleResponseSpec extends AnyFunSuite {
   private val size = BigInt(256)
 
   private val masterCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
+  private val ramBase   = BigInt("80000000", 16)
+  private val ramSize   = BigInt("00001000", 16)
+  // One master, so masterIndexBits is 0 and the slave-side ID is not widened.
+  private val ramCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
   private val liteCfg = Axi4Config(
     addressWidth = 32,
     dataWidth = 32,
@@ -126,6 +130,98 @@ class LiteSameCycleResponseSpec extends AnyFunSuite {
     for (i <- 0 until 2) fabric.io.masters(i) << io.masters(i)
     val regs = new SameCycleLiteSlave
     regs.io.axi <> fabric.io.slaves(0)
+  }
+
+  /** The same slave, plus an ordinary RAM port the master can move on to. */
+  private class DutTwoSlaves extends Component {
+    val io = new Bundle {
+      val cpu = slave(Axi4(masterCfg))
+      val ram = master(Axi4(ramCfg))
+    }
+    val fabric = new AxiZeroMixedTop(
+      AxiZeroConfig(
+        masters = Seq(MasterPort(masterCfg, FullAxi4)),
+        slaves = Seq(
+          SlavePort(liteCfg, LiteAxi4, base, size),
+          SlavePort(ramCfg, FullAxi4, ramBase, ramSize)
+        ),
+        maxOutstanding = 4
+      )
+    )
+    fabric.io.masters(0) << io.cpu
+    val regs = new SameCycleLiteSlave
+    regs.io.axi <> fabric.io.slaves(0)
+    io.ram <> fabric.io.slaves(1)
+  }
+
+  // ── The same-cycle answer and the ordering table ────────────────────────
+  // The pipelined crossbar holds a master's transactions of one ID to a single
+  // slave at a time and releases the claim when the response comes back. A
+  // slave that answers in the cycle it accepts the address releases it on the
+  // cycle it is claimed, which is the one case where the claim and the release
+  // land together -- and if the release is missed the claim is never given up,
+  // so the master is pinned to this slave and can never read anything else
+  // again. That is not a slow path or a dropped beat: every later read to a
+  // different slave goes unacknowledged for good.
+  //
+  // It hid once already. The whole suite reads such a slave, but nothing read
+  // one and then read somewhere else, so the pin had nothing to catch it.
+  test("a master that reads a same-cycle slave can still reach another slave") {
+    simCfg.compile(new DutTwoSlaves).doSim("lite_same_cycle_then_ram") { dut =>
+      SimTimeout(200000)
+      val cd = dut.clockDomain
+      val m  = dut.io.cpu
+      m.ar.valid #= false
+      m.aw.valid #= false
+      m.w.valid #= false
+      m.r.ready #= true
+      m.b.ready #= true
+      val mem = SimHelpers.spawnFullSlave(dut.io.ram, cd)
+      cd.forkStimulus(10)
+      cd.waitSampling(8)
+      mem(ramBase.toLong) = 0xc0ffeeL
+
+      val got = mutable.Queue[Long]()
+      cd.onSamplings {
+        if (m.r.valid.toBoolean && m.r.ready.toBoolean) got.enqueue(m.r.payload.data.toLong)
+      }
+
+      def issue(addr: Long): Unit = {
+        m.ar.valid #= true
+        m.ar.payload.addr #= addr
+        m.ar.payload.id #= 0
+        m.ar.payload.len #= 0
+        m.ar.payload.size #= 2
+        m.ar.payload.burst #= 1
+        // Dropped on the sampling the handshake completes, not a cycle later:
+        // this slave can accept a second address on the very next edge, and a
+        // duplicate read would put an extra beat in the queue below.
+        cd.waitSamplingWhere(400)(m.ar.ready.toBoolean)
+        m.ar.valid #= false
+      }
+
+      def await(what: String): Long = {
+        var left = 400
+        while (got.isEmpty && left > 0) { cd.waitSampling(); left -= 1 }
+        assert(got.nonEmpty, s"$what was never answered")
+        got.dequeue()
+      }
+
+      issue((base + 0x10).toLong)
+      val a = await("the register read")
+      assert(a == 0x5a5a0010L, f"register read back 0x$a%08X, expected 0x5A5A0010")
+
+      // The claim taken for that read has to have been released, or this one
+      // is never even accepted.
+      issue(ramBase.toLong)
+      val b = await("the RAM read after it")
+      assert(b == 0xc0ffeeL, f"RAM read back 0x$b%08X, expected 0x00C0FFEE")
+
+      // And back again, so a table that frees a thread only once is caught too.
+      issue((base + 0x24).toLong)
+      val c = await("the second register read")
+      assert(c == 0x5a5a0024L, f"register read back 0x$c%08X, expected 0x5A5A0024")
+    }
   }
 
   test("a Lite slave that answers in the same cycle is answered to the right master") {

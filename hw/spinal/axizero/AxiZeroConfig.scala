@@ -63,8 +63,17 @@ case class MasterPort(
   /** Required when mode == Axi3Mode. Describes the external AXI3 port (address/data/id widths must
     * match config).
     */
-  axi3Cfg: Option[axizero.adapters.Axi3Config] = None
+  axi3Cfg: Option[axizero.adapters.Axi3Config] = None,
+  /** Make this master's register slice a full pipe, so the READY the master sees is registered too
+    * rather than combinational through the fabric. Needs `regSlice`. Costs one more set of payload
+    * registers on AW/W/AR; forward latency and throughput are unchanged.
+    */
+  regSliceSkid: Boolean = false
 ) {
+  require(
+    !regSliceSkid || regSlice,
+    "MasterPort: regSliceSkid needs regSlice"
+  )
   require(
     mode != Axi3Mode || axi3Cfg.isDefined,
     "MasterPort: axi3Cfg must be set when mode == Axi3Mode"
@@ -86,8 +95,16 @@ case class SlavePort(
   /** Size of the slave's memory region in bytes. */
   size: BigInt,
   /** Insert a register slice between the crossbar fabric and this slave. */
-  regSlice: Boolean = false
+  regSlice: Boolean = false,
+  /** Make this slave's register slice a full pipe, so the READY the fabric sees is registered.
+    * Needs `regSlice`. Same cost and same reasoning as MasterPort.regSliceSkid.
+    */
+  regSliceSkid: Boolean = false
 ) {
+  require(
+    !regSliceSkid || regSlice,
+    "SlavePort: regSliceSkid needs regSlice"
+  )
   def endAddress: BigInt = baseAddress + size
 }
 
@@ -109,6 +126,20 @@ case class AxiZeroConfig(
     * the same slave). Only affects the full AXI4 crossbar; the Lite crossbar is always blocking.
     */
   maxOutstanding: Int = 1,
+  /** How many distinct in-flight transaction IDs the pipelined crossbar tracks per master per
+    * direction.
+    *
+    * AXI4 requires transactions sharing an ID and direction to complete in issue order whichever
+    * slave each went to. The crossbar enforces that with the industry's "single slave per ID" rule
+    * -- an ID may only have work outstanding at one slave -- and this is the size of the table that
+    * remembers where each live ID went. A request whose ID matches no live thread waits for a free
+    * one, so a small number costs throughput and never correctness; 1 means a master has one
+    * destination in flight at a time, which is already what a constant-ID master gets.
+    *
+    * Ignored when maxOutstanding is 1: blocking mode holds a master to one transaction per
+    * direction outright.
+    */
+  idThreads: Int = 2,
   /** Answer an address that decodes to no slave with DECERR instead of leaving it unacknowledged.
     *
     * With this off, a master that issues such an address never receives AWREADY/ARREADY and stalls
@@ -122,6 +153,7 @@ case class AxiZeroConfig(
   require(masters.nonEmpty, "At least one master port is required")
   require(slaves.nonEmpty, "At least one slave port is required")
   require(maxOutstanding >= 1, "maxOutstanding must be >= 1")
+  require(idThreads >= 1, "idThreads must be >= 1")
 
   arbitration match {
     case WeightedRoundRobin(w) =>

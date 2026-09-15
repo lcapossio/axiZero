@@ -35,7 +35,7 @@ class AxiZeroLiteTop(cfg: AxiZeroConfig) extends Component {
 
     // Step 1: optional register slice
     val afterRS: Axi4 = if (mp.regSlice) {
-      val rs = new Axi4LiteRegSlice(mp.config)
+      val rs = new Axi4LiteRegSlice(mp.config, mp.regSliceSkid)
       rs.io.upstream <> extPort
       rs.io.downstream
     } else extPort
@@ -68,7 +68,7 @@ class AxiZeroLiteTop(cfg: AxiZeroConfig) extends Component {
 
     // Step 2: optional register slice
     if (sp.regSlice) {
-      val rs = new Axi4LiteRegSlice(sp.config)
+      val rs = new Axi4LiteRegSlice(sp.config, sp.regSliceSkid)
       rs.io.upstream <> afterConv
       extPort <> rs.io.downstream
     } else {
@@ -129,7 +129,13 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
     )
   )
 
-  private val xbar = new Axi4Crossbar(xbarCfg)
+  // Not private, and deliberately so: a testbench that wants to know whether
+  // the arbiter actually had a choice to make has to look at the ports the
+  // arbiter sees, not at the external ones. Anything between them -- register
+  // slices, protocol bridges, width converters -- holds requests of its own,
+  // so measuring contention outside them measures the wrong thing. This
+  // matches AxiZeroLiteTop, whose xbar has always been visible.
+  val xbar = new Axi4Crossbar(xbarCfg)
 
   // ── Master-side wiring ────────────────────────────────────────────────────
   for (mi <- 0 until cfg.numMasters) {
@@ -140,11 +146,11 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
     // For Axi3Mode: Axi4RegSlice sits before the bridge (operates on the
     // AXI4 bundle; the protocol adapter is downstream and unaffected).
     val afterRS: Axi4 = if (mp.regSlice && mp.mode == LiteAxi4) {
-      val rs = new Axi4LiteRegSlice(mp.config)
+      val rs = new Axi4LiteRegSlice(mp.config, mp.regSliceSkid)
       rs.io.upstream <> extPort
       rs.io.downstream
     } else if (mp.regSlice) {
-      val rs = new Axi4RegSlice(mp.config)
+      val rs = new Axi4RegSlice(mp.config, mp.regSliceSkid)
       rs.io.upstream <> extPort
       rs.io.downstream
     } else extPort
@@ -212,11 +218,11 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
 
     // Optional register slice between adapter/converter and external port
     if (sp.regSlice && sp.mode == LiteAxi4) {
-      val rs = new Axi4LiteRegSlice(sp.config)
+      val rs = new Axi4LiteRegSlice(sp.config, sp.regSliceSkid)
       rs.io.upstream <> afterWidthConv
       extPort <> rs.io.downstream
     } else if (sp.regSlice) {
-      val rs = new Axi4RegSlice(sp.config)
+      val rs = new Axi4RegSlice(sp.config, sp.regSliceSkid)
       rs.io.upstream <> afterWidthConv
       extPort <> rs.io.downstream
     } else {

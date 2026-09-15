@@ -150,6 +150,64 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
     idx
   }
 
+  // =========================================================================
+  // Grant locking
+  // =========================================================================
+  /** Hold an arbitration decision while the slave's address channel is stalled.
+    *
+    * AXI4 A3.2.1: once AxVALID is asserted, the payload must not change until AxREADY. The arbiter
+    * re-evaluates every cycle from the live request vector, so a master that raises its request
+    * while a granted address is still waiting for AxREADY can win the next cycle and swap the
+    * address out from under the slave -- AxVALID never drops, but AxADDR and AxID move.
+    *
+    * Nothing is lost when that happens: both requests are real and both are issued eventually, so
+    * every data-value check still passes. It is still a protocol violation, and a slave that
+    * latches the address before it asserts READY -- which is a normal thing to do for timing --
+    * latches the wrong one. Found by [[axizero.verif.Axi4ProtocolChecker]] on the slave-side port
+    * of a loaded crossbar; see Axi4ProtocolCheckerSpec and VexZeroProtocolSpec.
+    *
+    * The lock releases on the handshake, so it costs no throughput: the held master was going to be
+    * served in that cycle anyway.
+    */
+  def lockGrant(freshIdx: UInt, axValid: Bool, axReady: Bool): UInt = {
+    // Named explicitly: these are per-slave registers created inside a helper,
+    // so SpinalHDL would otherwise emit them as _zz_when_Axi4Crossbar_l<line>
+    // in a netlist this project ships for people to read and instantiate.
+    val held    = RegInit(False).setWeakName("grantLock")
+    val heldIdx = Reg(UInt(ptrW bits)).init(0).setWeakName("grantLockIdx")
+    val idx     = held ? heldIdx | freshIdx
+    // Held only while the channel is actually stalled, which is exactly the
+    // window the rule covers. Releasing it whenever AxVALID is low matters as
+    // much as taking it: a stale lock would otherwise survive a master that
+    // withdrew its request, and the next cycle would present a master that is
+    // not asking for anything.
+    when(axValid && !axReady) {
+      held    := True
+      heldIdx := idx
+    } otherwise {
+      held := False
+    }
+    idx
+  }
+
+  /** Is this master already occupying some slave in this direction?
+    *
+    * The Lite crossbar routes B and R per slave, driving the granted master's channels from inside
+    * that slave's own block. With a master granted at two slaves at once, both blocks drive the
+    * same master's B: the last one written wins, but *both* slaves are handed that master's BREADY,
+    * so the losing slave's response fires and is never delivered to anyone.
+    *
+    * Holding a master to one transaction at a time in each direction is what makes the per-slave
+    * routing sound, and this makes that invariant explicit rather than assumed.
+    *
+    * Defensive rather than a reproduced fix: the hazard is visible in the structure, but no
+    * simulation here reaches the two-slaves-active state, because it needs a master to issue a
+    * second AW before sending the first W and the slave models will not assert AWREADY until a W
+    * beat is present.
+    */
+  def masterBusy(active: Vec[Bool], granted: Vec[UInt], mi: Int): Bool =
+    (0 until Sx).map(si => active(si) && granted(si) === mi).reduceBalancedTree(_ || _)
+
   // Write path
   val wrActive  = Vec(Seq.fill(Sx)(RegInit(False)))
   val wrGranted = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
@@ -216,11 +274,12 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
       val requests = Bits(M bits)
       for (mi <- 0 until M) {
         requests(mi) := io.masters(mi).aw.valid &&
-          addrDecodeOH(io.masters(mi).aw.addr)(si)
+          addrDecodeOH(io.masters(mi).aw.addr)(si) &&
+          !masterBusy(wrActive, wrGranted, mi)
       }
 
       val grant = arbitrate(requests, wrRrPtr(si), if (wrCredits != null) wrCredits(si) else null)
-      val grantIdx = ohToIdx(grant)
+      val grantIdx = lockGrant(ohToIdx(grant), slv.aw.valid, slv.aw.ready)
       val anyReq   = requests.orR
 
       when(anyReq) {
@@ -304,11 +363,12 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
       val requests = Bits(M bits)
       for (mi <- 0 until M) {
         requests(mi) := io.masters(mi).ar.valid &&
-          addrDecodeOH(io.masters(mi).ar.addr)(si)
+          addrDecodeOH(io.masters(mi).ar.addr)(si) &&
+          !masterBusy(rdActive, rdGranted, mi)
       }
 
       val grant = arbitrate(requests, rdRrPtr(si), if (rdCredits != null) rdCredits(si) else null)
-      val grantIdx = ohToIdx(grant)
+      val grantIdx = lockGrant(ohToIdx(grant), slv.ar.valid, slv.ar.ready)
       val anyReq   = requests.orR
 
       when(anyReq) {
