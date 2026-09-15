@@ -246,11 +246,111 @@ class IdThreads(unittest.TestCase):
                 self.assertIsNotNone(msg, f"{kind}[0].{key}: true was accepted")
                 self.assertIn("must be a non-negative integer", msg)
 
+    def test_a_width_with_no_bits_is_refused(self):
+        # An integer, so the bool check passes it through, but an address
+        # channel with no bits addresses nothing and a data channel with no
+        # bits carries nothing.
+        for kind in ("masters", "slaves"):
+            d = self._design()
+            d[kind][0]["addr_width"] = 0
+            msg = _validate(d)
+            self.assertIsNotNone(msg, f"{kind}[0].addr_width: 0 was accepted")
+            self.assertIn("addr_width", msg)
+
+            d = self._design()
+            d[kind][0]["data_width"] = 0
+            msg = _validate(d)
+            self.assertIsNotNone(msg, f"{kind}[0].data_width: 0 was accepted")
+            self.assertIn("data_width", msg)
+
+    def test_a_data_width_that_is_not_whole_byte_lanes_is_refused(self):
+        # WSTRB carries one bit per byte lane, so a width that is not a power
+        # of two whole bytes has no strobe that matches it.
+        for kind in ("masters", "slaves"):
+            for dw in (1, 4, 24, 48):
+                d = self._design()
+                d[kind][0]["data_width"] = dw
+                msg = _validate(d)
+                self.assertIsNotNone(msg, f"{kind}[0].data_width: {dw} was accepted")
+                self.assertIn("WSTRB", msg)
+
+    def test_the_ordinary_data_widths_are_still_accepted(self):
+        for kind in ("masters", "slaves"):
+            for dw in (8, 16, 32, 64, 128, 256, 512, 1024):
+                d = self._design()
+                d[kind][0]["data_width"] = dw
+                self.assertIsNone(_validate(d), f"{kind}[0].data_width: {dw} was refused")
+
     def test_a_boolean_weight_is_refused(self):
         d = self._design(arbitration="weighted_round_robin", weights=[True])
         msg = _validate(d)
         self.assertIsNotNone(msg, "weights: [true] was accepted")
         self.assertIn("must be a positive integer", msg)
+
+
+class AxisFieldTypes(unittest.TestCase):
+    """The AXIS signal options and widths, which reach the emitted Scala directly."""
+
+    def _design(self, **extra):
+        d = {"name": "S", "kind": "axis", "core": "reg_slice", "data_width": 32}
+        d.update(extra)
+        return d
+
+    def test_a_non_boolean_signal_option_is_refused(self):
+        # These go through str().lower() into the Scala, so `use_last: 1`
+        # emits `useLast = 1`, which does not compile.
+        for key in ("use_strb", "use_keep", "use_last", "use_id", "use_dest", "use_user"):
+            for bad in (1, 0, "true", "yes"):
+                d = self._design(**{key: bad})
+                msg = _validate(d)
+                self.assertIsNotNone(msg, f"{key}: {bad!r} was accepted")
+                self.assertIn("must be true or false", msg)
+
+    def test_the_booleans_are_still_accepted(self):
+        for key in ("use_strb", "use_keep", "use_last", "use_id", "use_dest", "use_user"):
+            for good in (True, False):
+                if key == "use_last" and good is False:
+                    continue  # reg_slice is fine either way, but arb_mux is not
+                self.assertIsNone(
+                    _validate(self._design(**{key: good})),
+                    f"{key}: {good!r} was refused",
+                )
+
+
+class FabricDataWidth(unittest.TestCase):
+    """fabric_data_width is a bus width like any other: whole byte lanes."""
+
+    def _design(self, **extra):
+        d = {
+            "name": "T", "type": "full",
+            "masters": [{"addr_width": 32, "data_width": 32, "id_width": 4}],
+            "slaves": [{"base": "0x0", "size": "0x1000", "data_width": 32}],
+        }
+        d.update(extra)
+        return d
+
+    def test_a_width_below_one_byte_is_refused(self):
+        for bad in (1, 2, 4):
+            msg = _validate(self._design(fabric_data_width=bad))
+            self.assertIsNotNone(msg, f"fabric_data_width: {bad} was accepted")
+            self.assertIn("at least 8", msg)
+
+    def test_the_ordinary_widths_are_still_accepted(self):
+        for good in (32, 64, 128):
+            self.assertIsNone(
+                _validate(self._design(fabric_data_width=good)),
+                f"fabric_data_width: {good} was refused",
+            )
+
+    def test_an_unparseable_address_reports_rather_than_raises(self):
+        # _parse_int used to let a float or a typo out as a ValueError
+        # traceback instead of the 'ERROR:' line every other bad field gets.
+        for field in ("base", "size"):
+            d = self._design()
+            d["slaves"][0][field] = "0x1000.5"
+            msg = _validate(d)
+            self.assertIsNotNone(msg, f"slave {field}: '0x1000.5' was accepted")
+            self.assertIn("expected an integer", msg)
 
 
 class ExistingConfigsUnchanged(unittest.TestCase):

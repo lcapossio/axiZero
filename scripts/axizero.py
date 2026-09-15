@@ -191,8 +191,10 @@ def _validate_design(d: dict, idx: int):
 
     fdw = d.get("fabric_data_width")
     if fdw is not None:
-        if not _is_int(fdw) or fdw <= 0 or (fdw & (fdw - 1)) != 0:
-            _err(f"{tag}: 'fabric_data_width' must be a power of 2 (got {fdw!r})")
+        # Same rule as the ports: whole byte lanes, so WSTRB has one bit each.
+        if not _is_int(fdw) or fdw < 8 or (fdw & (fdw - 1)) != 0:
+            _err(f"{tag}: 'fabric_data_width' must be a power of 2 and at least 8 "
+                 f"(got {fdw!r})")
 
     if arb == "weighted_round_robin":
         weights = d.get("weights")
@@ -234,6 +236,19 @@ def _validate_design(d: dict, idx: int):
                 v = port.get(key, dflt)
                 if not _is_int(v) or v < 0:
                     _err(f"{tag} {kind}[{i}]: '{key}' must be a non-negative integer (got {v!r})")
+            # A width of zero is an integer and so got this far, but an address
+            # channel with no bits addresses nothing and a data channel with no
+            # bits carries nothing.  Widths that are not a power of two number
+            # of whole bytes have no legal WSTRB: AXI gives one strobe bit per
+            # byte lane, so data_width: 1 would emit a zero-bit strobe and
+            # data_width: 24 a strobe that does not match the lanes.
+            aw = port.get("addr_width", 32)
+            if aw < 1:
+                _err(f"{tag} {kind}[{i}]: 'addr_width' must be at least 1 (got {aw})")
+            dw = port.get("data_width", 32)
+            if dw < 8 or dw % 8 != 0 or (dw & (dw - 1)) != 0:
+                _err(f"{tag} {kind}[{i}]: 'data_width' must be a power of 2 and at "
+                     f"least 8 -- one WSTRB bit per byte lane (got {dw})")
 
     for mi, m in enumerate(masters):
         check_skid(m, "master", mi)
@@ -352,6 +367,13 @@ def _validate_axis_design(d: dict, tag: str):
         if not _is_int(value) or value < 0:
             _err(f"{tag}: '{key}' must be a non-negative integer")
 
+    # The signal options go through str().lower() into the emitted Scala, so a
+    # value that is not a bool becomes a Scala literal that is not one either:
+    # `use_last: 1` emits `useLast = 1`, which does not compile.
+    for key in ("use_strb", "use_keep", "use_last", "use_id", "use_dest", "use_user"):
+        if key in d and not isinstance(d[key], bool):
+            _err(f"{tag}: '{key}' must be true or false (got {d[key]!r})")
+
 
 def _parse_int(v) -> int:
     """Accept int or hex string like '0x1000'."""
@@ -359,7 +381,12 @@ def _parse_int(v) -> int:
         return v
     if isinstance(v, bool):
         _err(f"expected an integer, got {v!r}")
-    return int(str(v), 0)
+    try:
+        return int(str(v), 0)
+    except ValueError:
+        # Anything else -- a float, a typo'd address -- gets the same 'ERROR:'
+        # diagnostic as every other bad field rather than a Python traceback.
+        _err(f"expected an integer, got {v!r}")
 
 # ---------------------------------------------------------------------------
 # Scala code generation
