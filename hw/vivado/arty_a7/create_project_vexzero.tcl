@@ -15,9 +15,12 @@
 ##   stress_wrr   VexZeroStressArty_wrr    generators loading the crossbar, one
 ##   stress_qos   VexZeroStressArty_qos    build per arbitration policy, plus
 ##   stress_axi3  VexZeroStressArty_axi3   one with the load/store port routed
-##                                         through AXI3
+##   stress_ids   VexZeroStressArty_ids    through AXI3, and one whose
+##                                         generators vary their ID across two
+##                                         on-chip RAMs to exercise AXI4
+##                                         ordering
 ##
-## The four stress builds replace the retired MicroBlaze wrr, qos, qos_stress,
+## The five stress builds replace the retired MicroBlaze wrr, qos, qos_stress,
 ## axi3 and axis suites. They carry the AXI4-Stream smoke test as well, which
 ## is why there is no separate stream build: the island shares nothing with the
 ## bus, so it costs a bitstream almost nothing to bring along.
@@ -26,7 +29,7 @@
 ## ────────────
 ##   sbt "vexZero/runMain vexzero.gen.VexZeroArtyGen"          ;# verdict
 ##   sbt "vexZero/runMain vexzero.gen.VexZeroBenchArtyGen"     ;# bench
-##   sbt "vexZero/runMain vexzero.gen.VexZeroStressArtyGen"    ;# all four stress
+##   sbt "vexZero/runMain vexzero.gen.VexZeroStressArtyGen"    ;# all five stress
 ##   (writes generated/vexriscv/<top>.v, ROM inlined)
 ##
 ## Usage
@@ -68,7 +71,7 @@ switch -- $design {
         set proj_name vexzero_bench
         set gen_main  vexzero.gen.VexZeroBenchArtyGen
     }
-    stress_rr - stress_wrr - stress_qos - stress_axi3 {
+    stress_rr - stress_wrr - stress_qos - stress_axi3 - stress_ids {
         set policy    [string range $design 7 end]
         set top       VexZeroStressArty_$policy
         set proj_name vexzero_stress_$policy
@@ -76,7 +79,7 @@ switch -- $design {
     }
     default {
         error "unknown design '$design' — expected verdict, bench, or one of\
-               stress_rr / stress_wrr / stress_qos / stress_axi3"
+               stress_rr / stress_wrr / stress_qos / stress_axi3 / stress_ids"
     }
 }
 

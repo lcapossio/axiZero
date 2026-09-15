@@ -21,10 +21,14 @@ check is ``checksum + switches``, so a non-zero nibble is what tells a working
 Lite read from one that always returns zero.  The same verdict is on LD4-LD7
 (done, pass, fail, heartbeat) for anyone watching the board itself.
 
-Five designs share this runner.  ``verdict`` is the plain self test; the four
+Six designs share this runner.  ``verdict`` is the plain self test; the five
 ``stress_*`` builds add two saturating self-checking traffic generators that
 load the crossbar for the whole run, one per arbitration policy, and carry the
-AXI4-Stream smoke test along with them.  Between them they replace the retired
+AXI4-Stream smoke test along with them.  ``stress_ids`` is the odd one out: its
+generators vary their ID and split each ID's traffic across two on-chip RAMs,
+so it is the build that asks the fabric for AXI4 ordering -- same-ID responses
+in issue order, one slave per live ID -- rather than only for arbitration.
+Between them they replace the retired
 MicroBlaze base, wrr, qos, qos_stress, axi3 and axis suites, and unlike those
 they build for Altera as well -- see ``hw/quartus/de25_nano``.
 
@@ -79,6 +83,11 @@ DESIGNS = {
         "VexZeroStressArty_axi3",
         "vexzero_stress_axi3",
         ["vexzero.gen.VexZeroStressArtyGen", "axi3"],
+    ),
+    "stress_ids": (
+        "VexZeroStressArty_ids",
+        "vexzero_stress_ids",
+        ["vexzero.gen.VexZeroStressArtyGen", "ids"],
     ),
 }
 

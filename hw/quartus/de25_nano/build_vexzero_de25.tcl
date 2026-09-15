@@ -12,12 +12,13 @@
 #   stress_rr    the self test with two saturating self-checking traffic
 #   stress_wrr   generators loading the crossbar, one build per arbitration
 #   stress_qos   policy, plus one with the CPU's load/store port routed
-#   stress_axi3  through AXI3 and back
+#   stress_axi3  through AXI3 and back, plus one whose generators vary their
+#   stress_ids   ID across two on-chip RAMs to exercise AXI4 ordering
 #
 # Every top level presents the same pins, so they all use the same QSF and SDC
 # and only the top-level entity and the netlist differ.
 #
-# The four stress builds are the Altera half of what replaced the MicroBlaze
+# The five stress builds are the Altera half of what replaced the MicroBlaze
 # wrr, qos, qos_stress, axi3 and axis Arty suites. Those could only ever be
 # built for Xilinx; these are the same source, the same configurations and the
 # same checks as the Vivado builds in hw/vivado/arty_a7, which is the whole
@@ -46,7 +47,7 @@ switch -- $design {
         set netlist VexZeroBenchDe25.v
         set project vexzero_bench_de25
     }
-    stress_rr - stress_wrr - stress_qos - stress_axi3 {
+    stress_rr - stress_wrr - stress_qos - stress_axi3 - stress_ids {
         set policy  [string range $design 7 end]
         set top     VexZeroStressDe25_$policy
         set netlist $top.v
@@ -54,7 +55,7 @@ switch -- $design {
     }
     default {
         error "unknown design '$design' -- expected verdict, bench, or one of\
-               stress_rr / stress_wrr / stress_qos / stress_axi3"
+               stress_rr / stress_wrr / stress_qos / stress_axi3 / stress_ids"
     }
 }
 

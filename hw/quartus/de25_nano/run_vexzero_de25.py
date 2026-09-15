@@ -24,9 +24,13 @@ Six designs share the flow:
   stress_wrr   traffic generators loading the crossbar for the whole run --
   stress_qos   one build per arbitration policy -- plus one with the CPU's
   stress_axi3  load/store port routed through AXI3 and back. Each carries the
-               AXI4-Stream smoke test as well.
+  stress_ids   AXI4-Stream smoke test as well. stress_ids is the exception:
+               its generators vary their ID and split each ID's traffic across
+               two on-chip RAMs, so it asks the fabric for AXI4 ordering --
+               same-ID responses in issue order, one slave per live ID --
+               rather than only for arbitration.
 
-The four stress builds are the same source, the same configurations and the
+The five stress builds are the same source, the same configurations and the
 same checks as the Vivado builds in hw/vivado/arty_a7. They replace the
 MicroBlaze wrr, qos, qos_stress, axi3 and axis suites, which were Xilinx-only
 and could never have run on this board at all.
@@ -72,8 +76,8 @@ DESIGNS = {
 }
 
 # The stress builds differ only in which arbitration policy they were built
-# with, so their entries are generated rather than written out four times.
-for _policy in ("rr", "wrr", "qos", "axi3"):
+# with, so their entries are generated rather than written out five times.
+for _policy in ("rr", "wrr", "qos", "axi3", "ids"):
     DESIGNS[f"stress_{_policy}"] = {
         "top": f"VexZeroStressDe25_{_policy}",
         "netlist": f"VexZeroStressDe25_{_policy}.v",
@@ -84,7 +88,7 @@ for _policy in ("rr", "wrr", "qos", "axi3"):
 # Everything the self-test path can check. bench is excluded from --design all
 # because it is a benchmark rather than a pass/fail test and takes minutes to
 # drain.
-VERDICT_DESIGNS = ["verdict"] + [f"stress_{p}" for p in ("rr", "wrr", "qos", "axi3")]
+VERDICT_DESIGNS = ["verdict"] + [f"stress_{p}" for p in ("rr", "wrr", "qos", "axi3", "ids")]
 
 # ── Address map, as the SoC defines it ─────────────────────────────────────
 RAM_BASE = 0x8000_0000
