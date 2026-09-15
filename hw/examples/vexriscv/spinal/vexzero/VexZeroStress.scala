@@ -154,6 +154,12 @@ object VexZeroStress {
   /** The two multi-ID generators. Four IDs each -- twice the crossbar's default of two threads per
     * master per direction, so an ID that finds no free thread has to wait for one, which is its own
     * case and one no constant-ID master can produce.
+    *
+    * Four outstanding per ID, not two: bursts go out in pairs at one RAM before crossing to the
+    * other, and the crossing request has to be offered while *both* members of the pair are still
+    * live. At a depth of two the queue is full by then and the cross waits for room rather than for
+    * the single-slave-per-ID rule, which asks the fabric's per-ID count for nothing beyond
+    * zero-or-one.
     */
   def multiIdGenerators: Seq[AxiMultiIdGenConfig] = Seq(
     AxiMultiIdGenConfig(
@@ -162,7 +168,7 @@ object VexZeroStress {
       windowWords = idWindowWords,
       idCount = 4,
       dataPattern = 0xd1000000L,
-      outstandingPerId = 2,
+      outstandingPerId = 4,
       respStall = 3
     ),
     AxiMultiIdGenConfig(
@@ -171,7 +177,7 @@ object VexZeroStress {
       windowWords = idWindowWords,
       idCount = 4,
       dataPattern = 0xd2000000L,
-      outstandingPerId = 2,
+      outstandingPerId = 4,
       respStall = 5
     )
   )

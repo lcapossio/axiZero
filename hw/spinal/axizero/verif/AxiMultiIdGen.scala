@@ -43,19 +43,33 @@
 // disagree about what a word should hold, and a burst delivered under the
 // wrong ID is a data error rather than an ambiguity.
 //
-// What the traffic does. Bursts are issued in a fixed order -- the region
-// first, then the ID, then the offset within the slice -- so one ID's two
-// consecutive bursts land in *different* RAMs, and the second is presented
-// while the first is still in flight. That is the single-slave-per-ID rule's
-// own case: the fabric may not admit the second until the first has retired,
-// and a fabric that admits it anyway answers out of order and fails here. The
-// ID changes every second burst, so several IDs are in flight at once as well.
+// What the traffic does. Bursts are issued in a fixed order -- the pair member
+// first, then the region, then the ID, then the offset within the slice -- so
+// each ID issues *two* bursts at one RAM and then crosses to the other while
+// both are still in flight. That is the single-slave-per-ID rule's own case,
+// in the shape that asks the most of it: the fabric may not admit the crossing
+// request until both earlier ones have retired, so its per-ID count has to be
+// right at two and not merely at zero-or-one. A gate that releases an ID's
+// thread when the first of two responses comes back passes a one-deep test and
+// fails this one. The ID changes every fourth burst, so several IDs are in
+// flight at once as well.
+//
+// What the fabric DID about that request is not visible from here, though.
+// Between this master and the crossbar sits a register slice, which can accept
+// a request the crossbar has not admitted, so the evidence bits below say what
+// this generator asked for and not what the ordering table held back. That is
+// what Axi4OrderingProbe is for: it watches the crossbar's own master port,
+// where READY is the admission decision itself, and it also catches the rule
+// being broken directly rather than waiting for a wrong answer -- two similar
+// slaves can answer in issue order by luck even with no gate at all.
 //
 // Both directions run this pattern, but the ordering proof is on the read
 // side. A write's only response is BID and BRESP, so two same-ID writes
-// answered in the wrong order are indistinguishable -- what the write side
-// proves is that the fabric routed every beat to the address its AW named,
-// which the read-back checks word by word.
+// answered in the wrong order are indistinguishable, and so is a pair of BIDs
+// exchanged between two IDs that are both waiting -- each decrements a
+// non-zero counter and every response is OKAY. What the write side proves is
+// that the fabric routed every beat to the address its AW named, which the
+// read-back checks word by word.
 
 package axizero.verif
 
@@ -87,7 +101,11 @@ import spinal.lib.bus.amba4.axi._
   * @param outstandingPerId
   *   Read bursts one ID may have in flight. This is the depth of that ID's expectation queue, and
   *   the whole point of more than one: an ID with a single outstanding burst cannot have its
-  *   responses reordered, so nothing would be proved.
+  *   responses reordered, so nothing would be proved. Above 2 it buys something further: bursts are
+  *   issued in pairs at one region before crossing to the other, so at 4 the crossing request is
+  *   offered while *both* members of the pair are still live, and the fabric's per-ID count has to
+  *   be right at two for its destination gate to hold. At 2 the queue is full when the cross is
+  *   reached and it waits for room rather than for the rule.
   * @param qos
   *   AXQOS presented on both address channels.
   * @param continuous
@@ -108,7 +126,7 @@ case class AxiMultiIdGenConfig(
   dataPattern: Long = 0xd1000000L,
   passes: Int = 4,
   maxBurstLen: Int = 4,
-  outstandingPerId: Int = 2,
+  outstandingPerId: Int = 4,
   qos: Int = 0,
   continuous: Boolean = true,
   respStall: Int = 0,
@@ -128,10 +146,12 @@ case class AxiMultiIdGenConfig(
     isPow2(windowWords),
     s"AxiMultiIdGenConfig: windowWords must be a power of two, not $windowWords"
   )
+  // Pairs, not bursts: each ID issues two bursts at one region before crossing
+  // to the other, and both members of a pair have to fit in its slice.
   require(
-    windowWords % (idCount * maxBurstLen) == 0,
+    windowWords % (idCount * maxBurstLen * 2) == 0,
     s"AxiMultiIdGenConfig: windowWords ($windowWords) must divide into $idCount slices of whole " +
-      s"bursts of up to $maxBurstLen beats"
+      s"pairs of bursts of up to $maxBurstLen beats"
   )
   require(
     windowWords <= (1 << 15),
@@ -275,8 +295,10 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
   /** Beats per burst this pass. */
   private val beats = (U(1, 5 bits) |<< lenSel)
 
-  /** Bursts one ID issues per region per pass. Every slice is a whole number of bursts. */
-  private val roundsPerPass = (U(cfg.sliceWords, roundW bits) >> lenSel)
+  /** Rounds one ID runs per pass, each of which is a pair of bursts at each region. Every slice is
+    * a whole number of pairs.
+    */
+  private val roundsPerPass = (U(cfg.sliceWords, roundW bits) >> (lenSel + 1))
 
   private def regionBase(region: Bool): UInt =
     region ? U(cfg.regionBBase, axiConfig.addressWidth bits) | U(
@@ -284,9 +306,14 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
       axiConfig.addressWidth bits
     )
 
-  /** The word a burst starts at: its ID's slice, then its offset inside it. */
-  private def startWord(id: UInt, round: UInt): UInt =
-    ((id.resize(wordW + 1) |<< sliceW) + (round.resize(wordW + 1) |<< lenSel)).resize(wordW + 1)
+  /** The word a burst starts at: its ID's slice, then its offset inside it.
+    *
+    * A round covers the *pair* of bursts issued at each region, so the two members sit next to each
+    * other and consecutive rounds do not overlap.
+    */
+  private def startWord(id: UInt, round: UInt, mate: Bool): UInt =
+    ((id.resize(wordW + 1) |<< sliceW) + (round.resize(wordW + 1) |<< (lenSel + 1)) +
+      (mate.asUInt.resize(wordW + 1) |<< lenSel)).resize(wordW + 1)
 
   private def addrOf(region: Bool, word: UInt): UInt =
     (regionBase(region) + (word.resize(axiConfig.addressWidth) |<< 2))
@@ -303,22 +330,31 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
   private def bump(counter: UInt): Unit =
     when(counter =/= counter.maxValue) { counter := counter + 1 }
 
-  /** A cursor over the burst order: region fastest, then the ID, then the offset in the slice.
+  /** A cursor over the burst order: the pair member fastest, then the region, then the ID, then the
+    * offset in the slice.
     *
-    * Region fastest is what puts the single-slave-per-ID rule under load. One ID's two consecutive
-    * bursts go to *different* slaves, so the second is presented while the first is still in flight
-    * and the fabric has to hold it back. With the ID stepping fastest instead, an ID's next burst
-    * comes round several bursts later, by which time its earlier one has long retired and the rule
-    * is never asked for anything.
+    * Each ID issues its bursts in pairs to the same region before crossing to the other one: A, A,
+    * B, B. That order is the point. A single burst per region would put the crossing request
+    * against an ID with exactly one burst outstanding, which asks the fabric's per-ID counter for
+    * nothing but zero-or-one -- and the interesting failure is a counter that releases an ID's
+    * thread when the *first* of two responses comes back. With pairs, the first B is presented
+    * while *two* A bursts are still live, so the count has to be right at two and the destination
+    * gate has to hold. `outstandingPerId` must be larger than 2 for both to be in flight when the
+    * crossing request is offered; at 2 the queue is full and the cross waits for room rather than
+    * for the rule, which is a weaker test and not a wrong one.
     *
-    * The ID still changes every second burst, so different IDs remain concurrent -- which is the
+    * With the ID stepping fastest instead, an ID's next burst comes round several bursts later, by
+    * which time its earlier one has long retired and the rule is never asked for anything. The ID
+    * still changes every fourth burst here, so different IDs remain concurrent -- which is the
     * other half of what is being tested.
     */
   private class Cursor(name: String) {
     val id     = Reg(UInt(idW bits)) init (0)
+    val mate   = Reg(Bool()) init (False) // which of the pair at this region
     val region = Reg(Bool()) init (False)
     val round  = Reg(UInt(roundW bits)) init (0)
     id.setName(s"${name}_id")
+    mate.setName(s"${name}_mate")
     region.setName(s"${name}_region")
     round.setName(s"${name}_round")
 
@@ -326,21 +362,27 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
     def exhausted: Bool = round === roundsPerPass
 
     def step(): Unit = {
-      when(!region) {
-        region := True
+      when(!mate) {
+        mate := True
       } otherwise {
-        region := False
-        when(id === (cfg.idCount - 1)) {
-          id    := 0
-          round := round + 1
+        mate := False
+        when(!region) {
+          region := True
         } otherwise {
-          id := id + 1
+          region := False
+          when(id === (cfg.idCount - 1)) {
+            id    := 0
+            round := round + 1
+          } otherwise {
+            id := id + 1
+          }
         }
       }
     }
 
     def rewind(): Unit = {
       id     := 0
+      mate   := False
       region := False
       round  := 0
     }
@@ -377,15 +419,15 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
 
   io.axi.aw.valid := False
   io.axi.aw.payload.assignDontCare()
-  io.axi.aw.addr                          := addrOf(awCur.region, startWord(awCur.id, awCur.round))
-  io.axi.aw.id                            := awCur.id.resized
-  io.axi.aw.len                           := (beats - 1).resized
-  io.axi.aw.size                          := U(2, 3 bits) // 4 bytes
-  io.axi.aw.burst                         := B(1, 2 bits) // INCR
-  if (axiConfig.useLock) io.axi.aw.lock   := 0
-  if (axiConfig.useCache) io.axi.aw.cache := 0
-  if (axiConfig.useProt) io.axi.aw.prot   := 0
-  if (axiConfig.useQos) io.axi.aw.qos     := B(cfg.qos, 4 bits)
+  io.axi.aw.addr  := addrOf(awCur.region, startWord(awCur.id, awCur.round, awCur.mate))
+  io.axi.aw.id    := awCur.id.resized
+  io.axi.aw.len   := (beats - 1).resized
+  io.axi.aw.size  := U(2, 3 bits) // 4 bytes
+  io.axi.aw.burst := B(1, 2 bits) // INCR
+  if (axiConfig.useLock) io.axi.aw.lock     := 0
+  if (axiConfig.useCache) io.axi.aw.cache   := 0
+  if (axiConfig.useProt) io.axi.aw.prot     := 0
+  if (axiConfig.useQos) io.axi.aw.qos       := B(cfg.qos, 4 bits)
   if (axiConfig.useRegion) io.axi.aw.region := 0
 
   when(io.enable && phase === Phase.WRITE && !awCur.exhausted && awRoom) {
@@ -405,7 +447,7 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
     (phase === Phase.WRITE || phase === Phase.WDRAIN) && !wCur.exhausted &&
       wAhead < (cfg.idCount * cfg.outstandingPerId)
 
-  private val wWord = (startWord(wCur.id, wCur.round) + wBeat).resize(wordW + 1)
+  private val wWord = (startWord(wCur.id, wCur.round, wCur.mate) + wBeat).resize(wordW + 1)
 
   io.axi.w.valid                       := io.enable && wArmed
   io.axi.w.data                        := dataOf(wWord, wCur.region, passIdx)
@@ -422,6 +464,7 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
   private val rdQRegion = Vec(Vec(Reg(Bool()) init (False), cfg.outstandingPerId), cfg.idCount)
   private val rdQRound =
     Vec(Vec(Reg(UInt(roundW bits)) init (0), cfg.outstandingPerId), cfg.idCount)
+  private val rdQMate  = Vec(Vec(Reg(Bool()) init (False), cfg.outstandingPerId), cfg.idCount)
   private val rdQHead  = Vec(Reg(UInt(log2Up(cfg.outstandingPerId) bits)) init (0), cfg.idCount)
   private val rdQTail  = Vec(Reg(UInt(log2Up(cfg.outstandingPerId) bits)) init (0), cfg.idCount)
   private val rdQCount = Vec(Reg(UInt(outW bits)) init (0), cfg.idCount)
@@ -432,15 +475,15 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
 
   io.axi.ar.valid := False
   io.axi.ar.payload.assignDontCare()
-  io.axi.ar.addr                          := addrOf(arCur.region, startWord(arCur.id, arCur.round))
-  io.axi.ar.id                            := arCur.id.resized
-  io.axi.ar.len                           := (beats - 1).resized
-  io.axi.ar.size                          := U(2, 3 bits)
-  io.axi.ar.burst                         := B(1, 2 bits)
-  if (axiConfig.useLock) io.axi.ar.lock   := 0
-  if (axiConfig.useCache) io.axi.ar.cache := 0
-  if (axiConfig.useProt) io.axi.ar.prot   := 0
-  if (axiConfig.useQos) io.axi.ar.qos     := B(cfg.qos, 4 bits)
+  io.axi.ar.addr  := addrOf(arCur.region, startWord(arCur.id, arCur.round, arCur.mate))
+  io.axi.ar.id    := arCur.id.resized
+  io.axi.ar.len   := (beats - 1).resized
+  io.axi.ar.size  := U(2, 3 bits)
+  io.axi.ar.burst := B(1, 2 bits)
+  if (axiConfig.useLock) io.axi.ar.lock     := 0
+  if (axiConfig.useCache) io.axi.ar.cache   := 0
+  if (axiConfig.useProt) io.axi.ar.prot     := 0
+  if (axiConfig.useQos) io.axi.ar.qos       := B(cfg.qos, 4 bits)
   if (axiConfig.useRegion) io.axi.ar.region := 0
 
   when(io.enable && phase === Phase.READ && !arCur.exhausted && arRoom) {
@@ -506,7 +549,8 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
   // an ID with nothing outstanding is an ordering error.
   private val rHeadRegion = rdQRegion(rId)(rdQHead(rId))
   private val rHeadRound  = rdQRound(rId)(rdQHead(rId))
-  private val rWord       = (startWord(rId, rHeadRound) + rBeat(rId)).resize(wordW + 1)
+  private val rHeadMate   = rdQMate(rId)(rdQHead(rId))
+  private val rWord       = (startWord(rId, rHeadRound, rHeadMate) + rBeat(rId)).resize(wordW + 1)
 
   when(rFire) {
     when(rdQCount(rId) === 0) {
@@ -525,6 +569,7 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
     when(push) {
       rdQRegion(i)(rdQTail(i)) := arCur.region
       rdQRound(i)(rdQTail(i))  := arCur.round
+      rdQMate(i)(rdQTail(i))   := arCur.mate
       rdQTail(i)               := (rdQTail(i) + 1).resized
     }
     when(pop) {
