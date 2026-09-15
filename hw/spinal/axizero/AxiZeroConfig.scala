@@ -147,13 +147,27 @@ case class AxiZeroConfig(
     * an internal responder that owns every unclaimed address and completes the transaction with
     * DECERR, so the master gets its handshake and the CPU sees a bus fault it can report.
     */
-  decodeErrorResponse: Boolean = true
+  decodeErrorResponse: Boolean = true,
+  /** Bring out a read-only copy of every master port as the crossbar itself sees it.
+    *
+    * The external ports say what a master asked for; a register slice sits between them and the
+    * arbiter and accepts requests the crossbar has not admitted, so nothing outside can tell a
+    * fabric that held a request from one that took it. This exposes the crossbar's own master ports
+    * as [[Axi4MasterObs]] outputs, where READY is the admission decision itself. For observers --
+    * see [[axizero.verif.Axi4OrderingProbe]] -- which is why it is off by default and why the
+    * bundle carries no data: a design that does not read it generates exactly what it did before.
+    */
+  observeMasters: Boolean = false
 ) {
   // ---- basic sanity -------------------------------------------------------
   require(masters.nonEmpty, "At least one master port is required")
   require(slaves.nonEmpty, "At least one slave port is required")
   require(maxOutstanding >= 1, "maxOutstanding must be >= 1")
   require(idThreads >= 1, "idThreads must be >= 1")
+  require(
+    !(observeMasters && isAllLite),
+    "observeMasters watches transaction IDs, which an all-Lite fabric does not carry"
+  )
 
   arbitration match {
     case WeightedRoundRobin(w) =>

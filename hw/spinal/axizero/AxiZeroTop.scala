@@ -99,11 +99,6 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
     "AxiZeroMixedTop requires at least one FullAxi4 port. Use AxiZeroLiteTop for all-Lite."
   )
 
-  val io = new Bundle {
-    val masters = Vec(cfg.masters.indices.map(i => slave(Axi4(cfg.masters(i).config))))
-    val slaves  = Vec(cfg.slaves.indices.map(i => master(Axi4(cfg.slaves(i).config))))
-  }
-
   // ── Normalised internal ID widths ─────────────────────────────────────────
   private val effectiveIdW: Int =
     // Axi3Mode and FullAxi4 master ports carry IDs; LiteAxi4 drives id=0.
@@ -121,6 +116,18 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
 
   private def internalSlaveCfg(sp: SlavePort): Axi4Config =
     Axi4Config(sp.config.addressWidth, cfg.fabricDataWidth, slaveIdW)
+
+  val io = new Bundle {
+    val masters = Vec(cfg.masters.indices.map(i => slave(Axi4(cfg.masters(i).config))))
+    val slaves  = Vec(cfg.slaves.indices.map(i => master(Axi4(cfg.slaves(i).config))))
+
+    /** The crossbar's own master ports, read-only, when `observeMasters` is on. See
+      * [[Axi4MasterObs]]: this is the boundary where READY means admitted, which the external ports
+      * cannot show once a register slice is in the way.
+      */
+    val obs = cfg.observeMasters generate
+      Vec(cfg.masters.indices.map(i => out(Axi4MasterObs(internalMasterCfg(cfg.masters(i))))))
+  }
 
   private val xbarCfg = cfg.copy(
     masters = cfg.masters.map(mp => MasterPort(internalMasterCfg(mp), FullAxi4, regSlice = false)),
@@ -199,6 +206,9 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
       } else afterWidthConv
 
     xbar.io.masters(mi) <> afterIdWiden
+
+    // What the crossbar sees, for anyone watching from outside. Reads only.
+    if (cfg.observeMasters) io.obs(mi).watch(xbar.io.masters(mi))
   }
 
   // ── Slave-side wiring ─────────────────────────────────────────────────────
