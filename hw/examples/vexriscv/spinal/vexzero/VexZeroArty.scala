@@ -43,7 +43,8 @@ class VexZeroArty(
   // traffic for hours at 100 MHz, which is orders of magnitude more of it than
   // any simulation, and the checkers turn all of that into one reported letter
   // instead of leaving it unjudged.
-  socConfig: VexZeroSocConfig = VexZeroSocConfig(switchWidth = 4, protocolCheck = true),
+  socConfig: VexZeroSocConfig =
+    VexZeroSocConfig(switchWidth = 4, protocolCheck = true, maxOutstanding = 1),
   clkFrequency: HertzNumber = 100 MHz,
   baudRate: HertzNumber = 115200 Hz,
   /** Report period, as a counter width: one line every 2^n clocks. The default is ~0.67 s on a 100

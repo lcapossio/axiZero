@@ -46,9 +46,24 @@ object VexZeroDe25 {
   /** LEDR sinks current on this board, so a low output lights the LED. */
   val ledsActiveLow = true
 
-  /** The self-test SoC, plus the host master the report travels over. */
-  def socConfig: VexZeroSocConfig =
-    VexZeroSocConfig(switchWidth = 4, hostMaster = true, protocolCheck = true)
+  /** The self-test SoC, plus the host master the report travels over.
+    *
+    * This is also the one build that uses the BLOCKING crossbar engine.
+    *
+    * `maxOutstanding = 1` selects a different engine, not a throttled version of the same one: it
+    * owns a slave from the AW that starts a write until the B that ends it, and both crossbars
+    * carry their own copy of it. Every loaded build here runs the pipelined engine, so without this
+    * the blocking path would go to silicon only through simulation. The self test is the right
+    * place for it -- it is the design whose job is to be correct rather than to be fast, and a CPU
+    * booting through the fabric exercises the engine's whole write window on every store.
+    */
+  val socConfig: VexZeroSocConfig =
+    VexZeroSocConfig(
+      switchWidth = 4,
+      hostMaster = true,
+      protocolCheck = true,
+      maxOutstanding = 1
+    )
 }
 
 class VexZeroDe25(
