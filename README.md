@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 157 SpinalSim + 36 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 160 SpinalSim + 36 cocotb tests pass.
 
 ---
 
@@ -536,7 +536,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-157 tests pass across 23 suites:
+160 tests pass across 24 suites:
 
 For the focused AXI4-Stream loop, including lint, YAML generator smoke tests, and cocotbext-axi generated-RTL tests:
 
@@ -550,6 +550,7 @@ python3 scripts/run_sim.py axis
 | `LiteSameCycleResponseSpec` | 2 | AXI4-Lite slave that raises RVALID in the same cycle as ARREADY: the Full→Lite adapter cannot capture the response ID a cycle late, and a master that reads such a slave — where the ordering table's claim and release land on one cycle — can still reach another slave afterwards |
 | `PipelinedCrossbarSpec` | 8 | Full AXI4: bursts, back-pressure, outstanding transactions |
 | `ChannelSkewSpec` | 3 | The channel skews AXI4 permits and no other slave model here produces: a slave that raises WREADY before AWREADY, so a W beat reaches it ahead of its address; a burst whose data all arrives early, where the forwarding path has to close again so the *next* burst's data is not swallowed by the slave still holding the first address; and a Lite slave whose answer lands on the cycle the next address is accepted |
+| `BlockingWriteBoundarySpec` | 3 | Where one write's data ends and the next begins in the blocking engines, which both crossbars carry their own copy of: a slave holding a write whose data is complete while its response is still outstanding, and a write whose data reached the slave before its address. In both the master may legally offer the next write's data, and the forwarding path has to be shut or that data is written under the previous address — at a slave it was never addressed to |
 | `MultiIdOrderingSpec` | 1 | Randomised multi-ID traffic — four IDs, two slaves, both directions, random response latency and master back-pressure — against a per-ID scoreboard. The only coverage of a master that varies its ID; every other master here, VexRiscv included, drives a constant one |
 | `MixedCrossbarSpec` | 4 | Full↔Lite adapters, mixed address maps |
 | `ArtySpec` | 5 | Sequence matching the Arty A7 hardware tests (T4, T5, T6, T9, combined) |
@@ -576,7 +577,7 @@ python3 scripts/run_sim.py axis
 python3 scripts/test_axizero.py
 ```
 
-16 tests covering the YAML front end's Scala emitters and its config validator. They
+32 tests covering the YAML front end's Scala emitters and its config validator. They
 import `scripts/axizero.py` directly and never invoke sbt, so a mistake in a port
 template or a validation rule is caught in milliseconds instead of at the far end of
 an elaboration. Run in CI ahead of the end-to-end generate.
