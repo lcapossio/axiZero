@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 165 SpinalSim + 36 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 171 SpinalSim + 36 cocotb tests pass.
 
 ---
 
@@ -541,7 +541,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-165 tests pass across 25 suites:
+171 tests pass across 26 suites:
 
 For the focused AXI4-Stream loop, including lint, YAML generator smoke tests, and cocotbext-axi generated-RTL tests:
 
@@ -557,6 +557,7 @@ python3 scripts/run_sim.py axis
 | `ChannelSkewSpec` | 3 | The channel skews AXI4 permits and no other slave model here produces: a slave that raises WREADY before AWREADY, so a W beat reaches it ahead of its address; a burst whose data all arrives early, where the forwarding path has to close again so the *next* burst's data is not swallowed by the slave still holding the first address; and a Lite slave whose answer lands on the cycle the next address is accepted |
 | `BlockingWriteBoundarySpec` | 3 | Where one write's data ends and the next begins in the blocking engines, which both crossbars carry their own copy of: a slave holding a write whose data is complete while its response is still outstanding, and a write whose data reached the slave before its address. In both the master may legally offer the next write's data, and the forwarding path has to be shut or that data is written under the previous address — at a slave it was never addressed to |
 | `AxiMultiIdGenSpec` | 5 | The synthesizable multi-ID generator that goes on the boards, checked against a crossbar with two RAMs: that a clean run really did have several IDs in flight and really did ask to move a live ID between slaves, that it catches a dropped byte lane, and — with a deliberately reordering RAM model — that it catches two same-ID reads answered out of order. A self-checking generator that cannot fail is worth nothing on hardware, so each of its checks is shown failing |
+| `Axi4OrderingProbeSpec` | 6 | The ordering probe that goes on the boards, driven directly so it can be shown failing: the single-slave-per-ID rule broken with **every response still in issue order**, caught (a check that waited for a wrong answer would call that run clean); a request admitted on the cycle the last outstanding one retires, correctly allowed; a crossing request held against two live bursts recorded as the evidence it is; one-burst-at-a-time traffic claiming no evidence it did not earn; reads and writes judged apart; and the same violation on the write channels |
 | `MultiIdOrderingSpec` | 1 | Randomised multi-ID traffic — four IDs, two slaves, both directions, random response latency and master back-pressure — against a per-ID scoreboard. The only coverage of a master that varies its ID; every other master here, VexRiscv included, drives a constant one |
 | `MixedCrossbarSpec` | 4 | Full↔Lite adapters, mixed address maps |
 | `ArtySpec` | 5 | Sequence matching the Arty A7 hardware tests (T4, T5, T6, T9, combined) |
@@ -791,6 +792,13 @@ whose only link to a host is a debug cable has no serial line to print them on. 
 reads them across the crossbar under test is deliberate: a fabric broken badly enough to hide its
 own verdict cannot report a pass either.
 
+Bit 3 of that word is the protocol checkers' **overflow** flag, and it fails the run. Each checker
+tracks a bounded number of outstanding transactions and says so when it runs out; a run that
+overflowed has a checker whose silence means "stopped counting", not "saw nothing". It now fails the
+run on both boards — it is folded into the `B` the Arty prints, and the DE25-Nano runner, which reads
+the whole word, names which of the two it was — so a board that overflowed is never mistaken for a
+board that was watched and found clean.
+
 ```bash
 python hw/vivado/arty_a7/run_vexzero_test.py                # generate, build, program, verify
 python hw/vivado/arty_a7/run_vexzero_test.py --skip-build   # reprogram and re-read only
@@ -808,13 +816,13 @@ run), so the result check ran against `checksum + 15` rather than against zero. 
 
 | Resource | Used | Available | Utilisation |
 |---|---:|---:|---:|
-| Slice LUTs | 2101 | 63400 | 3.31% |
-| Slice registers | 2694 | 126800 | 2.12% |
+| Slice LUTs | 2087 | 63400 | 3.29% |
+| Slice registers | 2654 | 126800 | 2.09% |
 | Block RAM tiles | 3 | 135 | 2.22% |
 | DSPs | 0 | 240 | 0.00% |
 
 Test conditions: Vivado 2025.2, `xc7a100tcsg324-1` (speed grade -1), default synthesis and
-implementation strategies, one 100 MHz clock domain, WNS **+0.453 ns** (104.7 MHz Fmax). The figures
+implementation strategies, one 100 MHz clock domain, WNS **+0.472 ns** (105.0 MHz Fmax). The figures
 cover the whole SoC — VexRiscv, the axiZero crossbar, the 8 KB RAM, both peripherals, the UART
 reporter and the five protocol checkers — not the crossbar alone; see
 [crossbar-only resource usage](#hardware-validation) for that.
@@ -1110,9 +1118,12 @@ VexRiscv included, and `AxiSatGen` — drives a **constant** transaction ID, so 
 bitstream exercised the crossbar's ordering machinery in its degenerate shape: one thread per
 master, nothing to order and nothing to hold back. It adds a second 4 KiB on-chip RAM at
 `0x9000_0000` and two [`AxiMultiIdGen`](hw/spinal/axizero/verif/AxiMultiIdGen.scala) masters, each
-running four IDs with two read bursts in flight per ID and sending one ID's *consecutive* bursts to
-*different* RAMs. That is the single-slave-per-ID rule's own case: the fabric may not admit the
-second burst until the first has retired, and a fabric that admits it anyway answers out of order.
+running four IDs with up to four read bursts in flight per ID and sending each ID's bursts to the two
+RAMs in *pairs* — two to one, two to the other. That is the single-slave-per-ID rule's own case, in
+the shape that is hard rather than the shape that is easy: when the crossing request arrives, two of
+that ID's bursts are still outstanding at the other RAM, so the fabric's per-ID *count* has to be
+right and not merely its record of one live destination. It may not admit the crossing burst until
+both have retired, and a fabric that admits it anyway answers out of order.
 
 The generators check that themselves, in hardware, with no scoreboard in Scala: each ID owns a queue
 of the bursts issued under it and every R beat is compared against the head of the queue its RID
@@ -1121,7 +1132,22 @@ and a burst answered with the wrong number of beats all land as errors. They als
 of evidence that the run was the run it claims — that more than one ID really was outstanding at
 once, and that an ID really did ask to move to the other RAM while it was still live at one — and a
 run without both is a *failure*, because a clean result from a generator that quietly issued one ID
-at a time to one slave proves nothing. `AxiMultiIdGenSpec` shows the data check failing against a
+at a time to one slave proves nothing.
+
+The generators can only report what they saw from their own boundary, though, and that is not where
+the rule is enforced. A register slice sits between each master and the crossbar: the skid accepts
+requests the crossbar has not admitted, so a generator can truthfully report "several IDs in flight"
+and "a live ID asked to cross" while the crossbar downstream was serializing everything and its ID
+table never held two IDs at once. The evidence would be true and would prove nothing about the
+machinery it is named after. So each generator also carries an
+[`Axi4OrderingProbe`](hw/spinal/axizero/verif/Axi4OrderingProbe.scala) watching the **crossbar's own
+master port**, where ARREADY *is* the admission decision. It latches a violation if the fabric ever
+admits a request for one RAM while that ID still has work outstanding at the other — seen directly,
+rather than inferred from a response arriving late, which matters because two identical RAMs can
+answer in issue order by luck — and it latches the proof that the interesting case was reached: a
+crossing request presented and **held** while two of that ID's bursts were live elsewhere. Reads and
+writes are tracked apart, because AXI4 orders each direction on its own. Both verdicts fold into
+`io.genOk`, so a bitstream whose traffic never reached that case fails rather than passing quietly. `AxiMultiIdGenSpec` shows the data check failing against a
 RAM that drops a byte lane and the ordering check failing against a RAM model that deliberately
 answers two same-ID reads out of order, before any of it goes to a board.
 
@@ -1153,9 +1179,13 @@ RAM:
 
 `stress_ids` is not in that table because it is not measuring a split. What it measures is that
 nothing came back in the wrong order: over the same 60,000-cycle window, **100.0% contended**, its
-two multi-ID generators completed 10 and 9 full laps of both windows — 9,753 read bursts and 9,940
+two multi-ID generators each completed 10 full laps of both windows — 9,749 read bursts and 10,010
 write bursts between them — with **zero data, response and ordering errors**, and both reported
-having had several IDs outstanding at once and having asked to move a live ID to the other RAM. The
+having had several IDs outstanding at once and having asked to move a live ID to the other RAM. At
+the crossbar's own master ports, where the rule is enforced rather than observed, both probes
+recorded **two IDs live at once, one ID two bursts deep, and a crossing request held against two
+live bursts, with no violation** — so the fabric was measured doing the holding, not merely
+producing answers that happened to be in order. The
 saturating generators and the CPU are running underneath all of it, so the ordering traffic is being
 held up against real contention rather than against an idle fabric.
 
@@ -1422,12 +1452,19 @@ boards from the same configuration object:
 
 | Build | What it adds | Replaces |
 |---|---|---|
-| `verdict` | the firmware self test on a quiet fabric | base |
+| `verdict` | the firmware self test on a quiet fabric, **on the blocking crossbar** (`maxOutstanding = 1`) | base |
 | `stress_rr` | two saturating self-checking generators, round robin | base under load |
 | `stress_wrr` | the same, weighted 3:1 | wrr |
 | `stress_qos` | the same, QoS across three ranks | qos, qos_stress |
 | `stress_axi3` | the same, CPU load/store routed through AXI3 | axi3 |
 | `stress_ids` | a second RAM and two multi-ID generators driving IDs between the two | — |
+
+`verdict` is the only one built on the blocking engine. Blocking and pipelined are separate RTL
+paths, and until now every bitstream here was the pipelined one — the blocking engine had
+simulation coverage and no silicon. `verdict` is where it belongs: on a quiet fabric a stall shows
+up as a boot that never finishes rather than as a statistic, so carrying the other engine costs
+nothing that build was measuring. The five stress builds stay pipelined, which is where
+arbitration and ordering have something to do.
 
 Every one of them carries a [protocol checker](#protocol-checking) on each fabric port and the
 AXI4-Stream smoke island, so the stream components are covered by all five stress builds rather than
@@ -1477,12 +1514,12 @@ Final builds, all six programmed and verified on the board:
 
 | Build | LUTs | FFs | BRAM | WNS | Fmax |
 |---|---:|---:|---:|---:|---:|
-| `verdict` | 2210 | 2725 | 3 | +0.364 ns | 103.8 MHz |
-| `stress_rr` | 3556 | 4547 | 9 | +0.766 ns | 108.3 MHz |
-| `stress_wrr` | 3662 | 4560 | 9 | +0.750 ns | 108.1 MHz |
-| `stress_qos` | 3726 | 4608 | 9 | +0.044 ns | 100.4 MHz |
-| `stress_axi3` | 4178 | 5047 | 9 | +0.506 ns | 105.3 MHz |
-| `stress_ids` | 9152 | 7993 | 11 | +0.311 ns | 103.2 MHz |
+| `verdict` | 2087 | 2654 | 3 | +0.472 ns | 105.0 MHz |
+| `stress_rr` | 3579 | 4556 | 9 | +1.036 ns | 111.6 MHz |
+| `stress_wrr` | 3707 | 4571 | 9 | +0.993 ns | 111.0 MHz |
+| `stress_qos` | 3767 | 4617 | 9 | +0.075 ns | 100.8 MHz |
+| `stress_axi3` | 4203 | 5056 | 9 | +0.986 ns | 110.9 MHz |
+| `stress_ids` | 9646 | 8319 | 11 | +0.342 ns | 103.5 MHz |
 
 Those are whole-SoC figures — VexRiscv, 8 KB RAM, peripherals, two traffic generators, a protocol
 checker on every fabric port and the AXI4-Stream island — not the crossbar alone.
@@ -1525,12 +1562,12 @@ never the constraint:
 
 | Build | ALMs | Registers | Block memory | Worst setup slack | Verdict word |
 |---|---:|---:|---:|---:|---|
-| `verdict` | 6291.4 (13%) | 9407 | 67,584 bits | +11.560 ns | `0x00000106` |
-| `stress_rr` | 7802.1 (16%) | 12085 | 264,464 bits | +12.395 ns | `0x00000706` |
-| `stress_wrr` | 7840.2 (16%) | 12072 | 264,464 bits | +12.024 ns | `0x00000706` |
-| `stress_qos` | 7989.1 (17%) | 12189 | 264,464 bits | +9.640 ns | `0x00000706` |
-| `stress_axi3` | 7897.3 (16%) | 12253 | 265,216 bits | +12.504 ns | `0x00000706` |
-| `stress_ids` | 12932.5 (27%) | 18970 | 297,232 bits | +9.280 ns | `0x00000706` |
+| `verdict` | 6121.6 (13%) | 9269 | 67,584 bits | +11.070 ns | `0x00000106` |
+| `stress_rr` | 7822.4 (16%) | 12097 | 264,464 bits | +12.748 ns | `0x00000706` |
+| `stress_wrr` | 7874.8 (16%) | 12108 | 264,464 bits | +12.054 ns | `0x00000706` |
+| `stress_qos` | 8025.1 (17%) | 12191 | 264,464 bits | +9.942 ns | `0x00000706` |
+| `stress_axi3` | 7891.5 (16%) | 12250 | 265,216 bits | +12.801 ns | `0x00000706` |
+| `stress_ids` | 13413.4 (28%) | 19574 | 297,232 bits | +9.404 ns | `0x00000706` |
 
 The ordering matches the Arty: `stress_qos` is the tightest of the four arbitration builds on both
 boards, for the same reason, and `stress_ids` is the largest on both for the reason given above —
