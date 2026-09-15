@@ -73,6 +73,11 @@ class ChannelSkewSpec extends AnyFunSuite {
   /** `waitSampling` with a limit, so a fabric that has wedged fails here rather than hanging sbt.
     */
   private def waitUpTo(cd: ClockDomain, limit: Int)(cond: => Boolean): Boolean = {
+    // Deliberately no pre-check before the first wait, unlike the same helper
+    // in the specs that wait on handshake counters. The conditions here are
+    // level polls of a READY, and a READY that is already high says the next
+    // edge will complete a handshake, not that this one did: returning on it
+    // would drop VALID for a transfer that never happened.
     var n = 0
     while ({ cd.waitSampling(); n += 1; !cond && n < limit }) {}
     cond

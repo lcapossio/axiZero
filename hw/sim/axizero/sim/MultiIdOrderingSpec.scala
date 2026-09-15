@@ -28,10 +28,18 @@ import axizero._
 // slaves, both directions at once, randomised response latency and randomised
 // backpressure from the master, checked against a per-ID scoreboard.
 //
-// The scoreboard checks the promise directly rather than by proxy: for each ID
-// it holds the transactions issued under that ID in order, and every response
-// must match the one at the head. A response out of order, a response carrying
-// the wrong ID, or a transaction never answered all fail here.
+// The read side checks the promise directly: for each ID it holds the bursts
+// issued under that ID in order, and every R beat must be the next word of the
+// one at the head. A read answered out of order, answered under the wrong ID,
+// or never answered fails here.
+//
+// The write side cannot be checked that way and does not claim to be. B carries
+// an ID and a response and nothing else, so two same-ID writes answered in the
+// wrong order are indistinguishable. What it checks instead is where the data
+// went: every beat is unique to its address, and every address written is read
+// back out of the slave models at the end. That catches a burst steered to the
+// wrong slave, a dropped beat and a shifted one. The ordering rule itself, on
+// the write side, is what ResponseStabilitySpec tests directly.
 //
 // The seed is fixed so a failure is reproducible.
 // ---------------------------------------------------------------------------
@@ -76,6 +84,9 @@ class MultiIdOrderingSpec extends AnyFunSuite {
     * than hanging sbt.
     */
   private def waitUpTo(cd: ClockDomain, limit: Int)(cond: => Boolean): Boolean = {
+    // Checked before the first wait: what is being waited for may already have
+    // happened in the cycle that led here, and a beat taken then is gone.
+    if (cond) return true
     var n = 0
     while ({ cd.waitSampling(); n += 1; !cond && n < limit }) {}
     cond
@@ -116,12 +127,17 @@ class MultiIdOrderingSpec extends AnyFunSuite {
       // own -- a burst delivered to the wrong slave, a beat dropped, or a beat
       // sent twice all still produce the expected number of them. The data is
       // where those show up, so every beat is unique to its address and the
-      // slave models' own memories are checked at the end.
+      // slave models' own memories are checked at the end. Addresses repeat
+      // across the run, so a write overwritten by a later one at the same
+      // address is the case this cannot see.
       val wrModel = mutable.HashMap[Long, Long]()
       var rBeats  = 0
       var bSeen   = 0
-      var awFires = 0
-      var wFires  = 0
+      // Every beat the writer offers, so the totals the fabric took can be
+      // compared against what was issued rather than only against each other.
+      var nWrBeats = 0
+      var awFires  = 0
+      var wFires   = 0
 
       // ── Response scoreboards ───────────────────────────────────────────
       cd.onSamplings {
@@ -200,6 +216,7 @@ class MultiIdOrderingSpec extends AnyFunSuite {
           val base = if (rnd.nextBoolean()) s0Base else s1Base
           val word = rnd.nextInt(winWords - len)
           val addr = base + writeWin + word * 4
+          nWrBeats += len + 1
           wrExpect(id).enqueue(addr.toLong)
           m.aw.valid #= true
           m.aw.addr #= addr
@@ -262,6 +279,8 @@ class MultiIdOrderingSpec extends AnyFunSuite {
         s"${failures.size} ordering failures:\n  ${failures.take(10).mkString("\n  ")}"
       )
       assert(bSeen == nWrites, s"saw $bSeen B responses, expected $nWrites")
+      assert(awFires == nWrites, s"the fabric took $awFires write addresses, expected $nWrites")
+      assert(wFires == nWrBeats, s"the fabric took $wFires W beats, expected $nWrBeats")
 
       // Every written word, where it was written. This is what catches a burst
       // steered to the wrong slave, a beat dropped, or a beat delivered twice.
