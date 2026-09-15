@@ -58,10 +58,12 @@ hw/vivado/arty_a7/axizero_arty_qos_stress_old/
 hw/vivado/arty_a7/axizero_arty_wrr/
 hw/vivado/arty_a7/vexzero_arty/
 hw/vivado/arty_a7/vexzero_bench/
+hw/vivado/arty_a7/vexzero_stress_*/
 
 # Quartus build outputs for the DE25-Nano example
 hw/quartus/de25_nano/vexzero_de25/
 hw/quartus/de25_nano/vexzero_bench_de25/
+hw/quartus/de25_nano/vexzero_stress_*/
 hw/quartus/de25_nano/db/
 hw/quartus/de25_nano/incremental_db/
 hw/quartus/de25_nano/output_files/
@@ -85,6 +87,7 @@ hw/vivado/arty_a7/_create_project_axis_gen.tcl
 /tclapp/
 # JVM crash artifacts from forked SpinalSim test JVMs
 hs_err_pid*.log
+_arty_*.log
 replay_pid*.log
 core.*
 hw/vivado/arty_a7/axis_hier_util.rpt

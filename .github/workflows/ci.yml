@@ -48,10 +48,14 @@ jobs:
           name: scoverage-report
           path: target/scala-2.13/scoverage-report/
 
+      - name: Install Python dependencies
+        run: pip install pyyaml
+
+      - name: Generator unit tests (axizero.py)
+        run: python3 scripts/test_axizero.py
+
       - name: Generator smoke test (axizero.py)
-        run: |
-          pip install pyyaml
-          python3 scripts/axizero.py generate scripts/example.yaml
+        run: python3 scripts/axizero.py generate scripts/example.yaml
 
   # ── cocotb integration tests against pre-built generated Verilog ──────────
   cocotb:

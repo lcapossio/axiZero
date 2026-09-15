@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T. 117 SpinalSim + 36 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 157 SpinalSim + 36 cocotb tests pass.
 
 ---
 
@@ -29,11 +29,13 @@ Hardware-validated on Xilinx Arty A7-100T. 117 SpinalSim + 36 cocotb tests pass.
   - [Arbitration modes](#arbitration-modes)
   - [Data-width conversion](#data-width-conversion)
   - [Pipelined vs blocking mode](#pipelined-vs-blocking-mode)
+  - [Transaction ordering](#transaction-ordering)
   - [Decode errors](#decode-errors)
   - [AXI4-Stream utility cores](#axi4-stream-utility-cores)
 - [Simulation](#simulation)
   - [SpinalSim (unit tests)](#spinalsim-unit-tests-run-with-sbt)
   - [cocotb (integration tests)](#cocotb-integration-tests-against-pre-built-verilog-run-with-python)
+- [Protocol checking](#protocol-checking)
 - [Example system — VexRiscv SoC](#example-system--vexriscv-soc)
   - [Running it](#running-it)
   - [No cross compiler required](#no-cross-compiler-required)
@@ -42,9 +44,12 @@ Hardware-validated on Xilinx Arty A7-100T. 117 SpinalSim + 36 cocotb tests pass.
   - [What Dhrystone does not test](#what-dhrystone-does-not-test)
   - [Stress — the crossbar under load](#stress--the-crossbar-under-load)
   - [QoS, and when it stops working](#qos-and-when-it-stops-working)
+  - [Loading the crossbar on hardware](#loading-the-crossbar-on-hardware)
   - [Video — a third-party IP core writing frames to RAM](#video--a-third-party-ip-core-writing-frames-to-ram)
   - [A second board — DE25-Nano (Agilex 5)](#a-second-board--de25-nano-agilex-5)
-- [Hardware validation — Arty A7-100T](#hardware-validation--arty-a7-100t)
+- [Hardware validation](#hardware-validation)
+  - [The current suites](#the-current-suites)
+  - [Retired — the MicroBlaze suites](#retired--the-microblaze-suites)
 - [Port naming](#port-naming)
 - [Tool integration](#tool-integration)
 - [Project structure](#project-structure)
@@ -69,16 +74,19 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - Pipelined mode (`max_outstanding > 1`) with per-slave W-route FIFOs and ID-based response routing
 - IPIF compatibility — AW and W are presented simultaneously to slaves that require it
 - Decode-error responses — an address that falls outside every slave's range is completed with `DECERR` on B or R instead of being left unacknowledged, so a stray address raises a bus fault rather than wedging the master forever
+- A synthesizable AXI4 protocol checker — 19 rules, passive, one sticky bit each, running in simulation and in the bitstream from the same source; it is what caught the arbitration bug described in [Protocol checking](#protocol-checking)
+- A synthesizable saturating self-checking traffic generator — keeps several bursts in flight and reads back every word it wrote, so a crossbar can be loaded and judged on the board and not only in simulation; see [loading the crossbar on hardware](#loading-the-crossbar-on-hardware)
 - YAML → Verilog generator with port-name post-processing for Vivado AXI naming conventions
 - AXI3-to-AXI4 bridge adapter with WID reorder buffer (write interleaving → strict AW-order), locked access conversion, LEN/LOCK field adaptation
 
 - Standalone AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster
 - VexRiscv example SoC: a RISC-V core booting through the crossbar into a mixed AXI4 / AXI4-Lite address map, in simulation and on an Arty A7-100T
 - Dhrystone 2.1 on that SoC, in simulation and on the board, with per-port AXI latency and occupancy measured at the crossbar
-- A system-level stress test: the same SoC with caches on and a third master saturating the fabric — 99.9% occupied and 60.4% of cycles contended, 971,146 burst beats checked against their expected values while the program on top still passes all 20 of its own self-checks
+- A system-level stress test: the same SoC with caches on and a third master saturating the fabric — 100.0% occupied and 80.8% of cycles contended, 1,064,161 burst beats checked against their expected values while the program on top still passes all 20 of its own self-checks
 - QoS measured where it matters: ranking the masters moves 9.2 points of bus share with 4-beat bursts and 0.3 with 16-beat ones, because the crossbar's anti-starvation age boost erases a priority gap that is smaller than the wait
 - A third-party video IP core (vtpgZero) as a fourth master, writing real 16-beat frames into RAM while the CPU runs from it — the only bursting write master in the design, and the one that found a response-routing bug in the Lite adapter
 - The same SoC on two FPGA families — Xilinx Artix-7 and Altera Agilex 5 — with a JTAG-to-AXI bridge acting as a third bus master on the board that has no UART
+- Arbitration validated on real silicon rather than only in simulation: four bitstreams — round robin, weighted, QoS, and one with the CPU's load/store path routed through the AXI3 adapter — each driven by two self-checking generators that hold the fabric contended 97% of the time in simulation of the same configuration, and each built for both vendors from one configuration object
 
 **Not yet implemented:**
 
@@ -328,6 +336,7 @@ designs:
 | `arbitration` | string | `round_robin` | Arbitration policy when multiple masters contend for the same slave. See [Arbitration modes](#arbitration-modes). |
 | `weights` | list[int] | — | One integer per master. Only used with `weighted_round_robin`. Master *i* receives `weights[i]` grants per round. |
 | `max_outstanding` | int | `1` | Maximum outstanding transactions per slave per direction. See [Pipelined vs blocking mode](#pipelined-vs-blocking-mode). |
+| `id_threads` | int | `2` | How many distinct in-flight transaction IDs the pipelined crossbar tracks per master per direction, to keep same-ID transactions in issue order. Ignored when `max_outstanding` is 1. See [Transaction ordering](#transaction-ordering). |
 | `fabric_data_width` | int | max of all ports | Override the internal fabric data width. Width converters are inserted automatically at any port whose `data_width` differs. See [Data-width conversion](#data-width-conversion). |
 | `decode_error_response` | bool | `true` | Answer an address that decodes to no slave with `DECERR`. Set `false` to restore the older behaviour, where such an address is never acknowledged. See [Decode errors](#decode-errors). |
 
@@ -341,7 +350,8 @@ Each entry in the `masters` list defines one slave-facing AXI interface on the c
 | `addr_width` | int | *required* | Address bus width in bits (typically 32). AXI3 limit: ≤ 32. |
 | `data_width` | int | *required* | Data bus width in bits (32, 64, 128, …). If it differs from `fabric_data_width`, a width converter is inserted. |
 | `id_width` | int | `4` | Transaction ID width. Full AXI4 and AXI3 only; ignored for Lite. AXI3 limit: ≤ 4. The crossbar appends `ceil(log2(nMasters))` master-index bits internally. |
-| `reg_slice` | bool | `false` | Insert a register slice (pipeline stage) on this master port for timing closure. |
+| `reg_slice` | bool | `false` | Insert a register slice (pipeline stage) on this master port for timing closure. Registers VALID and the payload; READY stays combinational through the slice. |
+| `reg_slice_skid` | bool | `false` | Make that slice a full pipe, so the READY the master sees is registered too. Needs `reg_slice`. Costs one more set of payload registers on AW/W/AR; forward latency and throughput are unchanged. |
 
 #### AXI3 master (`type: axi3`)
 
@@ -379,9 +389,10 @@ Each entry in the `slaves` list defines one master-facing AXI interface on the c
 | `size` | int | *required* | Address region size in bytes. Must be a power of 2. The slave occupies `[base, base+size)`. |
 | `type` | string | `full` | `full` or `lite`. A Lite slave on a Full crossbar gets an automatic Full-to-Lite adapter. |
 | `data_width` | int | *required* | Data bus width in bits. If it differs from `fabric_data_width`, a width converter is inserted. |
-| `reg_slice` | bool | `false` | Insert a register slice on this slave port. |
+| `reg_slice` | bool | `false` | Insert a register slice on this slave port. Registers VALID and the payload; READY stays combinational through the slice. |
+| `reg_slice_skid` | bool | `false` | Make that slice a full pipe, so the READY the fabric sees is registered too. Needs `reg_slice`. Same cost and same reasoning as on a master port. |
 
-Address regions must not overlap. The crossbar uses a bitmask decoder: for each slave, bits above `log2(size)` must match `base`. Addresses that don't match any slave are undefined (no default slave / error response).
+Address regions must not overlap. The crossbar uses a bitmask decoder: for each slave, bits above `log2(size)` must match `base`. Addresses that match no slave are answered by the decode-error responder with DECERR (see `decode_error_response`, on by default).
 
 ### Arbitration modes
 
@@ -408,6 +419,19 @@ When a port's `data_width` differs from `fabric_data_width`, the generator inser
 | `> 1` | Pipelined | Per-slave W-route FIFOs, ID-based B/R response routing. Multiple transactions can be in flight simultaneously to different slaves. Required for high-throughput designs. |
 
 Only affects the Full AXI4 crossbar. The Lite-only crossbar is always single-outstanding (blocking).
+
+### Transaction ordering
+
+AXI4 makes two ordering promises that a crossbar has to keep on the master's behalf, and neither falls out of counting work per slave:
+
+- Transactions that **share an ID and a direction** complete in the order they were issued, whichever slave each went to. Different IDs are unordered.
+- **Write data follows write address.** W has carried no ID since AXI3, so a master's W beats go in the order of its own AWs, and the fabric must steer each burst to the slave its AW went to.
+
+The pipelined crossbar keeps both with the rule the industry uses, **single slave per ID**: an ID may have work outstanding at only one slave at a time, and a request naming a second one waits. AMD states it in PG059, Arm's NIC-400 calls it a cyclic-dependency avoidance scheme, and Forencich's `verilog-axi` and PULP's `axi_demux` both implement it. W gets one rule more, NIC-400's *extended write rule*: a master may not address a new slave until every write it has already issued has sent its last W beat. Per-ID tracking alone does not cover that, because a master using two IDs could legally owe write data at two slaves at once.
+
+`id_threads` is the size of the table of live IDs, per master per direction — a small fixed number, the way AMD's, Arm's and Forencich's are (`verilog-axi` defaults to 2 as well), rather than one entry per ID value. A request whose ID matches no live thread and finds none free waits for one, so the number costs throughput under many-ID traffic and never correctness. `id_threads: 1` gives a master one destination in flight per direction, which is already what a constant-ID master gets.
+
+None of this applies in blocking mode, which holds a master to one transaction per direction outright, or to the Lite crossbar, which has no IDs and no bursts.
 
 ### Decode errors
 
@@ -512,7 +536,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-117 tests pass across 18 suites:
+157 tests pass across 23 suites:
 
 For the focused AXI4-Stream loop, including lint, YAML generator smoke tests, and cocotbext-axi generated-RTL tests:
 
@@ -523,8 +547,10 @@ python3 scripts/run_sim.py axis
 | Suite | Tests | Description |
 |---|---|---|
 | `LiteCrossbarSpec` | 6 | AXI4-Lite crossbar: arbitration, address decode, WRR |
-| `LiteSameCycleResponseSpec` | 1 | AXI4-Lite slave that raises RVALID in the same cycle as ARREADY, so the Full→Lite adapter cannot capture the response ID a cycle late |
+| `LiteSameCycleResponseSpec` | 2 | AXI4-Lite slave that raises RVALID in the same cycle as ARREADY: the Full→Lite adapter cannot capture the response ID a cycle late, and a master that reads such a slave — where the ordering table's claim and release land on one cycle — can still reach another slave afterwards |
 | `PipelinedCrossbarSpec` | 8 | Full AXI4: bursts, back-pressure, outstanding transactions |
+| `ChannelSkewSpec` | 3 | The channel skews AXI4 permits and no other slave model here produces: a slave that raises WREADY before AWREADY, so a W beat reaches it ahead of its address; a burst whose data all arrives early, where the forwarding path has to close again so the *next* burst's data is not swallowed by the slave still holding the first address; and a Lite slave whose answer lands on the cycle the next address is accepted |
+| `MultiIdOrderingSpec` | 1 | Randomised multi-ID traffic — four IDs, two slaves, both directions, random response latency and master back-pressure — against a per-ID scoreboard. The only coverage of a master that varies its ID; every other master here, VexRiscv included, drives a constant one |
 | `MixedCrossbarSpec` | 4 | Full↔Lite adapters, mixed address maps |
 | `ArtySpec` | 5 | Sequence matching the Arty A7 hardware tests (T4, T5, T6, T9, combined) |
 | `IpifWriteSpec` | 5 | IPIF-style slaves (Xilinx GPIO/UART-Lite require AW+W simultaneous), blocking and pipelined modes |
@@ -535,11 +561,25 @@ python3 scripts/run_sim.py axis
 | `PipelinedArbitrationSpec` | 9 | Pipelined FixedPriority, WRR, and QoS: contention, concurrent bursts, data integrity |
 | `NarrowPortSpec` | 6 | Narrow ports: 32→16 downsizing, 16→32 upsizing, mixed Full+Lite concurrent traffic |
 | `QosCrossbarSpec` | 5 | QoS arbitration: higher AWQOS/ARQOS wins (blocking + pipelined), equal-QoS round-robin tie-break, aging anti-starvation |
-| `DecodeErrorSpec` | 13 | Decode errors: DECERR on B and on every read beat, blocking and pipelined, burst reads, W beats sunk, ID routing back to the right master, Lite, all four arbitration policies, two masters erroring at once, AXQOS deciding which of two contending masters the responder serves first (both orderings, reads and writes), and the unacknowledged failure mode with the responder disabled |
+| `DecodeErrorSpec` | 17 | Decode errors: DECERR on B and on every read beat, blocking and pipelined, burst reads, W beats sunk, ID routing back to the right master, Lite, all four arbitration policies, two masters erroring at once, AXQOS deciding which of two contending masters the responder serves first (both orderings, reads and writes), and the unacknowledged failure mode with the responder disabled |
 | `QosStressShortSpec` | 1 | Short 4-master QoS stress: distinct patterns (sequential, reverse, sparse, random short bursts), concurrent traffic, end-state validation |
 | `Axi3ToAxi4Spec` | 5 | AXI3→AXI4 bridge: single-beat, INCR burst, write interleaving (WID reorder), locked→SLVERR, multiple outstanding |
 | `Axi3MixedCrossbarSpec` | 5 | Axi3Mode auto-adapter: single-beat to full slave, single-beat to Lite slave, routing to both, 4-beat INCR burst, register-sliced path |
+| `Axi4ProtocolCheckerSpec` | 17 | The protocol checker itself: clean traffic of every burst shape stays silent, each rule fires on its own injected violation, a burst ending exactly on a 4 KiB boundary does not, and losing track reports overflow rather than a violation |
+| `ResponseStabilitySpec` | 8 | Response channels and ordering under back-pressure: B and R payloads hold while the master stalls and a second slave answers, an R burst is not interleaved by another slave, a slave that bubbles mid-burst produces no phantom beats, both writes get their response in blocking mode, same-ID reads to two slaves come back in issue order, a second write to another slave does not take the first write's data, a same-ID write to another slave waits for the first response, and a read with a new ID waits for a free thread and then completes |
+| `AxiSatGenSpec` | 6 | The saturating self-checking traffic generator: a full run against a working RAM reports no errors, its own traffic passes the protocol checker, a RAM that drops a byte lane is caught, it stays off the bus while disabled, a fabric that stops answering is reported as a stall rather than as a pass, and a master straddling two slaves under B/R back-pressure neither hangs nor misreads |
 | `AxiStreamCoreSpec` | 17 | AXI4-Stream utility cores: register slice, width adapter, FIFO, packet arb-mux, packet demux, broadcaster, sparse TKEEP/TSTRB/TLAST edge cases, TID/TDEST/TUSER propagation |
+
+### Generator unit tests (no sbt, no JDK)
+
+```bash
+python3 scripts/test_axizero.py
+```
+
+16 tests covering the YAML front end's Scala emitters and its config validator. They
+import `scripts/axizero.py` directly and never invoke sbt, so a mistake in a port
+template or a validation rule is caught in milliseconds instead of at the far end of
+an elaboration. Run in CI ahead of the end-to-end generate.
 
 ### cocotb (integration tests against pre-built Verilog, run with Python)
 
@@ -566,6 +606,100 @@ python3 sim/cocotb_gen/run_all.py axis     # generated AXI4-Stream cocotb suite
 | `qos` | `MyFull_2M2S_QoS.v` | 6 | 2-master QoS crossbar: dual-master R/W, address routing, higher QoS wins contention, equal-QoS round-robin, aging anti-starvation, QoS read priority |
 | `ipif` | `MyLite_1M4S.v` | 4 | IPIF slave compatibility: strict IpifRam model requires AWVALID+WVALID simultaneously, routing unaffected |
 | `axis` | generated AXI4-Stream cores | 8 | cocotbext-axi stream BFM tests for reg slice, width adapter, FIFO, arb-mux, demux, broadcaster |
+
+---
+
+## Protocol checking
+
+Every other test here is value-based: drive traffic, check the numbers that come back. That catches
+an interconnect which loses or corrupts data. It is blind to one that returns every right answer
+while breaking AXI4 on the way — changing an address while AWVALID is waiting for AWREADY, putting
+WLAST on the wrong beat, answering a response nobody asked for. A tolerant slave hides it; the next
+slave, on the next board, does not.
+
+[`Axi4ProtocolChecker`](hw/spinal/axizero/verif/Axi4ProtocolChecker.scala) watches instead of asking.
+It is an `Area`, not a `Component`: it snoops a bus in place, reads only VALID, READY and payload,
+and drives nothing, so adding one cannot change what the design does.
+
+```scala
+val fabric = new AxiZeroMixedTop(config)
+val check  = Axi4ProtocolChecker(fabric.io.slaves(0), label = "s0")
+io.violation := check.any     // one wire, one spare LED
+```
+
+Each rule sets one bit of `sticky`, held until reset, so a violation that happens once in a
+ten-minute run is still there at the end. `any` is their OR. The bit numbering is part of the
+interface — firmware and test benches decode it by index — so it is append-only.
+
+| # | Rule | Fires when |
+|---:|---|---|
+| 0–4 | `{AW,W,B,AR,R}_UNSTABLE` | VALID dropped before READY, or the payload moved while stalled |
+| 5 | `W_BEATS_OVERRUN` | the write burst carried more beats than its AWLEN+1 |
+| 6 | `W_LAST_MISPLACED` | WLAST arrived before the burst reached AWLEN+1 beats |
+| 7 | `R_BEATS_OVERRUN` | the read burst carried more beats than its ARLEN+1 |
+| 8 | `R_LAST_MISPLACED` | RLAST arrived on a beat that is not the ARLEN'th |
+| 9 | `B_UNEXPECTED` | write response with no outstanding write of that ID |
+| 10 | `R_UNEXPECTED` | read data with no outstanding read of that ID |
+| 11–12 | `{AW,AR}_BURST_RESERVED` | AxBURST is the reserved encoding `2'b11` |
+| 13–14 | `{AW,AR}_WRAP_BAD_LEN` | a WRAP burst whose length is not 2, 4, 8 or 16 |
+| 15–16 | `{AW,AR}_4K_CROSS` | an INCR burst crosses a 4 KiB boundary |
+| 17–18 | `{AW,AR}_LEN_EXCEEDS_MAX` | a burst longer than the configured `maxBurstLen` |
+
+Write address and write data are queued independently and judged when both halves arrive, because
+AXI4 lets a master issue write data before its address. Read beats are counted per ID, because AXI4
+lets read data for different IDs interleave — a single counter would fire on legal traffic. Losing
+track of either sets `overflow`, which is not a rule: it says the checker stopped being able to see
+everything, so silence from that port stopped being evidence.
+
+It does not check X or unknown values (those need simulation semantics and mean nothing in
+hardware), exclusive access, the low-power interface, or timing. It is a protocol checker, not a
+liveness checker: a bus that stops entirely violates nothing here.
+
+See [ADR 003](docs/adr/003-synthesizable-protocol-checker.md) for why this is written here rather
+than taken from a vendor or replaced with formal.
+
+### Why not the vendor's
+
+AMD ships a 160-rule `axi_protocol_checker`, and it is a Vivado block-design IP. It cannot be
+instantiated in a plain RTL project, it cannot run in SpinalSim, and it cannot be built for Altera
+at all — which rules out every design this interconnect is actually validated on. The VexZero SoC is
+one generated Verilog file with no block design, built for both Vivado and Quartus. This checker is
+ordinary SpinalHDL, so the same source runs in simulation, on Artix-7 and on Agilex 5.
+
+### What it found
+
+Turning it on for the first time, on a loaded crossbar, reported `s0: AR_UNSTABLE` — the read
+address to the RAM slave changing while ARVALID was high and ARREADY low:
+
+```
+[ 574] PAYLOAD MOVED: 0x80008380/id 4/len 15 -> 0x80001020/id 2/len 7
+```
+
+The arbiter re-evaluated its grant every cycle from the live request vector. A master that raised
+its request while an already-granted address was waiting for AxREADY could win the next cycle and
+swap the address out from under the slave. AxVALID never dropped, so no handshake was lost; both
+requests were real and both were issued eventually, which is exactly why 133 value-based tests and
+six hardware suites all passed over it. A slave that latches the address before asserting READY —
+a normal thing to do for timing — latches the wrong one.
+
+The fix is `lockGrant` in both crossbars: the grant is held from the cycle AxVALID is asserted until
+AxREADY. It costs nothing in throughput, because the held master was going to be served in that
+cycle anyway. All six arbitration sites (blocking and pipelined, read and write, full and Lite) were
+affected.
+
+### On hardware
+
+`protocolCheck = true` in `VexZeroSocConfig` puts a checker on every fabric port — master side and
+slave side — and brings the verdict out on `io.busViolation`. It is on by default in both board
+wrappers, where it is worth the most: a bitstream runs the same traffic for hours at 100 MHz, far
+more of it than any simulation, and the checkers turn all of it into one reported letter. See the
+`B`/`b` byte in the [Arty UART line](#on-hardware).
+
+| Test (`sbt vexZero/test`) | Description |
+|---|---|
+| `the crossbar keeps AXI4 while the boot firmware runs on it` | every fabric port silent through a full boot |
+| `the crossbar keeps AXI4 with a cached CPU and a host contending for the same RAM` | 16-beat bursts, several outstanding, two masters on one slave |
+| `an illegal burst on the host port lights the verdict the board reports` | the control: one 4 KiB-crossing read has to reach `io.busViolation`, or the two silences above prove nothing |
 
 ---
 
@@ -607,6 +741,7 @@ sbt "vexZero/Compile/runMain vexzero.gen.VexZeroSocGen"   # -> generated/vexrisc
 | `boot firmware completes on the pipelined crossbar` | `maxOutstanding = 4` |
 | `boot firmware completes on the blocking crossbar` | `maxOutstanding = 1` |
 | `the firmware image is a valid RV32I encoding` | pins the assembled program |
+| `VexZeroProtocolSpec` (3 tests) | every fabric port judged against AXI4 itself; see [Protocol checking](#protocol-checking) |
 
 ### No cross compiler required
 
@@ -626,44 +761,67 @@ The example is not simulation-only — it runs on an Arty A7-100T. A board has n
 test runner, so the wrapper
 ([`VexZeroArty`](hw/examples/vexriscv/spinal/vexzero/VexZeroArty.scala)) reruns the SoC's checks in
 hardware and reports the verdict two ways: LD4–LD7 (done, pass, fail, heartbeat) for a human, and a
-9-byte line on the USB-UART at 115200 8N1, repeated every ~0.67 s, for the runner.
+12-byte line on the USB-UART at 115200 8N1, repeated every ~0.67 s, for the runner.
 
 | Line | Meaning |
 |---|---|
-| `VZPDRCL5` | every check passed; the switch nibble read back over AXI4-Lite was `0x5` (the value varies with the switches) |
-| `VZFdrcl0` | the CPU never finished — held in reset, or hung |
+| `VZPDRCLBGS5` | every check passed; the switch nibble read back over AXI4-Lite was `0x5` (the value varies with the switches) |
+| `VZFdrclBGS0` | the CPU never finished — held in reset, or hung |
+| `VZFDRCLbGS5` | the program computed everything correctly and the bus broke AXI4 while it did |
+| `VZFDRCLBgS5` | a traffic generator read back data it had not written |
 
 Upper case is a passing check: **P** overall, **D** done marker, **R** result value, **C** character
-stream, **L** LED register. The last byte is the switch nibble the firmware read back through the
+stream, **L** LED register, **B** [bus protocol](#protocol-checking), **G** [traffic
+generators](#loading-the-crossbar-on-hardware), **S** the AXI4-Stream island. A check the build
+leaves out reads upper case, so the line has the same shape whatever the configuration and one
+parser reads every variant. The last byte is the switch nibble the firmware read back through the
 AXI4-Lite GPIO. It is reported because the result check is `checksum + switches`, so with every
-switch down a Lite read that always returned zero would pass; the runner says as much when it sees
-a zero nibble.
+switch down a Lite read that always returned zero would pass; the runner says as much when it sees a
+zero nibble.
+
+The same three verdict bits are also readable over the bus, at `sysCtrl + 0x10`, because a board
+whose only link to a host is a debug cable has no serial line to print them on. That the host then
+reads them across the crossbar under test is deliberate: a fabric broken badly enough to hide its
+own verdict cannot report a pass either.
 
 ```bash
 python hw/vivado/arty_a7/run_vexzero_test.py                # generate, build, program, verify
 python hw/vivado/arty_a7/run_vexzero_test.py --skip-build   # reprogram and re-read only
+python hw/vivado/arty_a7/run_vexzero_test.py --design all   # every VexZero build in turn
 ```
 
 The runner generates the netlist with sbt, builds the bitstream, programs the board over JTAG with
 xsdb, then decodes the serial line. There is no MicroBlaze in this design, so unlike the crossbar HW
 tests it needs no `mb-gcc` — the firmware is already inside the bitstream.
 
-**Result** — the board reports `VZPDRCLF`. The trailing nibble is the switch register read back
-over AXI4-Lite (all four slide switches up on this run), so the result check ran against
-`checksum + 15` rather than against zero. Timing closes:
+**Result** — the board reports `VZPDRCLBGSF`. The `B` is the [protocol checker](#protocol-checking)
+verdict: five checkers, one on every fabric port, saw no AXI4 violation in the whole run. The
+trailing nibble is the switch register read back over AXI4-Lite (all four slide switches up on this
+run), so the result check ran against `checksum + 15` rather than against zero. Timing closes:
 
 | Resource | Used | Available | Utilisation |
 |---|---:|---:|---:|
-| Slice LUTs | 1140 | 63400 | 1.80% |
-| Slice registers | 1161 | 126800 | 0.92% |
+| Slice LUTs | 2101 | 63400 | 3.31% |
+| Slice registers | 2694 | 126800 | 2.12% |
 | Block RAM tiles | 3 | 135 | 2.22% |
 | DSPs | 0 | 240 | 0.00% |
 
 Test conditions: Vivado 2025.2, `xc7a100tcsg324-1` (speed grade -1), default synthesis and
-implementation strategies, one 100 MHz clock domain, WNS **+0.574 ns** (106.1 MHz Fmax). The figures
-cover the whole SoC — VexRiscv, the axiZero crossbar, the 8 KB RAM, both peripherals and the UART
-reporter — not the crossbar alone; see
-[crossbar-only resource usage](#hardware-validation--arty-a7-100t) for that.
+implementation strategies, one 100 MHz clock domain, WNS **+0.453 ns** (104.7 MHz Fmax). The figures
+cover the whole SoC — VexRiscv, the axiZero crossbar, the 8 KB RAM, both peripherals, the UART
+reporter and the five protocol checkers — not the crossbar alone; see
+[crossbar-only resource usage](#hardware-validation) for that.
+
+The checkers are most of the difference from the 1140 LUTs / 1161 registers this design used before
+they existed: they roughly double it, which is what watching five ports with per-ID tracking costs
+and is the reason `protocolCheck` is a switch rather than always on. Their cost in Fmax is small but
+it is not nothing, and it took work to get there: the first build with checkers came in at **+0.027
+ns**, with the critical path running from a register slice's stored AWADDR through the burst
+arithmetic and the 19-way OR into the sticky register's clock enable. Registering the rule outputs
+before they reach `sticky` ends that path at the rules; the bit only records whether something ever
+happened, so a cycle of latency on it changes nothing. `pipelineInputs` later took the checker off
+the fabric's critical path entirely — see [timing closure on the loaded
+builds](#timing-closure-on-the-loaded-builds).
 
 ### Benchmark — Dhrystone
 
@@ -815,33 +973,41 @@ adds rather than mixing in a cache-size change:
 
 | | Dhrystone alone | Dhrystone + host traffic |
 |---|---:|---:|
-| Cycles with any request | 7.9% | **99.9%** |
-| Cycles with two or more masters requesting | 0.0% | **60.4%** |
+| Cycles with any request | 7.9% | **100.0%** |
+| Cycles with two or more masters requesting | 0.0% | **80.8%** |
 | Longest burst | 8 beats | 16 beats |
-| Transactions / beats | 24,454 / 64,033 | 85,153 / 1,035,185 |
-| Instruction-fetch latency | 10.0 cycles | 23.8 cycles |
-| Data-read latency | 10.0 cycles | 34.0 cycles |
-| Host read-burst latency | — | 42.5 cycles |
-| Host beats checked | — | 971,146, **0 mismatches** |
+| Transactions / beats | 24,454 / 64,033 | 90,967 / 1,128,200 |
+| Instruction-fetch latency | 10.0 cycles | 40.2 cycles |
+| Data-read latency | 10.0 cycles | 50.1 cycles |
+| Host read-burst latency | — | 42.4 cycles |
+| Host beats checked | — | 1,064,161, **0 mismatches** |
 | Dhrystone self-checks | 20/20 pass | 20/20 pass, exit 0 |
 
-Latency rising from 10 to 24–34 cycles is the point: under Dhrystone alone the crossbar never
+Latency rising from 10 to 40–50 cycles is the point: under Dhrystone alone the crossbar never
 queued, and here it queues constantly, while the program on top still computes every one of its
 results correctly.
 
-**Pipelined against blocking, under real load.** With the fabric at 99.9% occupancy the two modes
-come out level — 85,153 transactions in 1,033,503 cycles pipelined against 82,548 in 999,762
-blocking, 0.2% apart in transactions per cycle. How the bandwidth is split differs, though: the
-pipelined path completes 4.5% more host bursts and costs Dhrystone 4.3% in timed cycles. That is
-not a defect. This load is bandwidth-bound at a single RAM slave, and allowing more transactions
-outstanding to one slave reorders who waits rather than creating bandwidth that is not there. The
-pipelined path's advantage is concurrency across *different* slaves, which is what
+**Pipelined against blocking, under real load.** With the fabric at 100.0% occupancy the two modes
+move almost the same total traffic — 90,967 transactions in 1,126,518 cycles pipelined against
+80,713 in 969,991 blocking, which is 3.0% *fewer* transactions per cycle for the pipelined path.
+What changes is who gets the bandwidth: the pipelined path completes 18.2% more host bursts and
+costs Dhrystone 20.5% in timed cycles. That is not a defect. This load is bandwidth-bound at a
+single RAM slave, and allowing more transactions outstanding to one slave reorders who waits rather
+than creating bandwidth that is not there — the host master, which always has another burst ready,
+is simply better placed to use the extra slots than a CPU that stalls on each miss. The pipelined
+path's advantage is concurrency across *different* slaves, which is what
 [`PipelinedArbitrationSpec`](hw/sim/axizero/sim/PipelinedArbitrationSpec.scala) measures directly.
 
 Test conditions: SpinalSim + Verilator, 3-master × 4-slave `AxiZeroMixedTop`, round-robin, 64 KB
 on-chip RAM, VexRiscv RV32I with a 4 KiB one-way instruction cache and a 512 B data cache, both
-32-byte lines, Dhrystone 2.1 `-O3`, 200 runs. The host reads the program text back from where it is being fetched and round-trips a pattern
-through the unused top 16 KB of RAM.
+32-byte lines, Dhrystone 2.1 `-O3`, 200 runs, master register slices as full pipes. The host reads
+the program text back from where it is being fetched and round-trips a pattern through the unused
+top 16 KB of RAM. Latency and beat counts are measured at the external master ports, because
+latency is what the master waited for, register slices included; occupancy and contention are
+measured one level in, at the crossbar's own master inputs, because that is where the arbiter makes
+its choice. Measured outside the slices the same run reads as 60% contended rather than 81%: a
+slice accepts an address beat the cycle it appears, so the master's VALID drops again immediately
+and a request that has only just reached the arbiter looks finished.
 
 ### QoS, and when it stops working
 
@@ -885,6 +1051,94 @@ sbt "vexZero/testOnly *VexZeroStressSpec"    # both the load and the QoS experim
 Test conditions: as above, plus `QosBased` arbitration and a fixed 300,000-cycle window per run
 rather than a whole Dhrystone — the question is how the bus was shared, and the test above already
 establishes that the program finishes correctly under the same load.
+
+### Loading the crossbar on hardware
+
+Everything above is simulation. A simulation of 300,000 cycles is about three milliseconds of a
+100 MHz board, and the load that produced those numbers — [`HostTraffic`](hw/examples/vexriscv/sim/vexzero/sim/HostTraffic.scala)
+— is Scala and cannot be synthesised. To ask the same questions of real silicon, the load has to be
+hardware.
+
+[`AxiSatGen`](hw/spinal/axizero/verif/AxiSatGen.scala) is that load: a saturating, self-checking
+AXI4 master, in SpinalHDL, that plugs into a crossbar port. Two properties make it worth more than a
+generic traffic generator.
+
+**It saturates.** It keeps several bursts in flight, so AW runs ahead of W and of B. A master that
+waits for each response before issuing the next address never makes an arbiter choose, which is why
+a CPU alone proves so little: measured on this SoC running Dhrystone, the two CPU ports both want
+the bus in about one cycle in a hundred. With two generators attached, the fabric is contended for
+**97%** of the run.
+
+**It checks itself.** It reads back every word it wrote and compares. That is possible without
+storing anything because the data is a function of the address:
+
+```
+data(k, p) = dataPattern | (p << 16) | k
+```
+
+with `k` the word offset in the generator's window and `p` the pass index. A pass covers the window
+exactly, so after its write phase every word holds `data(k, p)` and the read phase predicts each
+value from the address alone. A dropped or mis-routed beat then fails on the board rather than only
+in simulation, and the verdict is a wire — `io.genOk` — folded into the same report the firmware's
+checks go into. It is false if any generator miscompares, sees a response other than OKAY, has
+never completed a lap, or has gone `hangCycles` (65,536 by default) cycles without a single
+handshake on any channel. The last is there because the other three only describe what happened
+before a generator stopped: one that deadlocks after its first lap keeps zero errors and a non-zero
+lap count for ever, and would otherwise read as a pass. Burst length varies per pass, `1 << (p % 4)` beats, because long bursts are what
+make an arbitration ranking decay while short ones make the arbiter choose often.
+
+Four builds put this on both boards, differing in one field — how the crossbar chooses:
+
+| Build | Arbitration | Asks |
+|---|---|---|
+| `stress_rr` | round robin | does the fabric stay correct when saturated, and split evenly? |
+| `stress_wrr` | weighted 3:1 | do the weights move the split, without starving the lower one? |
+| `stress_qos` | QoS 12 / 6 / 2 | does ranking hold across three levels at once? |
+| `stress_axi3` | round robin | does the [AXI3 adapter](#axi3-adapter-test-1m4s-axi3-bridge-in-data-path) carry a CPU's whole load/store path under that load? |
+
+Each also runs the firmware self test, so the program on top still has to compute the right
+checksum, LEDs and characters while the generators compete with it for the RAM it fetches from; each
+carries a [protocol checker](#protocol-checking) on every fabric port; and each carries the
+AXI4-Stream smoke island, which shares nothing with the bus and so costs a bitstream almost nothing
+to bring along. The configurations live in one place,
+[`VexZeroStress`](hw/examples/vexriscv/spinal/vexzero/VexZeroStress.scala), and both the simulation
+and the two board generators build from it — a hardware run confirms a simulation only if the two
+were the same design.
+
+```bash
+sbt "vexZero/testOnly *VexZeroGenStressSpec"                 # all four, in simulation
+python hw/vivado/arty_a7/run_vexzero_test.py --design all    # all four, on the Arty
+python hw/quartus/de25_nano/run_vexzero_de25.py --design all # all four, on the DE25-Nano
+```
+
+What simulation measured, per policy, over a 60,000-cycle window after boot with two identical
+generators (256-word windows, up to 8-beat bursts, 4 outstanding) and the CPU running from the same
+RAM:
+
+| Policy | gen0 : gen1 beats | Contended | Result |
+|---|---|---:|---|
+| round robin | 25,940 : 25,874 (1.00:1) | 98.2% | even, as declared |
+| weighted 3:1 | 34,235 : 19,187 (1.78:1) | 97.5% | skewed, neither starved |
+| QoS 6 vs 2, CPU 12 | 31,092 : 20,581 (1.51:1) | 97.2% | ranked, neither starved |
+| AXI3, round robin | 25,943 : 25,873 (1.00:1) | 98.2% | the adapter does not change the split |
+
+A 3:1 weight does not produce a 3:1 throughput and is not meant to: the generators are closed-loop,
+each waiting on its own responses, so a weight buys a share of the grants rather than a share of the
+bandwidth. What has to hold — and does — is that the weighted port is served clearly more and the
+other is still served at all.
+
+Test conditions: SpinalSim/Verilator, `VexZeroSoc` with `maxOutstanding = 4`, 32 KB RAM,
+`protocolCheck` on, register slices on every master and slave port, two `AxiSatGen` masters plus
+VexRiscv's two ports; measurement window starts after the firmware writes its done marker, so the
+boot transient is excluded.
+
+The two columns are read at different points, deliberately. Beats are counted at the fabric's master
+ports, which is what each master was actually carried. Contention is counted one level further in,
+at the crossbar's own master inputs, because that is where the arbiter makes its choice: a register
+slice accepts an address beat into its own storage the cycle it appears, so at the external port the
+master's VALID drops again immediately and the request looks finished when the arbiter has only just
+received it. Measured outside the slices the same saturated run reads as 42-70% contended, which
+says nothing about the arbiter.
 
 ### Video — a third-party IP core writing frames to RAM
 
@@ -1067,15 +1321,17 @@ Only the wall-clock rate differs, because the DE25-Nano's oscillator is half the
 
 | Resource | Self test | Benchmark | Available |
 |---|---:|---:|---:|
-| ALMs | 4,689 | 4,885 | 46,800 |
-| Registers | 6,703 | 6,960 | — |
+| ALMs | 6,163.3 | 4,885 | 46,800 |
+| Registers | 9,351 | 6,960 | — |
 | RAM blocks | 6 | 19 | 358 |
 | DSP blocks | 0 | 0 | 376 |
 
 Test conditions: Quartus Prime Pro 26.1, `A5EB013BB23BE4SR1`, default synthesis and fitter settings,
-one 50 MHz clock domain. Worst-case slack **+12.830 ns** (self test) and **+11.859 ns** (benchmark),
-zero failing endpoints in both, with reported Fmax of **139.47 MHz** and **122.84 MHz** on the Slow
-0 °C model. The figures cover the whole system — VexRiscv, the axiZero crossbar, the RAM, the
+one 50 MHz clock domain. Worst-case setup slack **+12.655 ns** (self test) and **+11.859 ns**
+(benchmark), zero failing endpoints in both. The self-test figures are from the 2026-09-10 rebuild on the fixed RTL that
+also produced the [loaded-build table](#timing-closure-on-the-loaded-builds); the benchmark column
+predates the protocol checkers and the decode-error responder and has not been rebuilt since, so
+treat it as the older design it is. The figures cover the whole system — VexRiscv, the axiZero crossbar, the RAM, the
 peripherals *and* the JTAG-to-AXI bridge, which accounts for much of the register count and has no
 counterpart in the Arty builds, so the two boards' numbers are not comparable to each other.
 
@@ -1096,6 +1352,16 @@ host port directly with the transactions the bridge would issue.
   `cmd.valid` low — and `Axi4SharedOnChipRam`'s AR/AW arbiter derives `AWREADY` from `ARVALID`.
   Together those close a ready → valid → ready ring through the fabric. `regSlice = true` on both
   master ports registers every master → fabric valid and breaks it.
+- **`regSlice` registers VALID, not READY.** Each channel uses SpinalHDL's `Stream.stage()`, which
+  is `m2sPipe`: VALID and the payload are registered and `upstream.ready = !rValid || downstream.ready`
+  stays combinational. That is correct and loses no beat — READY has to stay combinational for
+  bubbles to collapse — but it means an arbiter's grant can reach a master's READY in the same
+  cycle, which is what the critical path on the loaded builds turned out to be. `regSliceSkid = true`
+  makes the three forward channels full pipes (`s2mPipe` + `m2sPipe`) so READY is registered too;
+  the skid register is what makes that safe, because once READY is a cycle stale the upstream can
+  complete a handshake the downstream did not accept and the beat needs somewhere to go. Forward
+  latency and throughput are unchanged. It is off by default and set only on the stress builds —
+  see [timing closure on the loaded builds](#timing-closure-on-the-loaded-builds).
 - **Response ordering.** Pipelined mode routes B/R by ID and both CPU ports drive a constant ID,
   so ordering only has to hold per master. IBus fetches never leave the RAM region, and
   `DBusSimplePlugin` keeps at most one read in flight and blocks reads while a write is
@@ -1106,13 +1372,150 @@ submodule in its own sbt project.
 
 ---
 
-## Hardware validation — Arty A7-100T
+## Hardware validation
 
-Six test suites run on a Xilinx Arty A7-100T (xc7a100t) at 100 MHz. All six pass. The
-[VexRiscv example SoC](#example-system--vexriscv-soc) runs on the same board with its own
-runner; its results are reported with the example.
+Validation runs on two boards from two vendors: a Xilinx Arty A7-100T (`xc7a100t`) at 100 MHz
+through Vivado, and a Terasic DE25-Nano (Agilex 5) at 50 MHz through Quartus. Both run the same
+SpinalHDL source.
 
-### Base test (1M×4S)
+### The current suites
+
+Five builds of the [VexRiscv example SoC](#example-system--vexriscv-soc), each built for both
+boards from the same configuration object:
+
+| Build | What it adds | Replaces |
+|---|---|---|
+| `verdict` | the firmware self test on a quiet fabric | base |
+| `stress_rr` | two saturating self-checking generators, round robin | base under load |
+| `stress_wrr` | the same, weighted 3:1 | wrr |
+| `stress_qos` | the same, QoS across three ranks | qos, qos_stress |
+| `stress_axi3` | the same, CPU load/store routed through AXI3 | axi3 |
+
+Every one of them carries a [protocol checker](#protocol-checking) on each fabric port and the
+AXI4-Stream smoke island, so the stream components are covered by all four stress builds rather than
+by a build of their own — that is what replaces the axis suite. See [loading the crossbar on
+hardware](#loading-the-crossbar-on-hardware) for what the generators do and why.
+
+```bash
+python hw/vivado/arty_a7/run_vexzero_test.py --design all       # Arty A7-100T, Vivado
+python hw/quartus/de25_nano/run_vexzero_de25.py --design all    # DE25-Nano, Quartus
+```
+
+### Timing closure on the loaded builds
+
+The `verdict` build closes at 100 MHz with room to spare. The four stress builds did not, and the
+reason is worth writing down: a register slice as `Stream.stage()` registers VALID and the payload
+but leaves READY combinational, so on a fabric with four masters the arbiter's grant could reach a
+master's READY through the decode-error slave in a single cycle. Three changes closed it, measured
+one at a time on `stress_qos`, the worst of the four:
+
+| Step | WNS | Failing endpoints | TNS |
+|---|---:|---:|---:|
+| baseline | −1.902 ns | 821 | −416.8 |
+| + `pipelineInputs` on the protocol checkers | −1.021 ns | 255 | −83.0 |
+| + `slaveRegSlices` | −0.552 ns | 68 | −23.7 |
+| + `masterRegSliceSkid` | **+0.316 ns** | 0 | — |
+
+That progression was measured on the RTL as it stood before the response-channel fix described in
+the changelog, so its last row (+0.316 ns) is not the number in the final table below (+0.540 ns) —
+the crossbar has since gained the response-channel hold, and every build in the final table was
+rebuilt from scratch on the fixed RTL. The rows are kept because what they show is the *shape* of
+the problem and which change moved it, and re-running three intermediate builds to restate an
+already-answered question would buy nothing.
+
+None of the three changes is supposed to alter an arbitration decision, and the one that was most
+likely to — the master-side skid, which changes when a master's request reaches the arbiter — was
+checked: the generator beat counts before and after it are bit-identical (34,235 : 19,187 on the
+weighted build). The other two rows were not re-measured beat-for-beat, so read that as "structural
+by construction, confirmed for the step that mattered" rather than as four measured rows.
+
+One attempt that did not work is worth recording too. Registering the QoS arbiter's effective-QoS
+computation, at the source of the path, made things *worse* — −0.917 ns and 448 failing endpoints.
+The path was 78–82% routing, not logic, so cutting it at its origin left the same long haul across
+the die with one fewer level of logic to hide it. The register had to go mid-haul, which is what the
+master-side skid does.
+
+Final builds, all five programmed and verified on the board:
+
+| Build | LUTs | FFs | BRAM | WNS | Fmax |
+|---|---:|---:|---:|---:|---:|
+| `verdict` | 2210 | 2725 | 3 | +0.364 ns | 103.8 MHz |
+| `stress_rr` | 3556 | 4547 | 9 | +0.766 ns | 108.3 MHz |
+| `stress_wrr` | 3662 | 4560 | 9 | +0.750 ns | 108.1 MHz |
+| `stress_qos` | 3726 | 4608 | 9 | +0.044 ns | 100.4 MHz |
+| `stress_axi3` | 4178 | 5047 | 9 | +0.506 ns | 105.3 MHz |
+
+Those are whole-SoC figures — VexRiscv, 8 KB RAM, peripherals, two traffic generators, a protocol
+checker on every fabric port and the AXI4-Stream island — not the crossbar alone.
+
+Test conditions: Vivado 2025.2, `xc7a100tcsg324-1` (speed grade −1), 100 MHz target, Vivado
+Implementation Defaults strategy with no directives, and implementation at `--jobs 8` (the
+runner's own default is 4). The design instantiates no Xilinx IP, so nothing is synthesised
+out-of-context. WNS is `STATS.WNS` of `impl_1` and Fmax is `1000 / (10 − WNS)`; the
+implementation strategy is recorded beside the slack in `vexzero_timing.txt`, because an Fmax
+without the strategy that produced it is not reproducible.
+
+Both runners refuse to program a board when the worst setup slack is negative. Three limits are
+worth stating plainly rather than leaving to be discovered: the gate reads **setup only**, so a hold
+or pulse-width violation passes it (the tightest hold margin measured here is +0.011 ns on the Arty
+`stress_qos` — positive, but not by much); `--allow-timing-failure` still ends in `PASSED` and exit
+0, having said once, earlier, that the result is not evidence; and `run_vexzero_bench.py` has no
+timing gate at all, so a Dhrystone score can come off a bitstream that missed timing.
+
+`stress_qos` is the one to watch: its margin is thin enough that placement variation moves it
+noticeably. Six builds of this design have come out at +0.316 ns, +0.121 ns, +0.540 ns, +0.373 ns,
++0.026 ns and +0.044 ns — several consecutive pairs of which differed only by a fix adding a
+register or a handful of gates and no combinational depth. So the design has something like 0.5 ns
+of run-to-run spread at this frequency, and its Fmax should be read as ~100-106 MHz rather than as
+any one of those numbers. Every one of the six closed with zero failing endpoints.
+
+The ordering table added for the AXI4 same-ID rule costs roughly 80-160 LUTs per build here (four
+masters, `idThreads = 2`, four slaves plus the decode-error responder), and the write-data skew
+tracking that goes with it a further handful of registers per slave. No build came out of closure.
+
+The same five builds on the DE25-Nano, where the 50 MHz clock leaves far more margin and timing was
+never the constraint:
+
+| Build | ALMs | Registers | Block memory | Worst setup slack | Verdict word |
+|---|---:|---:|---:|---:|---|
+| `verdict` | 6291.4 (13%) | 9407 | 67,584 bits | +11.560 ns | `0x00000106` |
+| `stress_rr` | 7802.1 (16%) | 12085 | 264,464 bits | +12.395 ns | `0x00000706` |
+| `stress_wrr` | 7840.2 (16%) | 12072 | 264,464 bits | +12.024 ns | `0x00000706` |
+| `stress_qos` | 7989.1 (17%) | 12189 | 264,464 bits | +9.640 ns | `0x00000706` |
+| `stress_axi3` | 7897.3 (16%) | 12253 | 265,216 bits | +12.504 ns | `0x00000706` |
+
+The ordering matches the Arty: `stress_qos` is the tightest of the five on both boards, for the same
+reason. The verdict word is read back over JTAG-AXI *across the crossbar under test*, because the
+board has no serial link to a host — a fabric broken badly enough to hide its own verdict cannot
+report a pass either.
+
+Test conditions: Quartus Prime Pro 26.1, Agilex 5 `A5EB013BB23BE4SR1`, 50 MHz target (20 ns
+period), default synthesis and fitter settings, Hyper-Retimer enabled but reporting no retiming
+opportunities. Slack is the worst setup slack from the Setup Summary of the post-fit timing
+analysis, and the runner refuses to program the board when it is negative. Quartus reports this
+device's timing and clock-uncertainty characteristics as *preliminary*, so treat the Agilex slack
+figures as indicative rather than final — the margin is large enough that it does not change the
+conclusion.
+
+### Retired — the MicroBlaze suites
+
+**The six suites below are retired as of 2026-09-08.** They are not run, not maintained, and not a
+gate on a push. Nothing has been deleted and they still work; see
+[`hw/vivado/arty_a7/RETIRED.md`](hw/vivado/arty_a7/RETIRED.md) for the details and the replacement
+map.
+
+They were retired because each pulls in ten or eleven Xilinx IP cores plus a block design, so none
+of them could ever be built for Altera — a hardware suite that runs on one vendor's silicon is
+evidence about one vendor's silicon. The parts that were doing the testing were never the Xilinx
+parts: the traffic generators in `hw/vivado/arty_a7/ip/rtl/` are our own portable Verilog, and only
+the CPU and the peripherals were the lock. `ip/rtl/axi_sat_gen.v` in particular lives on as
+[`AxiSatGen`](hw/spinal/axizero/verif/AxiSatGen.scala), which does the same job in SpinalHDL and so
+runs in simulation and on both vendors. See [ADR 004](docs/adr/004-vendor-neutral-hardware-validation.md)
+for the decision and what was rejected along the way.
+
+The results below are the last ones recorded, kept for the record.
+
+#### Base test (1M×4S)
 
 Topology: MicroBlaze LE → axiZero 1M×4S → 2× AXI4 BRAM ctrl (64 KB each) + AXI-Lite GPIO + AXI-Lite UART-Lite, `max_outstanding=4`.
 
@@ -1127,7 +1530,7 @@ All 10 tests pass (g\_fail=0, g\_pass=10).
 | T9 | Full 64 KB BRAM checkerboard — 16 384 word write + verify |
 | T10 | Cross-slave boundary: last word of BRAM #0, first word of BRAM #1 |
 
-### WRR test (2M×4S, weighted round-robin)
+#### WRR test (2M×4S, weighted round-robin)
 
 Topology: MicroBlaze + hardware traffic generator → axiZero 2M×4S WRR (weights 3:1) → same slaves as base test.
 
@@ -1139,7 +1542,7 @@ All 3 tests pass (g\_fail=0, g\_pass=3).
 | T2 | Contention: MB and traffic gen write concurrently, both regions verified |
 | T3 | Starvation: lower-weight master still makes progress under sustained load |
 
-### QoS hardware stress (4M×4S, heavy traffic)
+#### QoS hardware stress (4M×4S, heavy traffic)
 
 Topology: MicroBlaze QoS=15 plus 3 hardware traffic generators (QoS=8/4/0) → axiZero 4M×4S QoS → same slaves as base test.
 Each generator issues 512 words × 8 passes per iteration with intentionally different patterns:
@@ -1172,7 +1575,7 @@ mis-routed therefore fails on hardware, not only in simulation.
 
 Result over a 10-minute continuous run on an Arty A7-100T at 100 MHz (Vivado 2025.2, `xc7a100tcsg324-1`): **12,734 iterations, 76,400 sub-test checks, 0 failures**, with all three generators reporting a clean read-back status on every iteration. The load is deterministic now that no generator randomises its addresses or data — two consecutive runs reach the same iteration count and agree at every 5-second sample — so a change in the numbers is a change in the design, not in the weather.
 
-### AXI3 adapter test (1M×4S, AXI3 bridge in data path)
+#### AXI3 adapter test (1M×4S, AXI3 bridge in data path)
 
 Topology: MicroBlaze (AXI4) → AXI4-to-AXI3 shim → Axi3ToAxi4Adapter → axiZero 1M×4S crossbar → same slaves as base test.
 
@@ -1188,7 +1591,7 @@ All 5 tests pass (g\_fail=0, g\_pass=5).
 | T4 | GPIO LED sweep (AXI-Lite slave path through adapter) |
 | T5 | UART status read (second AXI-Lite slave path) |
 
-### AXI4-Stream smoke test
+#### AXI4-Stream smoke test
 
 Topology: MicroBlaze plus the dedicated fcapz EJTAG-AXI debug ingress -> axiZero 2M x 5S -> the normal base-test slaves plus a 32-bit AXI GPIO input at `0xC004_0000`.
 
@@ -1198,7 +1601,7 @@ The GPIO samples a self-running `AxiStreamArtySmoke` datapath:
 
 The smoke engine sends three two-beat 32-bit frames, arbitrates between all three sources, unpacks to bytes, routes frame 1 through the repack/broadcast path and frames 0/2 through the direct byte path, deliberately stalls one broadcast sink, then reports done/pass/fail, byte counts, frame counts, checksum matches, route checks, and backpressure observation. The MicroBlaze firmware polls that status through axiZero and passes only when the board-observed status has `done=1`, `pass=1`, `fail=0`, the expected counts/checksums/frame boundaries match, and backpressure was actually seen.
 
-### Arty fcapz debug
+#### Arty fcapz debug
 
 All Arty Vivado builds source `hw/vivado/arty_a7/fcapz_debug.tcl`, which adds the project-local `axizero_fcapz_debug` wrapper. The AXIS build inherits this through `create_project_axis.tcl` because it derives from the base Arty script. Builds with an appended debug ingress connect USER4 to the highest-numbered free `s*_axi` port, so existing MicroBlaze and traffic-generator ports keep their original wiring.
 
@@ -1211,29 +1614,32 @@ Debug chains:
 
 ### Running HW tests
 
-All six test runners auto-detect Vivado, xsdb, and mb-gcc by searching `PATH` and common AMD/Xilinx install locations (Windows and Linux). Override with environment variables if needed:
+The runners auto-detect Vivado, xsdb and Quartus by searching `PATH` and common install locations
+(Windows and Linux). Override with environment variables if needed:
 
 ```bash
-# Auto-detect (works on Windows and Linux)
-python hw/vivado/arty_a7/run_base_test.py
-python hw/vivado/arty_a7/run_wrr_test.py
-python hw/vivado/arty_a7/run_qos_test.py
-python hw/vivado/arty_a7/run_qos_stress_test.py
-python hw/vivado/arty_a7/run_axi3_test.py
-python hw/vivado/arty_a7/run_axis_test.py
+# Arty A7-100T, Vivado
+python hw/vivado/arty_a7/run_vexzero_test.py                   # the self test
+python hw/vivado/arty_a7/run_vexzero_test.py --design all      # every build, in turn
+python hw/vivado/arty_a7/run_vexzero_bench.py                  # Dhrystone on the same SoC
 
-# The VexRiscv example SoC (no MicroBlaze, so no mb-gcc needed)
-python hw/vivado/arty_a7/run_vexzero_test.py
-python hw/vivado/arty_a7/run_vexzero_bench.py    # ... and Dhrystone on the same SoC
+# DE25-Nano, Quartus
+python hw/quartus/de25_nano/run_vexzero_de25.py --design all
 
 # Override tool paths via env vars
 VIVADO_BIN=/opt/Xilinx/2025.2/Vivado/bin/vivado \
 XSDB_BIN=/opt/Xilinx/2025.2/Vitis/bin/xsdb \
-MBGCC_BIN=/opt/Xilinx/2025.2/Vitis/gnu/microblaze/lin64/bin/mb-gcc \
-  python hw/vivado/arty_a7/run_qos_stress_test.py
+  python hw/vivado/arty_a7/run_vexzero_test.py
 ```
 
-Each runner: (1) creates the Vivado project + bitstream if not already built, (2) compiles MicroBlaze firmware with mb-gcc, (3) programs the FPGA and runs tests via xsdb. The two VexZero runners are the exception: the VexRiscv example SoC carries its firmware inside the bitstream, so they need only Vivado and xsdb, and they read the result off the USB-UART with pyserial. See [example system](#example-system--vexriscv-soc).
+Each runner generates the netlist with sbt, builds the bitstream, programs the board, and reads the
+verdict back — off the USB-UART with pyserial on the Arty, over the JTAG-to-AXI bridge on the
+DE25-Nano. No `mb-gcc` is involved: the VexRiscv firmware is inside the bitstream. See
+[example system](#example-system--vexriscv-soc).
+
+The retired MicroBlaze runners (`run_base_test.py`, `run_wrr_test.py`, `run_qos_test.py`,
+`run_qos_stress_test.py`, `run_axi3_test.py`, `run_axis_test.py`) additionally need `mb-gcc` to
+compile their firmware. They still work; they are not part of the flow above.
 
 **Crossbar-only resource usage** — the interconnect alone, without the MicroBlaze, the BRAM
 controllers or the traffic generators around it:
@@ -1351,13 +1757,17 @@ hw/spinal/axizero/
     WidthConverter.scala       # Lite and Full AXI4 data-width conversion
     Axi4DownsizerExt.scala     # fork of SpinalHDL Axi4Downsizer; FIXED/WRAP flattened, INCR multi-beat
     Axi3ToAxi4Adapter.scala    # AXI3→AXI4 bridge: WID reorder buffer, locked access conversion
+    Axi4ToAxi3.scala           # the other direction, as wires: an AXI4 master presented on AXI3
+  verif/
+    Axi4ProtocolChecker.scala  # passive synthesizable AXI4 checker, 19 rules, one sticky bit each
+    AxiSatGen.scala            # saturating self-checking AXI4 master — the synthesizable load
   stream/
     AxiStreamCores.scala       # AXI4-Stream reg slice, width adapter, FIFO, arb-mux, demux, broadcaster
   gen/
     AxiZeroGen.scala           # built-in generation entry point
-    ArtyDutGen.scala           # Arty A7 DUT (1M×4S)
-    ArtyQosDutGen.scala        # Arty A7 QoS DUT (2M×4S, QoS arbitration)
-    ArtyAxi3DutGen.scala       # Arty A7 AXI3 adapter DUT (AXI4→AXI3→AXI4→crossbar)
+    ArtyDutGen.scala           # (retired) Arty A7 MicroBlaze DUT (1M×4S)
+    ArtyQosDutGen.scala        # (retired) Arty A7 QoS DUT (2M×4S, QoS arbitration)
+    ArtyAxi3DutGen.scala       # (retired) Arty A7 AXI3 adapter DUT
 hw/sim/axizero/sim/            # SpinalSim testbenches (sbt test)
 hw/examples/vexriscv/          # VexRiscv example SoC — separate sbt project `vexZero`
   spinal/vexzero/
@@ -1371,16 +1781,20 @@ hw/examples/vexriscv/          # VexRiscv example SoC — separate sbt project `
     VexZeroChecks.scala        # the self test's verdict, shared by the board wrappers
     VexZeroDe25.scala          # DE25-Nano board wrapper: verdict over JTAG-AXI
     VexZeroBenchDe25.scala     # DE25-Nano board wrapper: Dhrystone over JTAG-AXI
+    VexZeroStress.scala        # the four loaded configurations, shared by sim and both boards
     JtagAxi.scala              # fpgacapZero JTAG-to-AXI bridge as an axiZero master
     HexImage.scala             # Intel HEX reader for prebuilt firmware images
     gen/VexZeroSocGen.scala    # -> generated/vexriscv/VexZeroSoc.v
     gen/VexZeroArtyGen.scala   # -> generated/vexriscv/VexZeroArty.v (ROM inlined)
     gen/VexZeroBenchArtyGen.scala  # -> generated/vexriscv/VexZeroBenchArty.v
     gen/VexZeroDe25Gen.scala   # -> generated/vexriscv/VexZero{,Bench}De25.v
+    gen/VexZeroStressGen.scala # -> generated/vexriscv/VexZeroStress{Arty,De25}_<policy>.v
   sim/vexzero/sim/             # SpinalSim tests for the example (sbt vexZero/test)
     VexZeroBenchSpec.scala     #   Dhrystone over the crossbar, pipelined vs blocking
     VexZeroProfileSpec.scala   #   what that run asks of the fabric, uncached vs cached
     VexZeroStressSpec.scala    #   the same SoC with a third master saturating the fabric
+    VexZeroGenStressSpec.scala #   the four board builds: arbitration judged under 97% contention
+    VexZeroProtocolSpec.scala  #   the protocol checkers on every fabric port, in the SoC
     VexZeroVideoQosSpec.scala  #   why AXQOS cannot rank CPU reads against video writes
     HostTraffic.scala          #   the saturating master: 16-beat bursts, AW ahead of W
     AxiProfile.scala           #   per-port traffic shape and latency, measured at the master ports
@@ -1397,15 +1811,16 @@ sw/arty_a7/                    # MicroBlaze firmware (source + linker script)
 hw/quartus/
   package_ip.tcl               # Platform Designer _hw.tcl generator
 hw/vivado/arty_a7/             # Vivado TCL build and test scripts
-  ip/rtl/                      # tracked Arty handoff RTL consumed by Vivado IP integrator
   find_xilinx_tools.py         # cross-platform Vivado/xsdb/mb-gcc auto-detection
-  run_wrr_test.py              # WRR HW test runner (build + program + verify)
-  run_vexzero_test.py          # VexRiscv example SoC HW test runner (UART verdict)
-  run_vexzero_bench.py         # VexRiscv example SoC Dhrystone runner (UART console)
-  create_project_vexzero.tcl   # plain RTL project for either VexZero board wrapper
-  run_qos_test.py              # QoS HW test runner
-  run_qos_stress_test.py       # QoS 10-minute stress test runner
-  run_axi3_test.py             # AXI3 adapter HW test runner
+  create_project_vexzero.tcl   # plain RTL project for any VexZero board wrapper
+  run_vexzero_test.py          # VexZero HW test runner: verdict + the four stress builds
+  run_vexzero_bench.py         # VexZero Dhrystone runner (UART console)
+  RETIRED.md                   # what the MicroBlaze suites were, and what replaced them
+  ip/rtl/                      # (retired) Arty handoff RTL for the MicroBlaze block designs
+  run_{base,wrr,qos,qos_stress,axi3,axis}_test.py   # (retired) MicroBlaze HW test runners
+hw/quartus/de25_nano/
+  build_vexzero_de25.tcl       # Quartus batch build for any VexZero DE25 wrapper
+  run_vexzero_de25.py          # DE25-Nano runner: verdict read back over JTAG-AXI
 ```
 
 ---
