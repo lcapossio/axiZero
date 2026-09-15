@@ -228,17 +228,25 @@ object VexZeroSysCtrl {
     * bit 0 a fabric port has been seen breaking AXI4 bit 1 every traffic generator read back what
     * it wrote, and got onto the bus bit 2 the AXI4-Stream island passed bit 8 this build has
     * protocol checkers bit 9 this build has traffic generators bit 10 this build has the stream
-    * island bits 23:16 which generators failed, one bit each
+    * island bit 3 a checker lost track, so its silence stopped being evidence bits 23:16 which
+    * generators failed, one bit each
     */
   val verdictWord = 0x10 / 4
 
   val busViolationBit = 0
   val genOkBit        = 1
   val axisOkBit       = 2
-  val hasCheckersBit  = 8
-  val hasGensBit      = 9
-  val hasIslandBit    = 10
-  val genFaultShift   = 16
+
+  /** A protocol checker ran out of tracking state. Reported separately from a rule violation
+    * because it means something different: no rule was seen breaking, but the checker can no longer
+    * promise it would have seen one. It also sets `busViolationBit`, so a run cannot pass on a
+    * checker that gave up.
+    */
+  val checkerOverflowBit = 3
+  val hasCheckersBit     = 8
+  val hasGensBit         = 9
+  val hasIslandBit       = 10
+  val genFaultShift      = 16
 }
 
 object VexZeroBenchIo {

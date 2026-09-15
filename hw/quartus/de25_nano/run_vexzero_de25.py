@@ -106,6 +106,7 @@ SYS_VERDICT = SYSCTRL_BASE + 0x10
 VERDICT_BUS_VIOLATION = 1 << 0
 VERDICT_GEN_OK = 1 << 1
 VERDICT_AXIS_OK = 1 << 2
+VERDICT_CHECKER_OVERFLOW = 1 << 3
 VERDICT_HAS_CHECKERS = 1 << 8
 VERDICT_HAS_GENS = 1 << 9
 VERDICT_HAS_ISLAND = 1 << 10
@@ -269,7 +270,15 @@ def check_verdict(axi, switches_expected: int | None) -> bool:
     verdict = axi.axi_read(SYS_VERDICT)
     if verdict & VERDICT_HAS_CHECKERS:
         clean = not (verdict & VERDICT_BUS_VIOLATION)
-        checks.append(("bus protocol", clean, "violation seen" if not clean else "clean", "clean"))
+        # Overflow is reported on its own line because it means something
+        # different from a rule violation: nothing was seen breaking, and the
+        # checker can no longer promise it would have seen it.
+        overflowed = bool(verdict & VERDICT_CHECKER_OVERFLOW)
+        why = "checker lost track" if overflowed else "violation seen"
+        checks.append(("bus protocol", clean, why if not clean else "clean", "clean"))
+        checks.append(
+            ("checker tracking", not overflowed, "ran out of state", "held every transaction")
+        )
     if verdict & VERDICT_HAS_GENS:
         gens_ok = bool(verdict & VERDICT_GEN_OK)
         faults = (verdict >> VERDICT_GEN_FAULT_SHIFT) & 0xFF

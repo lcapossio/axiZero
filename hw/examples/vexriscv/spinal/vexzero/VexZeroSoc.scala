@@ -437,7 +437,10 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
       SlavePort(fullSlaveCfg, FullAxi4, _, cfg.ram2Size, cfg.slaveRegSlices)
     ),
     arbitration = cfg.arbitration,
-    maxOutstanding = cfg.maxOutstanding
+    maxOutstanding = cfg.maxOutstanding,
+    // Only the ordering build watches the crossbar's own master ports, and
+    // only because something reads them; nothing else generates differently.
+    observeMasters = cfg.multiIdGens.nonEmpty
   )
 
   // ── CPU ──────────────────────────────────────────────────────────────────
@@ -615,22 +618,58 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
       gen
   }
 
+  /** The address bit that tells the two RAMs apart, for the ordering probes.
+    *
+    * Taken from the address map rather than written down, and checked: each RAM's whole span has to
+    * sit on one side of it, or a probe would call two addresses in the same RAM a slave change.
+    */
+  private val regionBit: Option[Int] = cfg.ram2Base.map { base2 =>
+    val diff = cfg.ramBase ^ base2
+    require(diff != 0, "ram2Base must differ from ramBase")
+    val bit = diff.lowestSetBit
+    require(
+      cfg.ramSize <= (BigInt(1) << bit) && cfg.ram2Size <= (BigInt(1) << bit),
+      f"the two RAMs are separated by bit $bit%d, but one of them spans it " +
+        f"(0x${cfg.ramSize}%x, 0x${cfg.ram2Size}%x)"
+    )
+    bit
+  }
+
+  /** What the crossbar did with the traffic the generators produced.
+    *
+    * The generators can say what they asked for; they cannot say what was held back, because a
+    * register slice sits between them and the arbiter and accepts requests the crossbar has not
+    * admitted. These watch the crossbar's own master port, where READY is the admission decision,
+    * and they catch the single-slave-per-ID rule being broken directly -- a broken gate does not
+    * have to produce a wrong answer to be broken. See [[Axi4OrderingProbe]].
+    */
+  val orderProbes = cfg.multiIdGens.zipWithIndex.map {
+    case (genCfg, i) =>
+      Axi4OrderingProbe(
+        fabric.io.obs(multiIdIndex0 + i),
+        Axi4OrderingProbeConfig(idCount = genCfg.idCount, regionBit = regionBit.get),
+        label = s"orderProbe$i"
+      )
+  }
+
   private def satGenOk(g: AxiSatGen): Bool =
     g.io.dataErrors === 0 && g.io.respErrors === 0 && g.io.laps =/= 0 && !g.io.stalled
 
   // A multi-ID generator has to have done the work as well as got it right:
   // without both IDs in flight at once and an ID asking to move between the
   // RAMs, a clean run says nothing about ordering and must not read as a pass.
-  private def multiIdGenOk(g: AxiMultiIdGen): Bool =
-    g.io.dataErrors === 0 && g.io.respErrors === 0 && g.io.orderErrors === 0 &&
+  private def multiIdGenOk(g: AxiMultiIdGen, probe: Axi4OrderingProbe): Bool =
+    probe.ok &&
+      g.io.dataErrors === 0 && g.io.respErrors === 0 && g.io.orderErrors === 0 &&
       g.io.laps =/= 0 && !g.io.stalled && g.io.multiIdSeen && g.io.crossSlaveTried
 
   if (trafficGens.nonEmpty || multiIdGens.nonEmpty) {
+    val multiIdOk = multiIdGens.zip(orderProbes).map { case (g, p) => multiIdGenOk(g, p) }
     io.genFault := Cat(
       trafficGens.map(g => g.io.dataErrors =/= 0 || g.io.respErrors =/= 0 || g.io.stalled) ++
-        multiIdGens.map(g => !multiIdGenOk(g))
+        multiIdOk.map(!_)
     )
-    io.genOk := (trafficGens.map(satGenOk) ++ multiIdGens.map(multiIdGenOk)).reduce(_ && _)
+    io.genOk := (trafficGens.map(satGenOk) ++ multiIdOk).reduce(_ && _)
   }
 
   // ── AXI4-Stream island ───────────────────────────────────────────────────
@@ -677,11 +716,31 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
 
       val any = perPort.orR
 
+      private val overflowAny = checkers.map(_.overflow).reduce(_ || _)
+
       /** Any checker lost track. Silence from that port stops being evidence. */
-      val overflow = checkers.map(_.overflow).reduce(_ || _)
+      val overflow = RegNext(overflowAny) init (False)
+
+      /** The whole verdict this Area has to offer: a violation seen, or a checker that stopped
+        * being able to see one.
+        *
+        * Registered, and both of these are, because they are read at the end of a run and nowhere
+        * else. Every checker's contributing bit is itself sticky, so a reduction that is one cycle
+        * late still latches for good on the same run. What it buys is that the OR across every port
+        * in the design no longer reaches the verdict register and the board's LED in the cycle it
+        * resolves -- on the loaded QoS build, which has the most ports and the least slack, the
+        * unregistered form cost the path its last 7 ps and the build stopped closing at 100 MHz.
+        */
+      val failed = RegNext(any || overflowAny) init (False)
     }
   }
-  if (cfg.protocolCheck) io.busViolation := busCheck.get.any
+  // Overflow counts as a violation, not as a footnote. A checker that ran out
+  // of tracking state stops being able to promise anything about the traffic
+  // after it, and the case that overflows it -- more outstanding transactions
+  // than the fabric should ever have produced -- is exactly the kind of fault
+  // it was put there to catch. A separate verdict bit says which of the two
+  // happened; see VexZeroSysCtrl.checkerOverflowBit.
+  if (cfg.protocolCheck) io.busViolation := busCheck.get.failed
 
   // ── The verdict, as something a host can read over the bus ───────────────
   // The Arty prints these on its serial line; a board with only a debug cable
@@ -691,12 +750,14 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   // report a pass either.
   private val verdict = Bits(32 bits)
   verdict                                 := 0
-  verdict(VexZeroSysCtrl.busViolationBit) := (if (cfg.protocolCheck) busCheck.get.any else False)
-  verdict(VexZeroSysCtrl.genOkBit)        := (if (hasAnyGen) io.genOk else True)
-  verdict(VexZeroSysCtrl.axisOkBit)       := (if (cfg.axisSmoke) io.axisOk else True)
-  verdict(VexZeroSysCtrl.hasCheckersBit)  := Bool(cfg.protocolCheck)
-  verdict(VexZeroSysCtrl.hasGensBit)      := Bool(hasAnyGen)
-  verdict(VexZeroSysCtrl.hasIslandBit)    := Bool(cfg.axisSmoke)
+  verdict(VexZeroSysCtrl.busViolationBit) := (if (cfg.protocolCheck) io.busViolation else False)
+  verdict(VexZeroSysCtrl.checkerOverflowBit) :=
+    (if (cfg.protocolCheck) busCheck.get.overflow else False)
+  verdict(VexZeroSysCtrl.genOkBit)       := (if (hasAnyGen) io.genOk else True)
+  verdict(VexZeroSysCtrl.axisOkBit)      := (if (cfg.axisSmoke) io.axisOk else True)
+  verdict(VexZeroSysCtrl.hasCheckersBit) := Bool(cfg.protocolCheck)
+  verdict(VexZeroSysCtrl.hasGensBit)     := Bool(hasAnyGen)
+  verdict(VexZeroSysCtrl.hasIslandBit)   := Bool(cfg.axisSmoke)
   if (hasAnyGen) {
     verdict(VexZeroSysCtrl.genFaultShift, trafficGens.size + multiIdGens.size bits) := io.genFault
   }

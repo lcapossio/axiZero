@@ -77,7 +77,13 @@ class VexZeroGenStressSpec extends AnyFunSuite {
     laps: Int,
     stalled: Boolean,
     multiIdSeen: Boolean,
-    crossSlaveTried: Boolean
+    crossSlaveTried: Boolean,
+    /** What the probe at the crossbar's own master port saw; see [[Axi4OrderingProbe]]. */
+    sspidViolation: Boolean,
+    probeTwoIdsLive: Boolean,
+    probeDeepLive: Boolean,
+    probeDeepCrossHeld: Boolean,
+    probeOverflow: Boolean
   )
 
   /** What one run measured, so a test can assert on the parts it cares about. */
@@ -134,6 +140,14 @@ class VexZeroGenStressSpec extends AnyFunSuite {
         AxiProfile.publishRequests(dut.fabric.xbar.io.masters)
         dut.busCheck.foreach { bc =>
           bc.checkers.foreach { c => c.sticky.simPublic(); c.overflow.simPublic() }
+        }
+        dut.orderProbes.foreach { p =>
+          p.sspidViolation.simPublic()
+          p.twoIdsLive.simPublic()
+          p.deepLive.simPublic()
+          p.crossHeld.simPublic()
+          p.deepCrossHeld.simPublic()
+          p.overflow.simPublic()
         }
         dut.multiIdGens.foreach { g =>
           g.io.dataErrors.simPublic()
@@ -224,16 +238,22 @@ class VexZeroGenStressSpec extends AnyFunSuite {
           axisOk = dut.io.axisOk.toBoolean,
           axisStatus = dut.io.axisStatus.toLong,
           bootStoreLoads = bootStoreLoads,
-          multiId = dut.multiIdGens.map { g =>
-            MultiIdReport(
-              dataErrors = g.io.dataErrors.toInt,
-              respErrors = g.io.respErrors.toInt,
-              orderErrors = g.io.orderErrors.toInt,
-              laps = g.io.laps.toInt,
-              stalled = g.io.stalled.toBoolean,
-              multiIdSeen = g.io.multiIdSeen.toBoolean,
-              crossSlaveTried = g.io.crossSlaveTried.toBoolean
-            )
+          multiId = dut.multiIdGens.zip(dut.orderProbes).map {
+            case (g, p) =>
+              MultiIdReport(
+                dataErrors = g.io.dataErrors.toInt,
+                respErrors = g.io.respErrors.toInt,
+                orderErrors = g.io.orderErrors.toInt,
+                laps = g.io.laps.toInt,
+                stalled = g.io.stalled.toBoolean,
+                multiIdSeen = g.io.multiIdSeen.toBoolean,
+                crossSlaveTried = g.io.crossSlaveTried.toBoolean,
+                sspidViolation = p.sspidViolation.toBoolean,
+                probeTwoIdsLive = p.twoIdsLive.toBoolean,
+                probeDeepLive = p.deepLive.toBoolean,
+                probeDeepCrossHeld = p.deepCrossHeld.toBoolean,
+                probeOverflow = p.overflow.toBoolean
+              )
           }
         )
       }
@@ -279,6 +299,11 @@ class VexZeroGenStressSpec extends AnyFunSuite {
           f"/ ${g.orderErrors}%d order, several IDs in flight ${g.multiIdSeen}%s, " +
           f"live ID asked to cross ${g.crossSlaveTried}%s"
       )
+      println(
+        f"           at the crossbar: rule broken ${g.sspidViolation}%s, two IDs live " +
+          f"${g.probeTwoIdsLive}%s, one ID two deep ${g.probeDeepLive}%s, cross held against " +
+          f"two ${g.probeDeepCrossHeld}%s"
+      )
     }
   }
 
@@ -316,6 +341,30 @@ class VexZeroGenStressSpec extends AnyFunSuite {
         g.crossSlaveTried,
         s"multi-ID generator $i never asked to move a live ID to the other RAM, so the " +
           "single-slave-per-ID rule was never put under load"
+      )
+
+      // And what the crossbar itself did about it. The generator sits behind a
+      // register slice, which accepts requests the crossbar has not admitted,
+      // so everything above is what this master asked for and not what the
+      // ordering table held back. These come from the probe on the crossbar's
+      // own master port, where READY is the admission decision.
+      assert(
+        !g.sspidViolation,
+        s"the crossbar admitted generator $i's ID at a second slave while it was still live at " +
+          "the first -- the single-slave-per-ID rule, broken, whether or not any answer came " +
+          "back out of order"
+      )
+      assert(!g.probeOverflow, s"probe $i ran out of per-ID counter range, so its counts are stale")
+      assert(g.probeTwoIdsLive, s"the crossbar never had two of generator $i's IDs live at once")
+      assert(
+        g.probeDeepLive,
+        s"the crossbar never had two of one ID's bursts live at one slave for generator $i, so " +
+          "its per-ID count was never asked for anything past zero-or-one"
+      )
+      assert(
+        g.probeDeepCrossHeld,
+        s"the crossbar never held a crossing request against two live bursts of the same ID for " +
+          s"generator $i -- the case this build exists to reach"
       )
     }
   }
