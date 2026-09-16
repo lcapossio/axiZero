@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Leonardo Capossio — bard0 design  hello@bard0.com
 // SPDX-License-Identifier: MIT
-ThisBuild / version      := "0.1.0"
+ThisBuild / version      := "0.4.0"
 ThisBuild / scalaVersion := "2.13.12"
 ThisBuild / organization := "io.axizero"
 

@@ -299,7 +299,7 @@ ports. The AXI4-Stream cores in `axizero.stream` and the standalone adapters in 
 
 **Getting the dependency.** axiZero is not published to a public repository yet, so there is no
 coordinate to depend on. Until there is, use it as a source dependency, or run `sbt publishLocal`
-and depend on `"io.axizero" %% "axizero" % "0.1.0"` from the local Ivy cache. Note that
+and depend on `"io.axizero" %% "axizero" % "0.4.0"` from the local Ivy cache. Note that
 `AxiZeroUserGen.scala` in `hw/spinal/axizero/gen/` is written by `scripts/axizero.py` and
 overwritten on every YAML run — it is the generator's output, not a file to edit or copy from.
 
