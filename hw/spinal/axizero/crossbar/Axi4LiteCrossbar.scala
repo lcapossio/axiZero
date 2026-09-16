@@ -32,6 +32,14 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
   val M = cfg.numMasters
   val S = cfg.numSlaves
 
+  // The decode-error responder is wired in as one more slave owning every
+  // address no real slave claimed, so the arbitration and routing below need
+  // no special case for it. Sx counts the slaves the fabric routes to; S stays
+  // the number of ports the user asked for.
+  val decErrEnabled = cfg.decodeErrorResponse
+  val decErrIdx     = S
+  val Sx            = if (decErrEnabled) S + 1 else S
+
   // Single normalised Axi4Config used for every internal port.
   val normCfg = Axi4Config(
     addressWidth = (cfg.masters.map(_.config.addressWidth) ++
@@ -58,16 +66,26 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
     val slaves = Vec(master(Axi4(normCfg)), S)
   }
 
+  // Every internal port already shares normCfg, so the responder takes it too.
+  val decErr = if (decErrEnabled) new Axi4DecErrSlave(normCfg) else null
+
+  // Slave ports as the routing logic sees them: the real ones, then the
+  // responder. Indexing through these keeps every loop below index-agnostic.
+  val busSlaves: Seq[Axi4] =
+    (0 until S).map(io.slaves(_)) ++ (if (decErrEnabled) Seq(decErr.io.axi) else Nil)
+
   // -------------------------------------------------------------------------
   // Address decode: bit si = 1 iff addr falls in slaves(si)'s range.
   // -------------------------------------------------------------------------
   def addrDecodeOH(addr: UInt): Bits = {
-    val result = Bits(S bits)
-    for (si <- 0 until S) {
-      val sp = cfg.slaves(si)
-      result(si) := (addr >= sp.baseAddress) && (addr < (sp.baseAddress + sp.size))
-    }
-    result
+    // The mapped hits go in their own signal rather than into the result
+    // vector: driving one bit of a Bits from the others reads as a loop to
+    // PhaseCheckCombinationalLoops, which analyses whole signals.
+    val hits = Bits(S bits)
+    for (si <- 0 until S) hits(si) := AddrDecode.hit(addr, cfg.slaves(si))
+    // The catch-all is the complement of the mapped region, so exactly one bit
+    // is ever set and the vector stays one-hot for the arbiters.
+    if (decErrEnabled) (!hits.orR).asBits ## hits else hits
   }
 
   // -------------------------------------------------------------------------
@@ -132,15 +150,85 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
     idx
   }
 
+  // =========================================================================
+  // Grant locking
+  // =========================================================================
+  /** Hold an arbitration decision while the slave's address channel is stalled.
+    *
+    * AXI4 A3.2.1: once AxVALID is asserted, the payload must not change until AxREADY. The arbiter
+    * re-evaluates every cycle from the live request vector, so a master that raises its request
+    * while a granted address is still waiting for AxREADY can win the next cycle and swap the
+    * address out from under the slave -- AxVALID never drops, but AxADDR and AxID move.
+    *
+    * Nothing is lost when that happens: both requests are real and both are issued eventually, so
+    * every data-value check still passes. It is still a protocol violation, and a slave that
+    * latches the address before it asserts READY -- which is a normal thing to do for timing --
+    * latches the wrong one. Found by [[axizero.verif.Axi4ProtocolChecker]] on the slave-side port
+    * of a loaded crossbar; see Axi4ProtocolCheckerSpec and VexZeroProtocolSpec.
+    *
+    * The lock releases on the handshake, so it costs no throughput: the held master was going to be
+    * served in that cycle anyway.
+    */
+  def lockGrant(freshIdx: UInt, axValid: Bool, axReady: Bool): UInt = {
+    // Named explicitly: these are per-slave registers created inside a helper,
+    // so SpinalHDL would otherwise emit them as _zz_when_Axi4Crossbar_l<line>
+    // in a netlist this project ships for people to read and instantiate.
+    val held    = RegInit(False).setWeakName("grantLock")
+    val heldIdx = Reg(UInt(ptrW bits)).init(0).setWeakName("grantLockIdx")
+    val idx     = held ? heldIdx | freshIdx
+    // Held only while the channel is actually stalled, which is exactly the
+    // window the rule covers. Releasing it whenever AxVALID is low matters as
+    // much as taking it: a stale lock would otherwise survive a master that
+    // withdrew its request, and the next cycle would present a master that is
+    // not asking for anything.
+    when(axValid && !axReady) {
+      held    := True
+      heldIdx := idx
+    } otherwise {
+      held := False
+    }
+    idx
+  }
+
+  /** Is this master already occupying some slave in this direction?
+    *
+    * The Lite crossbar routes B and R per slave, driving the granted master's channels from inside
+    * that slave's own block. With a master granted at two slaves at once, both blocks drive the
+    * same master's B: the last one written wins, but *both* slaves are handed that master's BREADY,
+    * so the losing slave's response fires and is never delivered to anyone.
+    *
+    * Holding a master to one transaction at a time in each direction is what makes the per-slave
+    * routing sound, and this makes that invariant explicit rather than assumed.
+    *
+    * Defensive rather than a reproduced fix: the hazard is visible in the structure, but no
+    * simulation here reaches the two-slaves-active state, because it needs a master to issue a
+    * second AW before sending the first W and the slave models will not assert AWREADY until a W
+    * beat is present.
+    */
+  def masterBusy(active: Vec[Bool], granted: Vec[UInt], mi: Int): Bool =
+    (0 until Sx).map(si => active(si) && granted(si) === mi).reduceBalancedTree(_ || _)
+
   // Write path
-  val wrActive  = Vec(Seq.fill(S)(RegInit(False)))
-  val wrGranted = Vec(Seq.fill(S)(RegInit(U(0, ptrW bits))))
-  val wrRrPtr   = Vec(Seq.fill(S)(RegInit(U(0, ptrW bits))))
+  val wrActive  = Vec(Seq.fill(Sx)(RegInit(False)))
+  val wrGranted = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
+
+  /** Has the write this slave is holding already had its data?
+    *
+    * The Lite crossbar holds a slave from AW until B and forwards the granted master's W for that
+    * whole time. AXI4-Lite writes are one beat, so every beat after the first belongs to the next
+    * write -- and a master may legally present that beat before its AW is accepted, which while B
+    * is outstanding cannot happen anywhere (masterBusy holds the master to one slave). Without this
+    * the beat is taken here and written under the previous address, whichever slave it was meant
+    * for. The bypass below has the same hole before AW: it is open while the AW waits, so a write
+    * whose data arrived early left it open for the beat after it.
+    */
+  val wrDataDone = Vec(Seq.fill(Sx)(RegInit(False)))
+  val wrRrPtr    = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
 
   // Read path
-  val rdActive  = Vec(Seq.fill(S)(RegInit(False)))
-  val rdGranted = Vec(Seq.fill(S)(RegInit(U(0, ptrW bits))))
-  val rdRrPtr   = Vec(Seq.fill(S)(RegInit(U(0, ptrW bits))))
+  val rdActive  = Vec(Seq.fill(Sx)(RegInit(False)))
+  val rdGranted = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
+  val rdRrPtr   = Vec(Seq.fill(Sx)(RegInit(U(0, ptrW bits))))
 
   // ── WRR credit counters (only allocated when WeightedRoundRobin) ────────
   val wrrWeights = cfg.arbitration match {
@@ -152,14 +240,14 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
   val wrCredits = cfg.arbitration match {
     case WeightedRoundRobin(_) =>
       Vec(
-        Seq.tabulate(S)(_ => Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits)))))
+        Seq.tabulate(Sx)(_ => Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits)))))
       )
     case _ => null
   }
   val rdCredits = cfg.arbitration match {
     case WeightedRoundRobin(_) =>
       Vec(
-        Seq.tabulate(S)(_ => Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits)))))
+        Seq.tabulate(Sx)(_ => Vec(Seq.tabulate(M)(mi => RegInit(U(wrrWeights(mi), creditW bits)))))
       )
     case _ => null
   }
@@ -176,33 +264,34 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
     io.masters(mi).r.valid  := False
     io.masters(mi).r.payload.clearAll()
   }
-  for (si <- 0 until S) {
-    io.slaves(si).aw.valid := False
-    io.slaves(si).aw.payload.clearAll()
-    io.slaves(si).w.valid := False
-    io.slaves(si).w.payload.clearAll()
-    io.slaves(si).b.ready  := False
-    io.slaves(si).ar.valid := False
-    io.slaves(si).ar.payload.clearAll()
-    io.slaves(si).r.ready := False
+  for (si <- 0 until Sx) {
+    busSlaves(si).aw.valid := False
+    busSlaves(si).aw.payload.clearAll()
+    busSlaves(si).w.valid := False
+    busSlaves(si).w.payload.clearAll()
+    busSlaves(si).b.ready  := False
+    busSlaves(si).ar.valid := False
+    busSlaves(si).ar.payload.clearAll()
+    busSlaves(si).r.ready := False
   }
 
   // =========================================================================
   // Per-slave write path
   // =========================================================================
-  for (si <- 0 until S) {
-    val slv = io.slaves(si)
+  for (si <- 0 until Sx) {
+    val slv = busSlaves(si)
 
     when(!wrActive(si)) {
       // Collect write requests targeting this slave
       val requests = Bits(M bits)
       for (mi <- 0 until M) {
         requests(mi) := io.masters(mi).aw.valid &&
-          addrDecodeOH(io.masters(mi).aw.addr)(si)
+          addrDecodeOH(io.masters(mi).aw.addr)(si) &&
+          !masterBusy(wrActive, wrGranted, mi)
       }
 
       val grant = arbitrate(requests, wrRrPtr(si), if (wrCredits != null) wrCredits(si) else null)
-      val grantIdx = ohToIdx(grant)
+      val grantIdx = lockGrant(ohToIdx(grant), slv.aw.valid, slv.aw.ready)
       val anyReq   = requests.orR
 
       when(anyReq) {
@@ -214,9 +303,13 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
             io.masters(mi).aw.ready := slv.aw.ready
             // Also forward W alongside AW so that IPIF-based AXI4-Lite slaves
             // (which require AWVALID & WVALID simultaneously) can accept AW.
-            slv.w.valid            := io.masters(mi).w.valid
-            slv.w.payload          := io.masters(mi).w.payload
-            io.masters(mi).w.ready := slv.w.ready
+            // Closed again once this write's beat has gone through: the next
+            // beat is the next write's, which may not be for this slave.
+            when(!wrDataDone(si)) {
+              slv.w.valid            := io.masters(mi).w.valid
+              slv.w.payload          := io.masters(mi).w.payload
+              io.masters(mi).w.ready := slv.w.ready
+            }
           }
         }
 
@@ -262,9 +355,11 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
 
       for (mi <- 0 until M) {
         when(gmi === mi) {
-          slv.w.valid            := io.masters(mi).w.valid
-          slv.w.payload          := io.masters(mi).w.payload
-          io.masters(mi).w.ready := slv.w.ready
+          when(!wrDataDone(si)) {
+            slv.w.valid            := io.masters(mi).w.valid
+            slv.w.payload          := io.masters(mi).w.payload
+            io.masters(mi).w.ready := slv.w.ready
+          }
 
           io.masters(mi).b.valid   := slv.b.valid
           io.masters(mi).b.payload := slv.b.payload
@@ -274,23 +369,32 @@ class Axi4LiteCrossbar(cfg: AxiZeroConfig) extends Component {
 
       when(slv.b.fire) { wrActive(si) := False }
     }
+
+    // B wins over a beat in the same cycle: that pair ends the write, and the
+    // next one starts with its data still to come.
+    when(slv.b.fire) {
+      wrDataDone(si) := False
+    } elsewhen (slv.w.fire) {
+      wrDataDone(si) := True
+    }
   }
 
   // =========================================================================
   // Per-slave read path
   // =========================================================================
-  for (si <- 0 until S) {
-    val slv = io.slaves(si)
+  for (si <- 0 until Sx) {
+    val slv = busSlaves(si)
 
     when(!rdActive(si)) {
       val requests = Bits(M bits)
       for (mi <- 0 until M) {
         requests(mi) := io.masters(mi).ar.valid &&
-          addrDecodeOH(io.masters(mi).ar.addr)(si)
+          addrDecodeOH(io.masters(mi).ar.addr)(si) &&
+          !masterBusy(rdActive, rdGranted, mi)
       }
 
       val grant = arbitrate(requests, rdRrPtr(si), if (rdCredits != null) rdCredits(si) else null)
-      val grantIdx = ohToIdx(grant)
+      val grantIdx = lockGrant(ohToIdx(grant), slv.ar.valid, slv.ar.ready)
       val anyReq   = requests.orR
 
       when(anyReq) {

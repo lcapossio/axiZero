@@ -146,14 +146,33 @@ static void test_t4(void)
 /* T5: UART TX — proves second AXI-Lite slave works */
 static void test_t5(void)
 {
-    /* UART TX is tested implicitly by all the uart_puts above.
-       Explicitly verify UART status register is readable. */
+    /* UART TX is exercised implicitly by every uart_puts above. This checks
+       that the AXI4 -> AXI3 -> AXI4-Lite read path returns a value the slave
+       actually produced, not merely that the read completed: passing on a
+       discarded read would still pass with the read data bus tied off. The
+       preceding output has drained, so TX_EMPTY must be set. The poll is
+       bounded, so a stuck path fails the test instead of hanging it. */
     volatile uint32_t *stat = (volatile uint32_t *)(UART_BASEADDR + ULITE_STAT_REG);
-    uint32_t s = *stat;
-    /* Bit 2 = TX_EMPTY should be 1 after our puts drain */
-    /* Just verify the read doesn't hang (the adapter doesn't break the path) */
+    uint32_t s = 0;
+    int i;
+
+    for (i = 0; i < 1000000; i++) {
+        s = *stat;
+        if (s & ULITE_STAT_TX_EMPTY)
+            break;
+    }
+
+    if (!(s & ULITE_STAT_TX_EMPTY)) {
+        fail("T5 UART status", "TX_EMPTY never set", s, ULITE_STAT_TX_EMPTY);
+        return;
+    }
+    /* Nothing drives the UART RX on this board, so a full RX FIFO would mean
+       the read returned something other than this register. */
+    if (s & ULITE_STAT_RX_FULL) {
+        fail("T5 UART status", "RX_FULL set with no input", s, 0);
+        return;
+    }
     pass("T5 UART status read (AXI-Lite slave 2)");
-    (void)s;
 }
 
 int main(void)

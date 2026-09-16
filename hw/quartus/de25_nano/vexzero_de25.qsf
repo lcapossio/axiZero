@@ -1,0 +1,54 @@
+# Copyright (c) 2026 Leonardo Capossio - bard0 design - hello@bard0.com
+# SPDX-License-Identifier: MIT
+#
+# Device and pin assignments for the VexZero example on a Terasic DE25-Nano.
+#
+# Pin locations are from the DE25-Nano user manual and match the ones the
+# fpgacapZero submodule uses for the same board, so a design that works there
+# works here. Both VexZero top levels present the same pins, so one file
+# covers the self-test build and the benchmark build; the top-level entity is
+# set by the build script rather than here.
+#
+# The board has no UART. Nothing below routes one: the design talks to the
+# host through the on-board USB-Blaster, over the JTAG-to-AXI bridge.
+
+set_global_assignment -name FAMILY "Agilex 5"
+set_global_assignment -name DEVICE A5EB013BB23BE4SR1
+
+# ── Clock: 50 MHz oscillator ────────────────────────────────────────────────
+set_location_assignment PIN_V16 -to CLOCK1_50
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to CLOCK1_50
+
+# ── Push buttons (active low). KEY[0] is the system reset. ──────────────────
+set_location_assignment PIN_C8 -to KEY[0]
+set_location_assignment PIN_C11 -to KEY[1]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to KEY[0]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to KEY[1]
+
+# ── Slide switches ──────────────────────────────────────────────────────────
+set_location_assignment PIN_DK24 -to SW[0]
+set_location_assignment PIN_DD24 -to SW[1]
+set_location_assignment PIN_DD27 -to SW[2]
+set_location_assignment PIN_DF27 -to SW[3]
+set_instance_assignment -name IO_STANDARD "1.1 V" -to SW[0]
+set_instance_assignment -name IO_STANDARD "1.1 V" -to SW[1]
+set_instance_assignment -name IO_STANDARD "1.1 V" -to SW[2]
+set_instance_assignment -name IO_STANDARD "1.1 V" -to SW[3]
+
+# ── User LEDs (active low: a low output lights the LED) ─────────────────────
+set_location_assignment PIN_DF35 -to LEDR[0]
+set_location_assignment PIN_DJ32 -to LEDR[1]
+set_location_assignment PIN_DN22 -to LEDR[2]
+set_location_assignment PIN_DP23 -to LEDR[3]
+set_location_assignment PIN_DN25 -to LEDR[4]
+set_location_assignment PIN_DP25 -to LEDR[5]
+set_location_assignment PIN_DJ27 -to LEDR[6]
+set_location_assignment PIN_DP30 -to LEDR[7]
+set_instance_assignment -name IO_STANDARD "1.1 V" -to LEDR[0]
+set_instance_assignment -name IO_STANDARD "1.1 V" -to LEDR[1]
+set_instance_assignment -name IO_STANDARD "1.1 V" -to LEDR[2]
+set_instance_assignment -name IO_STANDARD "1.1 V" -to LEDR[3]
+set_instance_assignment -name IO_STANDARD "1.1 V" -to LEDR[4]
+set_instance_assignment -name IO_STANDARD "1.1 V" -to LEDR[5]
+set_instance_assignment -name IO_STANDARD "1.1 V" -to LEDR[6]
+set_instance_assignment -name IO_STANDARD "1.1 V" -to LEDR[7]

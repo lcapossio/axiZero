@@ -98,7 +98,6 @@ def _find_sbt() -> Path | None:
     for candidate in [
         Path("C:/Program Files/sbt/bin/sbt.bat"),
         Path("C:/sbt/bin/sbt.bat"),
-        Path("/tmp/cs_apps/sbt.bat"),   # axiZero dev bootstrap
     ]:
         if candidate.exists():
             return candidate
@@ -149,6 +148,16 @@ def _err(msg: str):
     sys.exit(1)
 
 
+def _is_int(v) -> bool:
+    """An integer, and not a bool.
+
+    ``isinstance(True, int)`` is True in Python, so a plain int check lets
+    ``max_outstanding: true`` through validation and emits ``= True`` into the
+    generated Scala, which does not compile.
+    """
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
 def _validate_design(d: dict, idx: int):
     tag = f"designs[{idx}] ({d.get('name', '?')})"
 
@@ -169,18 +178,31 @@ def _validate_design(d: dict, idx: int):
              f"Choose: {', '.join(ARBITRATION_MAP)}")
 
     mo = d.get("max_outstanding", 1)
-    if not isinstance(mo, int) or mo < 1:
+    if not _is_int(mo) or mo < 1:
         _err(f"{tag}: 'max_outstanding' must be a positive integer (got {mo!r})")
+
+    idt = d.get("id_threads", 2)
+    if not _is_int(idt) or idt < 1:
+        _err(f"{tag}: 'id_threads' must be a positive integer (got {idt!r})")
+
+    der = d.get("decode_error_response", True)
+    if not isinstance(der, bool):
+        _err(f"{tag}: 'decode_error_response' must be true or false (got {der!r})")
 
     fdw = d.get("fabric_data_width")
     if fdw is not None:
-        if not isinstance(fdw, int) or fdw <= 0 or (fdw & (fdw - 1)) != 0:
-            _err(f"{tag}: 'fabric_data_width' must be a power of 2 (got {fdw!r})")
+        # Same rule as the ports: whole byte lanes, so WSTRB has one bit each.
+        if not _is_int(fdw) or fdw < 8 or (fdw & (fdw - 1)) != 0:
+            _err(f"{tag}: 'fabric_data_width' must be a power of 2 and at least 8 "
+                 f"(got {fdw!r})")
 
     if arb == "weighted_round_robin":
         weights = d.get("weights")
         if not weights or not isinstance(weights, list):
             _err(f"{tag}: 'weights' list required for weighted_round_robin")
+        for wi, w in enumerate(weights):
+            if not _is_int(w) or w < 1:
+                _err(f"{tag}: weights[{wi}] must be a positive integer (got {w!r})")
 
     masters = d.get("masters", [])
     slaves  = d.get("slaves",  [])
@@ -193,7 +215,43 @@ def _validate_design(d: dict, idx: int):
         _err(f"{tag}: weights length ({len(d['weights'])}) must equal "
              f"number of masters ({len(masters)})")
 
+    def check_skid(port, kind, i):
+        rs = port.get("reg_slice", False)
+        if not isinstance(rs, bool):
+            _err(f"{tag} {kind}[{i}]: 'reg_slice' must be true or false (got {rs!r})")
+        skid = port.get("reg_slice_skid", False)
+        if not isinstance(skid, bool):
+            _err(f"{tag} {kind}[{i}]: 'reg_slice_skid' must be true or false (got {skid!r})")
+        if skid and not port.get("reg_slice", False):
+            _err(f"{tag} {kind}[{i}]: 'reg_slice_skid' needs 'reg_slice: true' -- "
+                 f"the skid register is an option on the slice, not a slice of its own")
+
+    # Every port width, on every port, before anything compares or emits one.
+    # These reach the generated Scala directly, so a value that is not an
+    # integer becomes a Scala literal that does not compile -- and bool is an
+    # int in Python, so `data_width: true` would otherwise sail through.
+    for kind, ports in (("master", masters), ("slave", slaves)):
+        for i, port in enumerate(ports):
+            for key, dflt in (("addr_width", 32), ("data_width", 32), ("id_width", 4)):
+                v = port.get(key, dflt)
+                if not _is_int(v) or v < 0:
+                    _err(f"{tag} {kind}[{i}]: '{key}' must be a non-negative integer (got {v!r})")
+            # A width of zero is an integer and so got this far, but an address
+            # channel with no bits addresses nothing and a data channel with no
+            # bits carries nothing.  Widths that are not a power of two number
+            # of whole bytes have no legal WSTRB: AXI gives one strobe bit per
+            # byte lane, so data_width: 1 would emit a zero-bit strobe and
+            # data_width: 24 a strobe that does not match the lanes.
+            aw = port.get("addr_width", 32)
+            if aw < 1:
+                _err(f"{tag} {kind}[{i}]: 'addr_width' must be at least 1 (got {aw})")
+            dw = port.get("data_width", 32)
+            if dw < 8 or dw % 8 != 0 or (dw & (dw - 1)) != 0:
+                _err(f"{tag} {kind}[{i}]: 'data_width' must be a power of 2 and at "
+                     f"least 8 -- one WSTRB bit per byte lane (got {dw})")
+
     for mi, m in enumerate(masters):
+        check_skid(m, "master", mi)
         pt = m.get("type")
         if pt is not None and pt not in ("lite", "full", "axi3"):
             _err(f"{tag} master[{mi}]: 'type' must be 'lite', 'full', or 'axi3'")
@@ -208,7 +266,14 @@ def _validate_design(d: dict, idx: int):
             if iw < 1 or iw > 4:
                 _err(f"{tag} master[{mi}]: axi3 id_width must be 1..4 (AXI3 limit, got {iw})")
 
+    # The widest address any master on this crossbar can drive.  Master
+    # addr_width defaults to the design-wide width, exactly as the emitters
+    # resolve it, so the check sees the same number the RTL will be built with.
+    default_aw = _default_addr_width(d)
+    max_master_aw = max(m.get("addr_width", default_aw) for m in masters)
+
     for si, s in enumerate(slaves):
+        check_skid(s, "slave", si)
         if "base" not in s:
             _err(f"{tag} slave[{si}]: 'base' address is required")
         if "size" not in s:
@@ -222,6 +287,28 @@ def _validate_design(d: dict, idx: int):
         pt = s.get("type")
         if pt is not None and pt not in ("lite", "full"):
             _err(f"{tag} slave[{si}]: 'type' must be 'lite' or 'full'")
+        # A region past the widest master's reach is one no master can ever
+        # address, so the decoder would turn it into a permanent decode error
+        # and say nothing.  Mirrors the same require in AxiZeroConfig, and is
+        # checked against the widest master rather than each one: a slave above
+        # a narrow master but within a wide one is a legitimate mixed-width map,
+        # and the narrow master's decode of it is a constant.  The bound is
+        # inclusive, so a map ending exactly at the top of the space is allowed.
+        if base + sz > (1 << max_master_aw):
+            _err(f"{tag} slave[{si}]: [0x{base:x}, 0x{base + sz:x}) is outside the "
+                 f"{max_master_aw}-bit master address space, so no master can reach it")
+
+    # Two slaves claiming the same address produce a one-hot decode with two
+    # bits set, and the arbiter then routes the beat to whichever one wins --
+    # silently, and differently for reads and writes.  Mirrors the same require
+    # in AxiZeroConfig so the YAML front end rejects it before sbt does.
+    for i in range(len(slaves)):
+        for j in range(i + 1, len(slaves)):
+            a_base, a_end = _parse_int(slaves[i]["base"]), _parse_int(slaves[i]["base"]) + _parse_int(slaves[i]["size"])
+            b_base, b_end = _parse_int(slaves[j]["base"]), _parse_int(slaves[j]["base"]) + _parse_int(slaves[j]["size"])
+            if not (a_base >= b_end or b_base >= a_end):
+                _err(f"{tag} slave[{i}]: [0x{a_base:x}, 0x{a_end:x}) overlaps with "
+                     f"slave[{j}]: [0x{b_base:x}, 0x{b_end:x})")
 
     # Validate slave id_width: if explicitly set on a full slave, it must be
     # at least as wide as the crossbar's expanded ID (master id + index bits).
@@ -245,7 +332,7 @@ def _validate_axis_design(d: dict, tag: str):
 
     def require_width(key: str):
         width = d.get(key)
-        if not isinstance(width, int) or width <= 0 or width % 8 != 0:
+        if not _is_int(width) or width <= 0 or width % 8 != 0:
             _err(f"{tag}: '{key}' must be a positive byte-aligned integer")
 
     if core == "width_adapter":
@@ -256,7 +343,7 @@ def _validate_axis_design(d: dict, tag: str):
 
     if core == "fifo":
         depth = d.get("depth")
-        if not isinstance(depth, int) or depth < 2:
+        if not _is_int(depth) or depth < 2:
             _err(f"{tag}: 'depth' must be an integer >= 2 for AXI Stream fifo")
 
     if core in ("arb_mux", "demux") and not d.get("use_last", True):
@@ -264,7 +351,7 @@ def _validate_axis_design(d: dict, tag: str):
 
     if core == "arb_mux":
         inputs = d.get("inputs", d.get("input_count"))
-        if not isinstance(inputs, int) or inputs < 1:
+        if not _is_int(inputs) or inputs < 1:
             _err(f"{tag}: 'inputs' must be a positive integer for AXI Stream arb_mux")
         arb = d.get("arbitration", "round_robin")
         if arb not in AXIS_ARBITRATION_MAP:
@@ -272,20 +359,34 @@ def _validate_axis_design(d: dict, tag: str):
 
     if core in ("demux", "broadcaster"):
         outputs = d.get("outputs", d.get("output_count"))
-        if not isinstance(outputs, int) or outputs < 1:
+        if not _is_int(outputs) or outputs < 1:
             _err(f"{tag}: 'outputs' must be a positive integer for AXI Stream {core}")
 
     for key in ("id_width", "dest_width", "user_width"):
         value = d.get(key, 0)
-        if not isinstance(value, int) or value < 0:
+        if not _is_int(value) or value < 0:
             _err(f"{tag}: '{key}' must be a non-negative integer")
+
+    # The signal options go through str().lower() into the emitted Scala, so a
+    # value that is not a bool becomes a Scala literal that is not one either:
+    # `use_last: 1` emits `useLast = 1`, which does not compile.
+    for key in ("use_strb", "use_keep", "use_last", "use_id", "use_dest", "use_user"):
+        if key in d and not isinstance(d[key], bool):
+            _err(f"{tag}: '{key}' must be true or false (got {d[key]!r})")
 
 
 def _parse_int(v) -> int:
     """Accept int or hex string like '0x1000'."""
-    if isinstance(v, int):
+    if _is_int(v):
         return v
-    return int(str(v), 0)
+    if isinstance(v, bool):
+        _err(f"expected an integer, got {v!r}")
+    try:
+        return int(str(v), 0)
+    except ValueError:
+        # Anything else -- a float, a typo'd address -- gets the same 'ERROR:'
+        # diagnostic as every other bad field rather than a Python traceback.
+        _err(f"expected an integer, got {v!r}")
 
 # ---------------------------------------------------------------------------
 # Scala code generation
@@ -404,7 +505,7 @@ def _gen_axis_design_block(d: dict) -> str:
 
     if core == "fifo":
         return textwrap.dedent(f"""\
-            // â”€â”€ {name} â”€â”€
+            // ── {name} ──
             locally {{
               val cfg = {_axis_config(d)}
               GenHelper.axisFifo(cfg, {d["depth"]}, "{name}")
@@ -488,43 +589,56 @@ def _compute_slave_idw(d: dict) -> int:
     return effective + idx_bits
 
 
+def _scala_call(name: str, fields: list, indent: int) -> str:
+    """Render a Scala `Name(field = value, ...)` call, one field per line.
+
+    The `=` column follows the widest field name present, so an optional field
+    whose name is longer than the others moves the whole block rather than
+    sitting out of line with it.
+
+    `indent` is the column the call is written at before dedenting, and it has
+    to match what the hand-written f-strings this replaced used, because a
+    multi-line value (a nested Axi4Config) carries its own indentation into the
+    block and so takes part in the common prefix textwrap.dedent strips.
+    """
+    pad = " " * indent
+    width = max(len(k) for k, _ in fields)
+    body = ",\n".join(f"{pad}  {k.ljust(width)} = {v}" for k, v in fields)
+    return textwrap.dedent(f"{pad}{name}(\n{body}\n{pad})")
+
+
 def _gen_master_port(m: dict, design: dict, global_addr_width: int) -> str:
     port_type = _port_type(m, design)
     addr_w  = m.get("addr_width",  global_addr_width)
     data_w  = m.get("data_width",  32)
     id_w    = m.get("id_width",    4)
     rs      = "true" if m.get("reg_slice", False) else "false"
+    # Emitted only when asked for, so a design that does not use it generates
+    # exactly the Scala it generated before the option existed.
+    skid    = m.get("reg_slice_skid", False)
 
     if port_type == "lite":
-        mode = "LiteAxi4"
-        cfg  = LITE_AXI4_CONFIG.format(addr_width=addr_w, data_width=data_w)
-        return textwrap.dedent(f"""\
-            MasterPort(
-              config   = {cfg},
-              mode     = {mode},
-              regSlice = {rs}
-            )""")
+        cfg = LITE_AXI4_CONFIG.format(addr_width=addr_w, data_width=data_w)
+        fields = [("config", cfg), ("mode", "LiteAxi4"), ("regSlice", rs)]
+        if skid:
+            fields.append(("regSliceSkid", "true"))
     elif port_type == "axi3":
         # Axi3Mode: the external AXI4 bundle is AXI3-constrained (max len=15,
         # no QoS/region).  The generator emits an Axi4Config for the MasterPort
         # (the bridge uses it internally) plus an Axi3Config for axi3Cfg.
         axi4_cfg = AXI3_CONFIG.format(addr_width=addr_w, data_width=data_w, id_width=id_w)
         a3_cfg   = AXI3_CFG.format(addr_width=addr_w, data_width=data_w, id_width=id_w)
-        return textwrap.dedent(f"""\
-            MasterPort(
-              config   = {axi4_cfg},
-              mode     = Axi3Mode,
-              regSlice = {rs},
-              axi3Cfg  = Some({a3_cfg})
-            )""")
+        fields = [("config", axi4_cfg), ("mode", "Axi3Mode"), ("regSlice", rs)]
+        if skid:
+            fields.append(("regSliceSkid", "true"))
+        fields.append(("axi3Cfg", f"Some({a3_cfg})"))
     else:
-        cfg  = FULL_AXI4_CONFIG.format(addr_width=addr_w, data_width=data_w, id_width=id_w)
-        return textwrap.dedent(f"""\
-            MasterPort(
-              config   = {cfg},
-              mode     = FullAxi4,
-              regSlice = {rs}
-            )""")
+        cfg = FULL_AXI4_CONFIG.format(addr_width=addr_w, data_width=data_w, id_width=id_w)
+        fields = [("config", cfg), ("mode", "FullAxi4"), ("regSlice", rs)]
+        if skid:
+            fields.append(("regSliceSkid", "true"))
+
+    return _scala_call("MasterPort", fields, 12)
 
 
 def _gen_slave_port(s: dict, design: dict, global_addr_width: int, slave_idw: int) -> str:
@@ -537,6 +651,7 @@ def _gen_slave_port(s: dict, design: dict, global_addr_width: int, slave_idw: in
     base    = _parse_int(s["base"])
     size    = _parse_int(s["size"])
     rs      = "true" if s.get("reg_slice", False) else "false"
+    skid    = s.get("reg_slice_skid", False)
     mode    = "LiteAxi4" if port_type == "lite" else "FullAxi4"
 
     if port_type == "lite":
@@ -544,14 +659,16 @@ def _gen_slave_port(s: dict, design: dict, global_addr_width: int, slave_idw: in
     else:
         cfg = FULL_AXI4_CONFIG.format(addr_width=addr_w, data_width=data_w, id_width=id_w)
 
-    return textwrap.dedent(f"""\
-        SlavePort(
-          config      = {cfg},
-          mode        = {mode},
-          baseAddress = {_scala_bigint(base)},
-          size        = {_scala_bigint(size)},
-          regSlice    = {rs}
-        )""")
+    fields = [
+        ("config", cfg),
+        ("mode", mode),
+        ("baseAddress", _scala_bigint(base)),
+        ("size", _scala_bigint(size)),
+        ("regSlice", rs),
+    ]
+    if skid:
+        fields.append(("regSliceSkid", "true"))
+    return _scala_call("SlavePort", fields, 8)
 
 
 def _gen_design_block(d: dict) -> str:
@@ -570,6 +687,16 @@ def _gen_design_block(d: dict) -> str:
 
     max_outstanding = d.get("max_outstanding", 1)
     mo_line = f",\n  maxOutstanding    = {max_outstanding}" if max_outstanding != 1 else ""
+
+    # Only emitted when it differs from the Scala default.
+    id_threads = d.get("id_threads", 2)
+    idt_line = f",\n  idThreads         = {id_threads}" if id_threads != 2 else ""
+
+    # Only emitted when turned off; on is the default in Scala too.
+    decerr_line = (
+        ",\n  decodeErrorResponse = false"
+        if d.get("decode_error_response", True) is False else ""
+    )
 
     masters_scala = ",\n    ".join(
         _gen_master_port(m, d, addr_w) for m in d["masters"]
@@ -590,7 +717,7 @@ def _gen_design_block(d: dict) -> str:
             slaves = Seq(
               {slaves_scala}
             ),
-            arbitration = {arb}{fabric_line}{mo_line}
+            arbitration = {arb}{fabric_line}{mo_line}{idt_line}{decerr_line}
           )
           GenHelper.{helper}(cfg, "{name}")
         }}
@@ -824,7 +951,8 @@ EXAMPLE_YAML = textwrap.dedent("""\
         masters:
           - addr_width: 32
             data_width: 32
-            reg_slice: true     # register slice on this master
+            reg_slice: true       # register slice on this master
+            reg_slice_skid: true  # ... and register READY too (needs reg_slice)
           - addr_width: 32
             data_width: 32
             reg_slice: false
@@ -846,6 +974,11 @@ EXAMPLE_YAML = textwrap.dedent("""\
         #                       Uses a W-route FIFO + ID-based response routing.
         #                       Recommended when multiple masters target the same slave.
         max_outstanding: 4
+        # id_threads: 2  - how many distinct in-flight IDs the fabric tracks per
+        #                  master per direction, to keep same-ID transactions in
+        #                  issue order (AXI4's "single slave per ID" rule). A
+        #                  request whose ID finds no free thread waits. Only
+        #                  meaningful when max_outstanding > 1.
 
         masters:
           - addr_width: 32
@@ -1046,6 +1179,13 @@ def cmd_generate(args):
 # ---------------------------------------------------------------------------
 
 def main():
+    # The banners and the example YAML carry box-drawing characters. On Windows
+    # a redirected stdout defaults to the ANSI codepage, which cannot encode them,
+    # so `axizero.py example > cfg.yaml` dies with UnicodeEncodeError. Force UTF-8.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser(
         prog="axizero",
         description="Generate AXI/AXI-Lite interconnect Verilog from a YAML config.",

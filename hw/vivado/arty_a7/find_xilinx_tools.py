@@ -135,9 +135,17 @@ def vivado_env(base: dict | None = None) -> dict:
         from the shared per-user store. Concurrent runs contend over it and
         an arbitrary subset dies with ``Could not open 'C' for writing``,
         so the build appears to fail at random in unrelated Xilinx IP.
-        Pointing ``APPDATA`` at a repo-local directory gives each build a
-        private store, which also stops Vivado depositing ``tclapp/`` and
+        Pointing ``APPDATA`` at a repo-local directory keeps builds out of
+        the shared store and stops Vivado depositing ``tclapp/`` and
         ``<version>/`` into whatever directory it was launched from.
+
+        This redirect does **not** close the race, and earlier versions of
+        this docstring wrongly implied it did. The runs within a single
+        build still share the redirected store: measured on Vivado 2025.2,
+        with the redirect in place, ``launch_runs synth_1 -jobs 4`` failed
+        four builds out of five and ``-jobs 1`` failed none out of four.
+        What actually fixes it is serializing synthesis, which every
+        ``create_project*.tcl`` now does unconditionally.
 
     Returns a copy of *base* (default ``os.environ``).
     """
@@ -150,6 +158,23 @@ def vivado_env(base: dict | None = None) -> dict:
         user_dir.mkdir(parents=True, exist_ok=True)
         env["APPDATA"] = str(user_dir.resolve())
     return env
+
+
+def require_fpga_tools() -> tuple[Path, Path]:
+    """Find ``vivado`` and ``xsdb`` or exit with an error message.
+
+    For designs with no MicroBlaze in them, where nothing has to be compiled
+    with ``mb-gcc``.  Honours ``VIVADO_BIN`` / ``XSDB_BIN``.
+    """
+    vivado = _env_override("VIVADO_BIN", find_vivado)
+    xsdb = _env_override("XSDB_BIN", find_xsdb)
+    missing = [n for n, p in (("vivado", vivado), ("xsdb", xsdb)) if not p]
+    if missing:
+        print(f"*** Could not find: {', '.join(missing)}")
+        print("    Searched PATH and common AMD/Xilinx install locations.")
+        print("    Set VIVADO_BIN / XSDB_BIN env vars to override.")
+        raise SystemExit(1)
+    return vivado, xsdb
 
 
 def require_tools() -> tuple[Path, Path, Path]:

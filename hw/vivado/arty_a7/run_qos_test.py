@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
 # SPDX-License-Identifier: MIT
-"""
+"""RETIRED 2026-09-08 -- this MicroBlaze suite is no longer maintained or run.
+Superseded by the VexZero builds; see hw/vivado/arty_a7/RETIRED.md.
+It still works, but it is Xilinx-only and is not a gate on a push.
+
+
 run_qos_test.py -- Build, program, and run the QoS hardware test on Arty A7-100T.
 
 Steps:
@@ -46,6 +50,35 @@ def run(cmd, cwd=None, timeout=None, desc="", env=None):
         print(f"\n*** FAILED (rc={result.returncode}): {desc}")
         sys.exit(result.returncode)
     return result
+
+
+def run_capture(cmd, cwd=None, timeout=None, desc="", env=None):
+    """Like run(), but returns the output as well as echoing it.
+
+    The verdict lives in xsdb's stdout, not in its exit status: xsdb exits 0
+    whether the test passed, failed or never ran, so the caller has to read
+    what it printed.
+    """
+    bar = "=" * 60
+    print("")
+    print(bar)
+    print(f"  {desc}")
+    print(f"  cmd: {' '.join(str(c) for c in cmd)}")
+    print(bar)
+    print("")
+    result = subprocess.run(
+        [str(c) for c in cmd],
+        cwd=str(cwd) if cwd else None,
+        timeout=timeout,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    print(result.stdout)
+    if result.returncode != 0:
+        print(f"*** FAILED (rc={result.returncode}): {desc}")
+        sys.exit(result.returncode)
+    return result.stdout
 
 
 def step_vivado():
@@ -151,7 +184,9 @@ puts "  g_fail = $fail_val   (@ 0x{g_fail_addr:08X})"
 puts "  g_pass = $pass_val   (@ 0x{g_pass_addr:08X})"
 puts "=========================================="
 
-if {{$fail_val == 0}} {{
+puts "  expected    = g_fail 0, g_pass 4"
+
+if {{$fail_val == 0 && $pass_val == 4}} {{
     puts "  *** ALL QoS TESTS PASSED ***"
 }} else {{
     puts "  *** QoS FAILURES DETECTED ***"
@@ -162,7 +197,7 @@ disconnect
 exit
 """, encoding="utf-8")
 
-    run(
+    output = run_capture(
         [XSDB_BIN, str(xsdb_tcl)],
         cwd=SCRIPT_DIR,
         timeout=180,
@@ -170,6 +205,19 @@ exit
     )
 
     xsdb_tcl.unlink(missing_ok=True)
+
+    # xsdb exits 0 whether the test passed, failed or never ran, so the
+    # verdict has to be read out of what it printed. A wedged bus leaves
+    # g_fail = 0 and g_pass = 0, which the banner used to report as success.
+    if "no targets found" in output or "*** QoS FAILURES DETECTED ***" in output:
+        print("")
+        print("*** FAILED: QoS hardware test did not pass")
+        sys.exit(1)
+    if "*** ALL QoS TESTS PASSED ***" not in output:
+        print("")
+        print("*** FAILED: QoS pass banner was not observed "
+              "(expected g_fail=0 and g_pass=4)")
+        sys.exit(1)
 
 
 def main():

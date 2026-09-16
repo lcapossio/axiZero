@@ -7,11 +7,26 @@
  *   s0: MicroBlaze full AXI4 (QoS tied to 0xF in BD)
  *   s1: QoS traffic gen #0 (QoS=0x8), sequential BRAM0 writes
  *   s2: QoS traffic gen #1 (QoS=0x4), reverse-order BRAM1 writes
- *   s3: QoS traffic gen #2 (QoS=0x0), random-address short bursts in BRAM1
+ *   s3: saturating gen (QoS=0x0), up to 4 outstanding bursts in BRAM1
  *
  * Heavy traffic profile:
- *   MB/G0/G1: 512 words x 8 passes.
- *   G2: random short bursts (len 1..4), 1024 bursts x 8 passes.
+ *   MB:     512 words x 8 passes, writes only.
+ *   G0/G1:  512 words x 8 passes, each word read back and compared in
+ *           hardware, so the read address channel carries generated traffic
+ *           at the generator's own QoS instead of the CPU's alone.
+ *   G2:     128-word window x 64 passes of bursts (1, 2, 4, 8 beats by pass)
+ *           with up to 4 outstanding, every word read back and compared.
+ *           Fewer words and more passes than the other two, chosen so its
+ *           beat count matches theirs despite bursts retiring faster.
+ *
+ * Each generator ends its run by writing a status word of its own:
+ *
+ *     status = TAG | (resp_errors << 8) | data_errors
+ *
+ * so a clean run leaves the bare TAG. Waiting on that word replaces the old
+ * data-sentinel wait: it means "finished" the way a sentinel did, and it also
+ * carries whatever the generator saw on its own read-back, which no amount of
+ * checking from the CPU afterwards can reconstruct.
  */
 
 #include "platform.h"
@@ -25,13 +40,41 @@
 
 #define G0_BASE_ADDR    0xC0000800UL
 #define G0_PATTERN      0xB1000000UL
+#define G0_STATUS_ADDR  0xC0001FFCUL
+#define G0_STATUS_TAG   0x5A710000UL
 
 #define G1_BASE_ADDR    0xC0010800UL
 #define G1_PATTERN      0xB2000000UL
+#define G1_STATUS_ADDR  0xC0011000UL
+#define G1_STATUS_TAG   0x5A720000UL
 
 #define G2_BASE_ADDR    0xC0011800UL
 #define G2_PATTERN      0xB3000000UL
-#define G2_SENTINEL_DATA 0xD00D0000UL
+#define G2_WORDS        128U
+/*
+ * The saturating generator covers a 128-word window per pass, against 512 for
+ * the other two, and its bursts retire far faster than their single-beat
+ * transactions. Matching their beat count keeps it contending for the whole
+ * iteration instead of finishing early and leaving the fabric a master short.
+ */
+#define G2_NPASSES      64U
+#define G2_FINAL_PASS   (G2_NPASSES - 1U)
+#define G2_STATUS_ADDR  0xC0011FFCUL
+#define G2_STATUS_TAG   0x5A700000UL
+
+#define STATUS_TAG_MASK 0xFFFF0000UL
+
+/*
+ * Status words live in the gaps between the data windows, and every address
+ * here must fit inside the 8 KB of physical BRAM behind each controller: the
+ * block design assigns 64 K per controller, but the custom crossbar has no
+ * BD-recognised AXI path, so MEM_DEPTH never propagates and anything above
+ * 8 KB aliases back into the window. See the note in
+ * create_project_qos_stress.tcl.
+ *
+ *   BRAM0 0xC0000000..0xC0001FFF   MB 0x000..0x7FF, G0 0x800..0xFFF
+ *   BRAM1 0xC0010000..0xC0011FFF   G1 0x800..0xFFF, G2 0x1800..0x19FF
+ */
 
 #define G0_TRIG_BIT     (1u << 1)
 #define G1_TRIG_BIT     (1u << 2)
@@ -104,9 +147,15 @@ static void clear_region(uint32_t base, uint32_t words)
     }
 }
 
-static int wait_sentinel(uint32_t addr, uint32_t exp, uint32_t timeout)
+/*
+ * Wait for a generator's status word to appear, then report what it says.
+ * Splitting the two apart keeps "the generator never finished" distinct from
+ * "it finished and found errors", which a single equality wait would fold
+ * into one indistinguishable timeout.
+ */
+static int wait_status(uint32_t addr, uint32_t tag, uint32_t timeout)
 {
-    while (rd32(addr) != exp && --timeout) {
+    while (((rd32(addr) & STATUS_TAG_MASK) != tag) && --timeout) {
         if ((timeout & 0x3FFu) == 0u) beat();
     }
     return (timeout != 0u);
@@ -138,7 +187,12 @@ static void test_t2_t3_stress(void)
     clear_region(MB_BASE_ADDR, NWORDS);
     clear_region(G0_BASE_ADDR, NWORDS);
     clear_region(G1_BASE_ADDR, NWORDS);
-    clear_region(G2_BASE_ADDR, 128u);
+    clear_region(G2_BASE_ADDR, G2_WORDS);
+    /* Stale status words from a previous iteration would satisfy the wait
+       below immediately, so they are cleared along with the data regions. */
+    wr32(G0_STATUS_ADDR, 0u);
+    wr32(G1_STATUS_ADDR, 0u);
+    wr32(G2_STATUS_ADDR, 0u);
 
     GPIO_TRI  = 0;
     GPIO_DATA = 0;
@@ -184,29 +238,45 @@ static void test_t2_t3_stress(void)
              0x7);
     }
 
-    uart_puts("[INFO] Waiting for generator completion sentinels...\n");
-    uint32_t g0_sentinel_addr = G0_BASE_ADDR + (NWORDS - 1u) * 4u;
-    uint32_t g1_sentinel_addr = G1_BASE_ADDR;
-    uint32_t g2_sentinel_addr = G2_BASE_ADDR + 127u * 4u;
-
-    uint32_t g0_sentinel_exp = exp_word(G0_PATTERN, FINAL_PASS, NWORDS - 1u);
-    uint32_t g1_sentinel_exp = exp_word(G1_PATTERN, FINAL_PASS, 0u);
-    uint32_t g2_sentinel_exp = G2_SENTINEL_DATA | FINAL_PASS;
-
-    if (!wait_sentinel(g0_sentinel_addr, g0_sentinel_exp, 4000000u)) {
-        fail_ex(4, "T3 completion G0", "timeout", rd32(g0_sentinel_addr), g0_sentinel_exp);
+    uart_puts("[INFO] Waiting for generator status words...\n");
+    if (!wait_status(G0_STATUS_ADDR, G0_STATUS_TAG, 4000000u)) {
+        fail_ex(4, "T3 completion G0", "timeout", rd32(G0_STATUS_ADDR), G0_STATUS_TAG);
         GPIO_DATA = 0;
         return;
     }
-    if (!wait_sentinel(g1_sentinel_addr, g1_sentinel_exp, 4000000u)) {
-        fail_ex(5, "T3 completion G1", "timeout", rd32(g1_sentinel_addr), g1_sentinel_exp);
+    if (!wait_status(G1_STATUS_ADDR, G1_STATUS_TAG, 4000000u)) {
+        fail_ex(5, "T3 completion G1", "timeout", rd32(G1_STATUS_ADDR), G1_STATUS_TAG);
         GPIO_DATA = 0;
         return;
     }
-    if (!wait_sentinel(g2_sentinel_addr, g2_sentinel_exp, 4000000u)) {
-        fail_ex(6, "T3 completion G2", "timeout", rd32(g2_sentinel_addr), g2_sentinel_exp);
+    if (!wait_status(G2_STATUS_ADDR, G2_STATUS_TAG, 4000000u)) {
+        fail_ex(6, "T3 completion G2", "timeout", rd32(G2_STATUS_ADDR), G2_STATUS_TAG);
         GPIO_DATA = 0;
         return;
+    }
+
+    /*
+     * The tag arrived, so each generator ran to completion. The low half of
+     * the word is its own verdict on the traffic it read back: a non-zero
+     * low byte is a data mismatch it saw, the next byte up a non-OKAY
+     * response. A clean run leaves the bare tag.
+     */
+    {
+        uint32_t st0 = rd32(G0_STATUS_ADDR);
+        uint32_t st1 = rd32(G1_STATUS_ADDR);
+        uint32_t st2 = rd32(G2_STATUS_ADDR);
+        if (st0 != G0_STATUS_TAG) {
+            fail_ex(12, "T3 G0 read-back status", "generator reported errors",
+                    st0, G0_STATUS_TAG);
+        } else if (st1 != G1_STATUS_TAG) {
+            fail_ex(13, "T3 G1 read-back status", "generator reported errors",
+                    st1, G1_STATUS_TAG);
+        } else if (st2 != G2_STATUS_TAG) {
+            fail_ex(14, "T3 G2 read-back status", "generator reported errors",
+                    st2, G2_STATUS_TAG);
+        } else {
+            pass("T3 generator hardware read-back clean on all three masters");
+        }
     }
 
     /* NOTE: do NOT clear GPIO_DATA here — G2 GPIO verify needs to read it first */
@@ -235,25 +305,20 @@ static void test_t2_t3_stress(void)
     }
     if (ok) pass("T3 G1 reverse-pattern region verify");
 
+    /*
+     * The saturating generator covers its whole window on every pass, so the
+     * final contents are fully determined and can be checked word for word.
+     * The generator it replaced wrote random addresses, which is why this
+     * check used to be a "some words were touched" heuristic that plain
+     * round-robin would have satisfied just as well.
+     */
     ok = 1;
-    {
-        uint32_t touched = 0u;
-        uint32_t fold_xor = 0u;
-        for (i = 0; i < 128u; i++) {
-            uint32_t v = rd32(G2_BASE_ADDR + i * 4u);
-            if (v != 0u) touched++;
-            fold_xor ^= v;
-        }
-        if (touched < 32u) {
-            fail_ex(10, "T3 G2 random burst verify", "too few touched words", touched, 32u);
-            ok = 0;
-        }
-        if (fold_xor == 0u) {
-            fail_ex(11, "T3 G2 random burst verify", "xor fold is zero", fold_xor, 1u);
-            ok = 0;
-        }
+    for (i = 0; i < G2_WORDS; i++) {
+        uint32_t exp = exp_word(G2_PATTERN, G2_FINAL_PASS, i);
+        uint32_t got = rd32(G2_BASE_ADDR + i * 4u);
+        if (got != exp) { fail_ex(10, "T3 G2 verify", "word mismatch", got, exp); ok = 0; break; }
     }
-    if (ok) pass("T3 G2 random-burst region activity verify");
+    if (ok) pass("T3 G2 saturating-burst region verify");
 
     GPIO_DATA = 0;
 }

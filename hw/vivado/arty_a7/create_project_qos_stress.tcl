@@ -26,11 +26,11 @@ catch { set_property board_part digilentinc.com:arty-a7-100:part0:1.1 [current_p
 ## Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ 2. RTL sources Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 add_files -norecurse "$script_dir/ip/rtl/AxiZeroArtyQosStressDUT.v"
 add_files -norecurse "$script_dir/ip/rtl/axi_qos_traffic_gen.v"
-add_files -norecurse "$script_dir/ip/rtl/axi_qos_rand_burst_gen.v"
+add_files -norecurse "$script_dir/ip/rtl/axi_sat_gen.v"
 add_files -norecurse "$script_dir/ip/rtl/axi_id_echo.v"
 set_property file_type {Verilog} [get_files AxiZeroArtyQosStressDUT.v]
 set_property file_type {Verilog} [get_files axi_qos_traffic_gen.v]
-set_property file_type {Verilog} [get_files axi_qos_rand_burst_gen.v]
+set_property file_type {Verilog} [get_files axi_sat_gen.v]
 set_property file_type {Verilog} [get_files axi_id_echo.v]
 add_fcapz_debug_sources $script_dir
 update_compile_order -fileset sources_1
@@ -140,6 +140,9 @@ set_property -dict {
     CONFIG.QOS_VALUE    {0x8}
     CONFIG.NWORDS       {512}
     CONFIG.NPASSES      {8}
+    CONFIG.READ_CHECK   {1}
+    CONFIG.STATUS_ADDR  {0xC0001FFC}
+    CONFIG.STATUS_TAG   {0x5A710000}
 } [get_bd_cells tgen_0]
 connect_bd_net [get_bd_ports sys_clk] [get_bd_pins tgen_0/aclk]
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins tgen_0/aresetn]
@@ -153,20 +156,24 @@ set_property -dict {
     CONFIG.QOS_VALUE    {0x4}
     CONFIG.NWORDS       {512}
     CONFIG.NPASSES      {8}
+    CONFIG.READ_CHECK   {1}
+    CONFIG.STATUS_ADDR  {0xC0011000}
+    CONFIG.STATUS_TAG   {0x5A720000}
 } [get_bd_cells tgen_1]
 connect_bd_net [get_bd_ports sys_clk] [get_bd_pins tgen_1/aclk]
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins tgen_1/aresetn]
 
-create_bd_cell -type module -reference axi_qos_rand_burst_gen tgen_2
+create_bd_cell -type module -reference axi_sat_gen tgen_2
 set_property -dict {
     CONFIG.BASE_ADDR    {0xC0011800}
     CONFIG.DATA_PATTERN {0xB3000000}
-    CONFIG.SENTINEL_DATA {0xD00D0000}
+    CONFIG.STATUS_ADDR  {0xC0011FFC}
+    CONFIG.STATUS_TAG   {0x5A700000}
     CONFIG.QOS_VALUE    {0x0}
     CONFIG.WINDOW_WORDS {128}
-    CONFIG.NBURSTS      {1024}
-    CONFIG.NPASSES      {8}
-    CONFIG.MAX_BURST_LEN {4}
+    CONFIG.NPASSES      {64}
+    CONFIG.MAX_BURST_LEN {8}
+    CONFIG.MAX_OUTSTAND {4}
 } [get_bd_cells tgen_2]
 connect_bd_net [get_bd_ports sys_clk] [get_bd_pins tgen_2/aclk]
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins tgen_2/aresetn]
@@ -539,6 +546,9 @@ set_property CONFIG.C_MASK {0x00000000FFFF8000} [get_bd_cells dlmb_bram_if_cntlr
 set_property CONFIG.C_MASK {0x00000000FFFF8000} [get_bd_cells ilmb_bram_if_cntlr_0]
 
 ## Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ 6. Validate and generate Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+## NOTE: the generator status addresses (0xC0001FFC, 0xC0011000, 0xC0011FFC)
+## are chosen to sit in the gaps between the data windows AND inside the 8KB
+## below, for the reason that follows.
 ## NOTE: blk_mem_gen Write_Depth_A defaults to 2048 (8KB) because the custom
 ## crossbar module has no BD-recognized AXI path, so the address editor can't
 ## propagate MEM_DEPTH to the BRAM controllers.  All test addresses must fit
@@ -560,7 +570,14 @@ if {[info exists argc] && $argc > 0} {
     set jobs 4
 }
 
-launch_runs synth_1 -jobs $jobs
+# Synthesis is deliberately serialized regardless of $jobs. Parallel
+# out-of-context IP runs each load the Vivado tclapp store independently
+# and contend over it; an arbitrary subset then dies with
+#   ERROR: [Common 17-354] Could not open 'C' for writing.
+# in unrelated Xilinx IP. Measured on 2025.2: at -jobs 4 this hit four of
+# five builds, at -jobs 1 none of four. $jobs still applies to
+# implementation below, which does not have the contention.
+launch_runs synth_1 -jobs 1
 wait_on_run synth_1
 launch_runs impl_1 -to_step write_bitstream -jobs $jobs
 wait_on_run impl_1

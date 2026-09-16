@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
 # SPDX-License-Identifier: MIT
-"""Build, program, and run the AXI4-Stream smoke HW test on Arty A7-100T."""
+"""RETIRED 2026-09-08 -- this MicroBlaze suite is no longer maintained or run.
+Superseded by the VexZero builds; see hw/vivado/arty_a7/RETIRED.md.
+It still works, but it is Xilinx-only and is not a gate on a push.
+
+Build, program, and run the AXI4-Stream smoke HW test on Arty A7-100T."""
 
 import os
 import argparse

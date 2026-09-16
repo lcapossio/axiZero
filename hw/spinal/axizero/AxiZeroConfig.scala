@@ -63,8 +63,17 @@ case class MasterPort(
   /** Required when mode == Axi3Mode. Describes the external AXI3 port (address/data/id widths must
     * match config).
     */
-  axi3Cfg: Option[axizero.adapters.Axi3Config] = None
+  axi3Cfg: Option[axizero.adapters.Axi3Config] = None,
+  /** Make this master's register slice a full pipe, so the READY the master sees is registered too
+    * rather than combinational through the fabric. Needs `regSlice`. Costs one more set of payload
+    * registers on AW/W/AR; forward latency and throughput are unchanged.
+    */
+  regSliceSkid: Boolean = false
 ) {
+  require(
+    !regSliceSkid || regSlice,
+    "MasterPort: regSliceSkid needs regSlice"
+  )
   require(
     mode != Axi3Mode || axi3Cfg.isDefined,
     "MasterPort: axi3Cfg must be set when mode == Axi3Mode"
@@ -86,8 +95,16 @@ case class SlavePort(
   /** Size of the slave's memory region in bytes. */
   size: BigInt,
   /** Insert a register slice between the crossbar fabric and this slave. */
-  regSlice: Boolean = false
+  regSlice: Boolean = false,
+  /** Make this slave's register slice a full pipe, so the READY the fabric sees is registered.
+    * Needs `regSlice`. Same cost and same reasoning as MasterPort.regSliceSkid.
+    */
+  regSliceSkid: Boolean = false
 ) {
+  require(
+    !regSliceSkid || regSlice,
+    "SlavePort: regSliceSkid needs regSlice"
+  )
   def endAddress: BigInt = baseAddress + size
 }
 
@@ -108,12 +125,49 @@ case class AxiZeroConfig(
     * W-route FIFOs and ID-based response routing — better throughput when multiple masters target
     * the same slave). Only affects the full AXI4 crossbar; the Lite crossbar is always blocking.
     */
-  maxOutstanding: Int = 1
+  maxOutstanding: Int = 1,
+  /** How many distinct in-flight transaction IDs the pipelined crossbar tracks per master per
+    * direction.
+    *
+    * AXI4 requires transactions sharing an ID and direction to complete in issue order whichever
+    * slave each went to. The crossbar enforces that with the industry's "single slave per ID" rule
+    * -- an ID may only have work outstanding at one slave -- and this is the size of the table that
+    * remembers where each live ID went. A request whose ID matches no live thread waits for a free
+    * one, so a small number costs throughput and never correctness; 1 means a master has one
+    * destination in flight at a time, which is already what a constant-ID master gets.
+    *
+    * Ignored when maxOutstanding is 1: blocking mode holds a master to one transaction per
+    * direction outright.
+    */
+  idThreads: Int = 2,
+  /** Answer an address that decodes to no slave with DECERR instead of leaving it unacknowledged.
+    *
+    * With this off, a master that issues such an address never receives AWREADY/ARREADY and stalls
+    * permanently -- the port is wedged with no error and no diagnostic. With it on, the fabric adds
+    * an internal responder that owns every unclaimed address and completes the transaction with
+    * DECERR, so the master gets its handshake and the CPU sees a bus fault it can report.
+    */
+  decodeErrorResponse: Boolean = true,
+  /** Bring out a read-only copy of every master port as the crossbar itself sees it.
+    *
+    * The external ports say what a master asked for; a register slice sits between them and the
+    * arbiter and accepts requests the crossbar has not admitted, so nothing outside can tell a
+    * fabric that held a request from one that took it. This exposes the crossbar's own master ports
+    * as [[Axi4MasterObs]] outputs, where READY is the admission decision itself. For observers --
+    * see [[axizero.verif.Axi4OrderingProbe]] -- which is why it is off by default and why the
+    * bundle carries no data: a design that does not read it generates exactly what it did before.
+    */
+  observeMasters: Boolean = false
 ) {
   // ---- basic sanity -------------------------------------------------------
   require(masters.nonEmpty, "At least one master port is required")
   require(slaves.nonEmpty, "At least one slave port is required")
   require(maxOutstanding >= 1, "maxOutstanding must be >= 1")
+  require(idThreads >= 1, "idThreads must be >= 1")
+  require(
+    !(observeMasters && isAllLite),
+    "observeMasters watches transaction IDs, which an all-Lite fabric does not carry"
+  )
 
   arbitration match {
     case WeightedRoundRobin(w) =>
@@ -156,6 +210,10 @@ case class AxiZeroConfig(
   def slaveSideIdWidth(masterIdWidth: Int): Int = masterIdWidth + masterIndexBits
 
   // ---- address map validation ----------------------------------------------
+  /** The widest address any master on this crossbar can drive. */
+  private val maxMasterAddrW: Int =
+    if (masters.isEmpty) 0 else masters.map(_.config.addressWidth).max
+
   for (si <- slaves.indices) {
     val sp = slaves(si)
     require(
@@ -166,6 +224,18 @@ case class AxiZeroConfig(
       (sp.baseAddress & (sp.size - 1)) == 0,
       s"Slave $si: baseAddress (0x${sp.baseAddress
           .toString(16)}) must be aligned to size (0x${sp.size.toString(16)})"
+    )
+    // A region past the widest master's reach is one no master can ever
+    // address, so the decoder would turn it into a permanent decode error and
+    // say nothing. Checked against the widest master rather than each one: a
+    // slave above a narrow master but within a wide one is a legitimate
+    // mixed-width map, and the narrow master's decode of it is a constant.
+    // The bound is inclusive, so a map that ends exactly at the top of the
+    // address space is allowed.
+    require(
+      masters.isEmpty || sp.endAddress <= (BigInt(1) << maxMasterAddrW),
+      s"Slave $si [0x${sp.baseAddress.toString(16)}, 0x${sp.endAddress.toString(16)}) is outside " +
+        s"the $maxMasterAddrW-bit master address space, so no master can reach it"
     )
   }
   for (i <- slaves.indices; j <- slaves.indices if i < j) {

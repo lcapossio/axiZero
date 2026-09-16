@@ -1,0 +1,44 @@
+# Copyright (c) 2026 Leonardo Capossio - bard0 design  hello@bard0.com
+# SPDX-License-Identifier: MIT
+
+name: Set up Verilator
+description: Install an exactly pinned Verilator from apt and verify what landed.
+
+# SpinalHDL 1.10.1 segfaulted inside VerilatedContext::addModel() on Verilator
+# 5.x, which killed the whole SpinalSim suite on the first test. An unpinned
+# `apt-get install verilator` lets the runner image drift into that class of
+# failure silently, so the version is pinned to an exact package revision.
+#
+# Ubuntu 24.04 (noble/universe) publishes exactly one Verilator, 5.020-1. If
+# Ubuntu supersedes it, apt will fail to find this version and CI goes red with
+# a clear message - that is the intent. To bump: pick the new version from
+# `apt-cache madison verilator` on ubuntu-24.04, update the default below, and
+# re-record it in docs/axis-stream-verification.md.
+
+inputs:
+  version:
+    description: Exact apt package version of Verilator to install.
+    required: false
+    default: 5.020-1
+
+runs:
+  using: composite
+  steps:
+    - name: Install Verilator
+      shell: bash
+      run: |
+        set -euo pipefail
+        pinned='${{ inputs.version }}'
+        # Strip the Debian revision: 5.020-1 is what apt installs, 5.020 is
+        # what `verilator --version` reports.
+        expected="${pinned%%-*}"
+
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends "verilator=${pinned}"
+
+        verilator --version
+        got=$(verilator --version | awk '{print $2}')
+        if [ "$got" != "$expected" ]; then
+          echo "::error::Verilator is ${got}, expected ${expected} (pinned ${pinned})."
+          exit 1
+        fi

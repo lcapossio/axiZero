@@ -35,11 +35,223 @@ class AxiStreamCoreSpec extends AnyFunSuite {
       useUser = false
     )
 
+  /** Config with the sideband fields enabled.
+    *
+    * The Axi4StreamMaster/Slave helpers only carry data bytes, so the sideband tests drive the
+    * bus directly rather than through the BFMs.
+    */
+  private def axisSidebandCfg(dataWidth: Int): Axi4StreamConfig =
+    Axi4StreamConfig(
+      dataWidth = dataWidth,
+      idWidth = 4,
+      destWidth = 3,
+      userWidth = 5,
+      useStrb = true,
+      useKeep = true,
+      useLast = true,
+      useId = true,
+      useDest = true,
+      useUser = true
+    )
+
+  /** Park a stream input at a defined idle state.
+    *
+    * Every payload field must be driven, not just valid: an undriven field stays at X, and
+    * reading one through a core's payload mux fails with a raw64ToInt error rather than a
+    * useful mismatch.
+    */
+  private def idleSidebandInput(stream: Axi4Stream.Axi4Stream): Unit = {
+    stream.valid        #= false
+    stream.payload.data #= 0
+    stream.payload.id   #= 0
+    stream.payload.dest #= 0
+    stream.payload.user #= 0
+    stream.payload.last #= false
+    stream.payload.strb #= 0
+    stream.payload.keep #= 0
+  }
+
+  /** Drive one beat with explicit sideband values and wait for it to be accepted. */
+  private def sendSidebandBeat(
+    stream: Axi4Stream.Axi4Stream,
+    cd: ClockDomain,
+    data: BigInt,
+    id: Int,
+    dest: Int,
+    user: Int,
+    last: Boolean = true
+  ): Unit = {
+    stream.valid       #= true
+    stream.payload.data #= data
+    stream.payload.id   #= id
+    stream.payload.dest #= dest
+    stream.payload.user #= user
+    stream.payload.last #= last
+    stream.payload.strb #= (BigInt(1) << (stream.payload.data.getWidth / 8)) - 1
+    stream.payload.keep #= (BigInt(1) << (stream.payload.data.getWidth / 8)) - 1
+    cd.waitSamplingWhere(stream.ready.toBoolean)
+    stream.valid #= false
+  }
+
+  /** Wait for a beat and return its sideband fields.
+    *
+    * All four are read as BigInt rather than Int: TUSER is userWidth bits *per data byte*, so on
+    * an 8-byte bus a userWidth of 5 is a 40-bit field and toInt overflows.
+    */
+  private def recvSidebandBeat(
+    stream: Axi4Stream.Axi4Stream,
+    cd: ClockDomain
+  ): (BigInt, BigInt, BigInt, BigInt) = {
+    stream.ready #= true
+    cd.waitSamplingWhere(stream.valid.toBoolean)
+    val out = (
+      stream.payload.data.toBigInt,
+      stream.payload.id.toBigInt,
+      stream.payload.dest.toBigInt,
+      stream.payload.user.toBigInt
+    )
+    stream.ready #= false
+    out
+  }
+
   private def byteFrame(values: Int*): List[Byte] =
     values.map(v => (v & 0xff).toByte).toList
 
   private def unsigned(bytes: List[Byte]): List[Int] =
     bytes.map(_ & 0xff)
+
+  test("AXI Stream register slice preserves TID, TDEST and TUSER") {
+    val cfg = axisSidebandCfg(8)
+
+    simCfg.compile(new AxiStreamRegSlice(cfg)).doSim { dut =>
+      val cd = dut.clockDomain
+
+      idleSidebandInput(dut.io.input)
+      dut.io.output.ready #= false
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      val send = fork {
+        sendSidebandBeat(dut.io.input, cd, data = 0x5a, id = 0xd, dest = 0x5, user = 0x13)
+      }
+      val (data, id, dest, user) = recvSidebandBeat(dut.io.output, cd)
+      send.join()
+
+      assert(data == 0x5a, s"data was $data")
+      assert(id == 0xd, s"TID was $id")
+      assert(dest == 0x5, s"TDEST was $dest")
+      assert(user == 0x13, s"TUSER was $user")
+    }
+  }
+
+  test("AXI Stream FIFO preserves per-beat TUSER across a packet") {
+    val cfg = axisSidebandCfg(8)
+
+    simCfg.compile(new AxiStreamFifo(cfg, depth = 4)).doSim { dut =>
+      val cd = dut.clockDomain
+
+      idleSidebandInput(dut.io.input)
+      dut.io.output.ready #= false
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      // TID/TDEST are constant for a packet, TUSER varies per beat.
+      val beats = Seq((0x11, 0x01), (0x22, 0x02), (0x33, 0x04))
+
+      val send = fork {
+        beats.zipWithIndex.foreach { case ((data, user), i) =>
+          sendSidebandBeat(
+            dut.io.input, cd,
+            data = data, id = 0x7, dest = 0x2, user = user,
+            last = i == beats.length - 1
+          )
+        }
+      }
+
+      val got = beats.indices.map(_ => recvSidebandBeat(dut.io.output, cd))
+      send.join()
+
+      assert(got.map(_._1) == beats.map(b => BigInt(b._1)), s"data was ${got.map(_._1)}")
+      assert(got.map(_._4) == beats.map(_._2), s"TUSER was ${got.map(_._4)}")
+      assert(got.forall(_._2 == 0x7), s"TID was ${got.map(_._2)}")
+      assert(got.forall(_._3 == 0x2), s"TDEST was ${got.map(_._3)}")
+    }
+  }
+
+  test("AXI Stream arb-mux forwards sideband from the granted input") {
+    val cfg = axisSidebandCfg(8)
+
+    simCfg.compile(new AxiStreamArbMux(cfg, inputCount = 2)).doSim { dut =>
+      val cd = dut.clockDomain
+
+      dut.io.inputs.foreach(idleSidebandInput)
+      dut.io.output.ready #= false
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      // Only input 1 is offered, so it must win and its sideband must appear.
+      val send = fork {
+        sendSidebandBeat(dut.io.inputs(1), cd, data = 0x3c, id = 0x9, dest = 0x6, user = 0x1a)
+      }
+      val (data, id, dest, user) = recvSidebandBeat(dut.io.output, cd)
+      send.join()
+
+      assert(data == 0x3c, s"data was $data")
+      assert(id == 0x9, s"TID was $id")
+      assert(dest == 0x6, s"TDEST was $dest")
+      assert(user == 0x1a, s"TUSER was $user")
+    }
+  }
+
+  test("AXI Stream demux forwards sideband to the selected output") {
+    val cfg = axisSidebandCfg(8)
+
+    simCfg.compile(new AxiStreamDemux(cfg, outputCount = 2)).doSim { dut =>
+      val cd = dut.clockDomain
+
+      idleSidebandInput(dut.io.input)
+      dut.io.outputs.foreach(_.ready #= false)
+      dut.io.select #= 1
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      val send = fork {
+        sendSidebandBeat(dut.io.input, cd, data = 0x77, id = 0xa, dest = 0x3, user = 0x05)
+      }
+      val (data, id, dest, user) = recvSidebandBeat(dut.io.outputs(1), cd)
+      send.join()
+
+      assert(data == 0x77, s"data was $data")
+      assert(id == 0xa, s"TID was $id")
+      assert(dest == 0x3, s"TDEST was $dest")
+      assert(user == 0x05, s"TUSER was $user")
+    }
+  }
+
+  test("AXI Stream broadcaster replicates sideband to every output") {
+    val cfg = axisSidebandCfg(8)
+
+    simCfg.compile(new AxiStreamBroadcaster(cfg, outputCount = 2)).doSim { dut =>
+      val cd = dut.clockDomain
+
+      idleSidebandInput(dut.io.input)
+      dut.io.outputs.foreach(_.ready #= false)
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      var got0 = (BigInt(0), BigInt(0), BigInt(0), BigInt(0))
+      var got1 = (BigInt(0), BigInt(0), BigInt(0), BigInt(0))
+
+      val recv0 = fork { got0 = recvSidebandBeat(dut.io.outputs(0), cd) }
+      val recv1 = fork { got1 = recvSidebandBeat(dut.io.outputs(1), cd) }
+      sendSidebandBeat(dut.io.input, cd, data = 0x2b, id = 0x6, dest = 0x1, user = 0x0f)
+      recv0.join()
+      recv1.join()
+
+      assert(got0 == (BigInt(0x2b), 0x6, 0x1, 0x0f), s"output 0 got $got0")
+      assert(got1 == (BigInt(0x2b), 0x6, 0x1, 0x0f), s"output 1 got $got1")
+    }
+  }
 
   test("AXI Stream register slice preserves a byte frame") {
     val cfg = axisCfg(8)

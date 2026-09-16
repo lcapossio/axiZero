@@ -35,7 +35,7 @@ class AxiZeroLiteTop(cfg: AxiZeroConfig) extends Component {
 
     // Step 1: optional register slice
     val afterRS: Axi4 = if (mp.regSlice) {
-      val rs = new Axi4LiteRegSlice(mp.config)
+      val rs = new Axi4LiteRegSlice(mp.config, mp.regSliceSkid)
       rs.io.upstream <> extPort
       rs.io.downstream
     } else extPort
@@ -68,7 +68,7 @@ class AxiZeroLiteTop(cfg: AxiZeroConfig) extends Component {
 
     // Step 2: optional register slice
     if (sp.regSlice) {
-      val rs = new Axi4LiteRegSlice(sp.config)
+      val rs = new Axi4LiteRegSlice(sp.config, sp.regSliceSkid)
       rs.io.upstream <> afterConv
       extPort <> rs.io.downstream
     } else {
@@ -99,11 +99,6 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
     "AxiZeroMixedTop requires at least one FullAxi4 port. Use AxiZeroLiteTop for all-Lite."
   )
 
-  val io = new Bundle {
-    val masters = Vec(cfg.masters.indices.map(i => slave(Axi4(cfg.masters(i).config))))
-    val slaves  = Vec(cfg.slaves.indices.map(i => master(Axi4(cfg.slaves(i).config))))
-  }
-
   // ── Normalised internal ID widths ─────────────────────────────────────────
   private val effectiveIdW: Int =
     // Axi3Mode and FullAxi4 master ports carry IDs; LiteAxi4 drives id=0.
@@ -122,6 +117,18 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
   private def internalSlaveCfg(sp: SlavePort): Axi4Config =
     Axi4Config(sp.config.addressWidth, cfg.fabricDataWidth, slaveIdW)
 
+  val io = new Bundle {
+    val masters = Vec(cfg.masters.indices.map(i => slave(Axi4(cfg.masters(i).config))))
+    val slaves  = Vec(cfg.slaves.indices.map(i => master(Axi4(cfg.slaves(i).config))))
+
+    /** The crossbar's own master ports, read-only, when `observeMasters` is on. See
+      * [[Axi4MasterObs]]: this is the boundary where READY means admitted, which the external ports
+      * cannot show once a register slice is in the way.
+      */
+    val obs = cfg.observeMasters generate
+      Vec(cfg.masters.indices.map(i => out(Axi4MasterObs(internalMasterCfg(cfg.masters(i))))))
+  }
+
   private val xbarCfg = cfg.copy(
     masters = cfg.masters.map(mp => MasterPort(internalMasterCfg(mp), FullAxi4, regSlice = false)),
     slaves = cfg.slaves.map(sp =>
@@ -129,7 +136,13 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
     )
   )
 
-  private val xbar = new Axi4Crossbar(xbarCfg)
+  // Not private, and deliberately so: a testbench that wants to know whether
+  // the arbiter actually had a choice to make has to look at the ports the
+  // arbiter sees, not at the external ones. Anything between them -- register
+  // slices, protocol bridges, width converters -- holds requests of its own,
+  // so measuring contention outside them measures the wrong thing. This
+  // matches AxiZeroLiteTop, whose xbar has always been visible.
+  val xbar = new Axi4Crossbar(xbarCfg)
 
   // ── Master-side wiring ────────────────────────────────────────────────────
   for (mi <- 0 until cfg.numMasters) {
@@ -140,11 +153,11 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
     // For Axi3Mode: Axi4RegSlice sits before the bridge (operates on the
     // AXI4 bundle; the protocol adapter is downstream and unaffected).
     val afterRS: Axi4 = if (mp.regSlice && mp.mode == LiteAxi4) {
-      val rs = new Axi4LiteRegSlice(mp.config)
+      val rs = new Axi4LiteRegSlice(mp.config, mp.regSliceSkid)
       rs.io.upstream <> extPort
       rs.io.downstream
     } else if (mp.regSlice) {
-      val rs = new Axi4RegSlice(mp.config)
+      val rs = new Axi4RegSlice(mp.config, mp.regSliceSkid)
       rs.io.upstream <> extPort
       rs.io.downstream
     } else extPort
@@ -183,7 +196,19 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
         conv.io.output
       } else afterAdapt
 
-    xbar.io.masters(mi) <> afterWidthConv
+    // A master may declare fewer IDs than the widest master in the design;
+    // the fabric carries the widest, so pad this port's IDs out to it.
+    val afterIdWiden: Axi4 =
+      if (afterWidthConv.config.idWidth != xbarCfg.masters(mi).config.idWidth) {
+        val widen = new Axi4IdWidener(afterWidthConv.config, xbarCfg.masters(mi).config)
+        widen.io.input <> afterWidthConv
+        widen.io.output
+      } else afterWidthConv
+
+    xbar.io.masters(mi) <> afterIdWiden
+
+    // What the crossbar sees, for anyone watching from outside. Reads only.
+    if (cfg.observeMasters) io.obs(mi).watch(xbar.io.masters(mi))
   }
 
   // ── Slave-side wiring ─────────────────────────────────────────────────────
@@ -212,11 +237,11 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
 
     // Optional register slice between adapter/converter and external port
     if (sp.regSlice && sp.mode == LiteAxi4) {
-      val rs = new Axi4LiteRegSlice(sp.config)
+      val rs = new Axi4LiteRegSlice(sp.config, sp.regSliceSkid)
       rs.io.upstream <> afterWidthConv
       extPort <> rs.io.downstream
     } else if (sp.regSlice) {
-      val rs = new Axi4RegSlice(sp.config)
+      val rs = new Axi4RegSlice(sp.config, sp.regSliceSkid)
       rs.io.upstream <> afterWidthConv
       extPort <> rs.io.downstream
     } else {

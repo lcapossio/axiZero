@@ -9,11 +9,7 @@ on:
   pull_request:
 
 env:
-  # Verilator versions this project is validated against. SpinalHDL 1.10.1
-  # segfaulted on 5.048 (see no_commit/BUGS.md #3), so an unpinned runner
-  # image can silently reintroduce that class of failure. Assert the version
-  # instead of trusting whatever apt serves.
-  VERILATOR_EXPECTED: '5.0'
+  # Verilator is pinned in .github/actions/setup-verilator.
   # Unpinned ruff drifts its default rule set: 0.16.0 reports 114 findings
   # on a tree that 0.14.2 passes clean. Pin it so lint is deterministic.
   RUFF_VERSION: '0.14.2'
@@ -29,14 +25,7 @@ jobs:
 
       - uses: ./.github/actions/setup-sbt
 
-      - name: Install Verilator
-        run: |
-          sudo apt-get install -y --no-install-recommends verilator
-          verilator --version
-          verilator --version | grep -q "Verilator ${VERILATOR_EXPECTED}" || {
-            echo "::error::Verilator drifted from ${VERILATOR_EXPECTED}.x - see no_commit/BUGS.md #3"
-            exit 1
-          }
+      - uses: ./.github/actions/setup-verilator
 
       - name: Compile (SpinalHDL)
         run: sbt compile
@@ -59,10 +48,14 @@ jobs:
           name: scoverage-report
           path: target/scala-2.13/scoverage-report/
 
+      - name: Install Python dependencies
+        run: pip install pyyaml
+
+      - name: Generator unit tests (axizero.py)
+        run: python3 scripts/test_axizero.py
+
       - name: Generator smoke test (axizero.py)
-        run: |
-          pip install pyyaml
-          python3 scripts/axizero.py generate scripts/example.yaml
+        run: python3 scripts/axizero.py generate scripts/example.yaml
 
   # ── cocotb integration tests against pre-built generated Verilog ──────────
   cocotb:
@@ -76,14 +69,7 @@ jobs:
 
       - uses: ./.github/actions/setup-sbt
 
-      - name: Install Verilator
-        run: |
-          sudo apt-get install -y --no-install-recommends verilator
-          verilator --version
-          verilator --version | grep -q "Verilator ${VERILATOR_EXPECTED}" || {
-            echo "::error::Verilator drifted from ${VERILATOR_EXPECTED}.x - see no_commit/BUGS.md #3"
-            exit 1
-          }
+      - uses: ./.github/actions/setup-verilator
 
       - name: Install Python dependencies
         run: pip install "cocotb==1.9.2" "cocotbext-axi @ git+https://github.com/alexforencich/cocotbext-axi@b2d126c4bc0f4cafa6e2fd3cdcfafc333e716a9a" pyyaml
@@ -165,3 +151,57 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: formal
         run: sby -f axis_ready_valid_regslice.sby
+
+  # ── VexRiscv example SoC (hw/examples/vexriscv) ───────────────────────────
+  vexriscv-soc:
+    name: VexRiscv example SoC
+    runs-on: ubuntu-24.04
+    # The example is its own sbt project (`vexZero`) and is neither aggregated
+    # nor depended on by the root build, so none of the jobs above touch it and
+    # it needs its own. It is the only job that checks out a submodule: only
+    # third_party/VexRiscv is initialised, deliberately not `submodules: true`,
+    # which would also pull fcapz for no reason.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the pinned VexRiscv submodule
+        run: git submodule update --init third_party/VexRiscv
+
+      - uses: ./.github/actions/setup-sbt
+
+      - uses: ./.github/actions/setup-verilator
+
+      - name: Check formatting (scalafmt)
+        # Only the example's own sources; .scalafmt.conf excludes third_party.
+        run: sbt vexZero/scalafmtCheck vexZero/Test/scalafmtCheck
+
+      - name: Boot the SoC in SpinalSim
+        # Runs the firmware on both the pipelined and the blocking crossbar and
+        # checks what the CPU actually moved across the bus, then simulates the
+        # Arty wrapper and decodes its 115200 8N1 report line. Also runs
+        # Dhrystone on both crossbar modes and asserts the per-port AXI latency,
+        # so a regression that only shows up as a slower fabric is still caught.
+        run: sbt vexZero/test
+
+      - name: Generate the SoC netlist
+        run: sbt "vexZero/Compile/runMain vexzero.gen.VexZeroSocGen"
+
+      - name: Generate the Arty board netlist
+        # The board wrapper is what the hardware test builds; generating it here
+        # keeps a change to the SoC from breaking that flow unnoticed.
+        run: sbt "vexZero/Compile/runMain vexzero.gen.VexZeroArtyGen"
+
+      - name: Generate the benchmark board netlist
+        # Also proves the Intel HEX image in the submodule still parses and still
+        # fits the RAM the board build gives it.
+        run: sbt "vexZero/Compile/runMain vexzero.gen.VexZeroBenchArtyGen"
+
+      - name: Generate the DE25-Nano netlists
+        # The Altera board wrappers. Only the JTAG bridge's black-box
+        # declaration is needed to elaborate them, not the fpgacapZero
+        # submodule itself, so this runs without checking that one out --
+        # which is also what keeps the bridge's port list honest.
+        run: |
+          sbt "vexZero/Compile/runMain vexzero.gen.VexZeroDe25Gen"
+          sbt "vexZero/Compile/runMain vexzero.gen.VexZeroBenchDe25Gen"
