@@ -346,7 +346,18 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   private val multiIdW =
     if (cfg.multiIdGens.isEmpty) masterCfg.idWidth
     else cfg.multiIdGens.map(g => log2Up(g.idCount)).max
-  private val multiIdMasterCfg = masterCfg.copy(idWidth = multiIdW)
+
+  /** Each multi-ID generator's port is exactly as wide as its own ID count, not as wide as the
+    * widest generator's.
+    *
+    * A generator that uses fewer IDs than the fabric carries then reaches the crossbar through
+    * [[axizero.adapters.Axi4IdWidener]] with an ID that actually varies. Giving every generator the
+    * widest port would be simpler and would leave the widener carrying none: the only narrow master
+    * left would be the CPU, whose ID is constant, so the padding path would be exercised by a
+    * signal that never changes -- which is the shape a zero-extension bug hides in.
+    */
+  private def multiIdCfgOf(g: AxiMultiIdGenConfig): Axi4Config =
+    masterCfg.copy(idWidth = log2Up(g.idCount))
 
   // The slave side carries the widest master ID plus the index bits the
   // crossbar adds to tell the masters apart.
@@ -415,9 +426,9 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
         regSlice = true,
         regSliceSkid = cfg.masterRegSliceSkid
       ) // traffic generators
-    ) ++ Seq.fill(multiIdCount)(
+    ) ++ cfg.multiIdGens.map(g =>
       MasterPort(
-        multiIdMasterCfg,
+        multiIdCfgOf(g),
         FullAxi4,
         regSlice = true,
         regSliceSkid = cfg.masterRegSliceSkid
@@ -612,7 +623,7 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   // that every response came back under the right ID and in the right order.
   val multiIdGens = cfg.multiIdGens.zipWithIndex.map {
     case (genCfg, i) =>
-      val gen = new AxiMultiIdGen(multiIdMasterCfg, genCfg)
+      val gen = new AxiMultiIdGen(multiIdCfgOf(genCfg), genCfg)
       gen.setWeakName(s"multiIdGen$i")
       fabric.io.masters(multiIdIndex0 + i) << gen.io.axi
       gen

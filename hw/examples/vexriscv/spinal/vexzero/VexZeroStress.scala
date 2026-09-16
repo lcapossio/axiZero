@@ -171,11 +171,19 @@ object VexZeroStress {
       outstandingPerId = 4,
       respStall = 3
     ),
+    // Two IDs rather than four, and that is the point: its port is one ID bit
+    // wide where the fabric carries two, so everything it issues crosses
+    // Axi4IdWidener with an ID that changes. The widener is in every mixed-width
+    // design in this repository and until now the only narrow master on either
+    // board was the CPU, whose ID is a constant -- so the zero-extension was
+    // carried by a signal that never moved, which is exactly where a padding or
+    // truncation bug survives. Two IDs is still enough for the ordering rule to
+    // have something to hold: one ID crossing while the other is live.
     AxiMultiIdGenConfig(
       regionABase = ramBase + 0x6000 + idWindowBytes,
       regionBBase = ram2Base + idWindowBytes,
       windowWords = idWindowWords,
-      idCount = 4,
+      idCount = 2,
       dataPattern = 0xd2000000L,
       outstandingPerId = 4,
       respStall = 5
