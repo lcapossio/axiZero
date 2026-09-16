@@ -237,6 +237,37 @@ def open_bridge(quartus_stp: Path):
     return transport, controller
 
 
+def read_settled_verdict(axi, observe: float = 5.0, interval: float = 0.5) -> int:
+    """Read the verdict word, then keep reading it for `observe` seconds and require it to hold.
+
+    A single read samples the design once, moments after configuration, and calls that the result.
+    Every bit in this word is sticky -- a protocol violation, a checker that lost track and a
+    generator error all latch and never clear -- so a fault that first appears a second later is
+    real, is still being reported, and was simply never looked at. The traffic generators run for as
+    long as the board is powered, and the first read is the least traffic they will ever have run.
+
+    Re-reading costs a few seconds of JTAG and turns "it passed when we looked" into "it passed for
+    as long as we watched". A word that changes is reported with both values, because which bit
+    moved is the whole of the information.
+    """
+    first = axi.axi_read(SYS_VERDICT)
+    deadline = time.time() + observe
+    reads = 1
+    while time.time() < deadline:
+        time.sleep(interval)
+        again = axi.axi_read(SYS_VERDICT)
+        reads += 1
+        if again != first:
+            print("  verdict word changed while the board kept running:")
+            print(f"    first = 0x{first:08X}")
+            print(f"    later = 0x{again:08X}")
+            print("    Every bit in this word is sticky, so this is a fault that took longer")
+            print("    to appear than the first read took to arrive.")
+            return again
+    print(f"  verdict word held across {reads} reads over {observe:g}s")
+    return first
+
+
 def check_verdict(axi, switches_expected: int | None) -> bool:
     banner("Reading the verdict over JTAG-AXI")
 
@@ -267,7 +298,7 @@ def check_verdict(axi, switches_expected: int | None) -> bool:
     # wrote, and whether the stream island passed. Each is only reported when
     # the build actually contains it -- a design with no protocol checkers
     # would otherwise "pass" the protocol check by having nobody watching.
-    verdict = axi.axi_read(SYS_VERDICT)
+    verdict = read_settled_verdict(axi)
     if verdict & VERDICT_HAS_CHECKERS:
         clean = not (verdict & VERDICT_BUS_VIOLATION)
         # Overflow is reported on its own line because it means something
