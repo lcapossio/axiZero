@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 171 SpinalSim + 36 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 178 SpinalSim + 36 cocotb tests pass.
 
 ---
 
@@ -546,7 +546,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-171 tests pass across 26 suites:
+178 tests pass across 27 suites:
 
 For the focused AXI4-Stream loop, including lint, YAML generator smoke tests, and cocotbext-axi generated-RTL tests:
 
@@ -563,7 +563,7 @@ python3 scripts/run_sim.py axis
 | `BlockingWriteBoundarySpec` | 3 | Where one write's data ends and the next begins in the blocking engines, which both crossbars carry their own copy of: a slave holding a write whose data is complete while its response is still outstanding, and a write whose data reached the slave before its address. In both the master may legally offer the next write's data, and the forwarding path has to be shut or that data is written under the previous address — at a slave it was never addressed to |
 | `AxiMultiIdGenSpec` | 5 | The synthesizable multi-ID generator that goes on the boards, checked against a crossbar with two RAMs: that a clean run really did have several IDs in flight and really did ask to move a live ID between slaves, that it catches a dropped byte lane, and — with a deliberately reordering RAM model — that it catches two same-ID reads answered out of order. A self-checking generator that cannot fail is worth nothing on hardware, so each of its checks is shown failing |
 | `Axi4OrderingProbeSpec` | 6 | The ordering probe that goes on the boards, driven directly so it can be shown failing: the single-slave-per-ID rule broken with **every response still in issue order**, caught (a check that waited for a wrong answer would call that run clean); a request admitted on the cycle the last outstanding one retires, correctly allowed; a crossing request held against two live bursts recorded as the evidence it is; one-burst-at-a-time traffic claiming no evidence it did not earn; reads and writes judged apart; and the same violation on the write channels |
-| `MultiIdOrderingSpec` | 1 | Randomised multi-ID traffic — four IDs, two slaves, both directions, random response latency and master back-pressure — against a per-ID scoreboard. The only coverage of a master that varies its ID; every other master here, VexRiscv included, drives a constant one |
+| `MultiIdOrderingSpec` | 2 | Randomised multi-ID traffic — four IDs, two slaves, both directions, random response latency and master back-pressure — against a per-ID scoreboard. The only coverage of a master that varies its ID; every other master here, VexRiscv included, drives a constant one. B carries nothing but an ID and a response, so a swap between two busy IDs is invisible unless the two slaves answer differently: one slave returns SLVERR, which gives every write response an identity the scoreboard can hold it to, and the second test proves that scoreboard catches an exchanged BID and a same-ID response reordering while passing a correct trace |
 | `MixedCrossbarSpec` | 4 | Full↔Lite adapters, mixed address maps |
 | `ArtySpec` | 5 | Sequence matching the Arty A7 hardware tests (T4, T5, T6, T9, combined) |
 | `IpifWriteSpec` | 5 | IPIF-style slaves (Xilinx GPIO/UART-Lite require AW+W simultaneous), blocking and pipelined modes |
@@ -571,6 +571,7 @@ python3 scripts/run_sim.py axis
 | `BurstTypeSpec` | 6 | Downsizer burst types: INCR baseline, FIXED 1-beat and 2-beat overwrite, WRAP aligned, WRAP 4-beat, WRAP with actual wrap-around |
 | `ArbitrationSpec` | 7 | FixedPriority and WeightedRoundRobin: contention ordering, throughput proportionality, data integrity |
 | `RegSliceAndLiteWidthSpec` | 8 | Register slices (Full + Lite, master/slave/both), AXI4-Lite width conversion (16→32 upsizing) |
+| `RegSliceSkidSpec` | 6 | What `regSliceSkid` actually buys, rather than inferring it from timing closure: a stalled plain slice accepts one beat and a skid two; the plain slice's READY is combinational from the far side and the skid's is not, shown by stalling and releasing on one cycle; 400 beats survive random back-pressure through both; latency stays one cycle and throughput full for both; B and R keep the plain slice they are given; and the Lite slice behaves the same way. The skid buffer is on the AW/W/AR path of every registered master on both boards, and until now no test told the two apart |
 | `PipelinedArbitrationSpec` | 9 | Pipelined FixedPriority, WRR, and QoS: contention, concurrent bursts, data integrity |
 | `NarrowPortSpec` | 6 | Narrow ports: 32→16 downsizing, 16→32 upsizing, mixed Full+Lite concurrent traffic |
 | `QosCrossbarSpec` | 5 | QoS arbitration: higher AWQOS/ARQOS wins (blocking + pipelined), equal-QoS round-robin tie-break, aging anti-starvation |
@@ -813,6 +814,14 @@ python hw/vivado/arty_a7/run_vexzero_test.py --design all   # every VexZero buil
 The runner generates the netlist with sbt, builds the bitstream, programs the board over JTAG with
 xsdb, then decodes the serial line. There is no MicroBlaze in this design, so unlike the crossbar HW
 tests it needs no `mb-gcc` — the firmware is already inside the bitstream.
+
+It does not stop at the first report line. Every verdict the board reports is **sticky** — a
+generator error, a protocol violation and a checker that lost track all latch and never clear — so a
+fault that first appears a second in is real, is still being reported, and would simply never have
+been looked at; and the first report line is the least traffic the generators will ever have run
+behind them. So the runner keeps reading for `--observe` seconds (default 5) and requires every
+later report to match the first, printing both and failing the run if one changes. The DE25-Nano
+runner does the same thing with the verdict word it reads over JTAG-AXI.
 
 **Result** — the board reports `VZPDRCLBGSF`. The `B` is the [protocol checker](#protocol-checking)
 verdict: five checkers, one on every fabric port, saw no AXI4 violation in the whole run. The
@@ -1122,8 +1131,8 @@ Five builds put this on both boards, four of them differing in one field — how
 VexRiscv included, and `AxiSatGen` — drives a **constant** transaction ID, so until this build every
 bitstream exercised the crossbar's ordering machinery in its degenerate shape: one thread per
 master, nothing to order and nothing to hold back. It adds a second 4 KiB on-chip RAM at
-`0x9000_0000` and two [`AxiMultiIdGen`](hw/spinal/axizero/verif/AxiMultiIdGen.scala) masters, each
-running four IDs with up to four read bursts in flight per ID and sending each ID's bursts to the two
+`0x9000_0000` and two [`AxiMultiIdGen`](hw/spinal/axizero/verif/AxiMultiIdGen.scala) masters — one
+running four IDs, one running two — with up to four read bursts in flight per ID and sending each ID's bursts to the two
 RAMs in *pairs* — two to one, two to the other. That is the single-slave-per-ID rule's own case, in
 the shape that is hard rather than the shape that is easy: when the crossing request arrives, two of
 that ID's bursts are still outstanding at the other RAM, so the fabric's per-ID *count* has to be
@@ -1155,6 +1164,15 @@ writes are tracked apart, because AXI4 orders each direction on its own. Both ve
 `io.genOk`, so a bitstream whose traffic never reached that case fails rather than passing quietly. `AxiMultiIdGenSpec` shows the data check failing against a
 RAM that drops a byte lane and the ordering check failing against a RAM model that deliberately
 answers two same-ID reads out of order, before any of it goes to a board.
+
+The two generators are also deliberately **different widths**. Each one's port is sized to its own
+ID count, so the two-ID generator reaches the fabric one ID bit wide where the fabric carries two,
+and everything it issues crosses
+[`Axi4IdWidener`](hw/spinal/axizero/adapters/Axi4IdWidener.scala) with an ID that changes. That
+widener sits in every mixed-width design here, but until this build the only narrow master on either
+board was the CPU, whose ID is a constant — so its zero-extension was carried by a signal that never
+moved, which is exactly where a padding or truncation bug survives a bitstream. Two IDs is still
+enough for the ordering rule to have something to hold: one ID crossing while the other is live.
 
 Each also runs the firmware self test, so the program on top still has to compute the right
 checksum, LEDs and characters while the generators compete with it for the RAM it fetches from; each
@@ -1524,7 +1542,7 @@ Final builds, all six programmed and verified on the board:
 | `stress_wrr` | 3707 | 4571 | 9 | +0.993 ns | 111.0 MHz |
 | `stress_qos` | 3767 | 4617 | 9 | +0.075 ns | 100.8 MHz |
 | `stress_axi3` | 4203 | 5056 | 9 | +0.986 ns | 110.9 MHz |
-| `stress_ids` | 9646 | 8319 | 11 | +0.342 ns | 103.5 MHz |
+| `stress_ids` | 9238 | 8137 | 11 | +0.325 ns | 103.4 MHz |
 
 Those are whole-SoC figures — VexRiscv, 8 KB RAM, peripherals, two traffic generators, a protocol
 checker on every fabric port and the AXI4-Stream island — not the crossbar alone.
@@ -1533,7 +1551,7 @@ checker on every fabric port and the AXI4-Stream island — not the crossbar alo
 about: it is a bigger *system*, not a more expensive crossbar. It carries six masters instead of
 four and five slaves instead of three, and the crossbar's cost is roughly the product of the two —
 every extra master-slave pair is another arbiter input, another decode and another ordering-table
-entry. On top of that its two multi-ID generators each carry four per-ID expectation queues and the
+entry. On top of that its two multi-ID generators carry four and two per-ID expectation queues and the
 comparison logic that checks every R beat against one, and two more protocol checkers come with the
 two extra ports. It is the price of the *test*, paid once in a build that exists to run it.
 
@@ -1572,7 +1590,7 @@ never the constraint:
 | `stress_wrr` | 7874.8 (16%) | 12108 | 264,464 bits | +12.054 ns | `0x00000706` |
 | `stress_qos` | 8025.1 (17%) | 12191 | 264,464 bits | +9.942 ns | `0x00000706` |
 | `stress_axi3` | 7891.5 (16%) | 12250 | 265,216 bits | +12.801 ns | `0x00000706` |
-| `stress_ids` | 13413.4 (28%) | 19574 | 297,232 bits | +9.404 ns | `0x00000706` |
+| `stress_ids` | 13161.8 (28%) | 19292 | 297,232 bits | +9.584 ns | `0x00000706` |
 
 The ordering matches the Arty: `stress_qos` is the tightest of the four arbitration builds on both
 boards, for the same reason, and `stress_ids` is the largest on both for the reason given above —
