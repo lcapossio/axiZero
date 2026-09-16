@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Board](https://img.shields.io/badge/HW--validated-Arty%20A7--100T-green)](hw/vivado/arty_a7/)
 
-Author: Leonardo Capossio — bard0 design hello@bard0.com
+Author: Leonardo Capossio — [bard0 design](https://www.bard0.com) — hello@bard0.com
 
 Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology in YAML, get Verilog. Or use a [pre-built output](generated/) directly.
 
@@ -184,6 +184,11 @@ python scripts/axizero.py example > my_design.yaml
 # Generate Verilog
 python scripts/axizero.py generate my_design.yaml --output rtl/
 ```
+
+Every key the config file accepts — port modes, address maps, data and ID widths, arbitration
+policy, register slices, outstanding depth — is documented in the
+[YAML configuration reference](#yaml-configuration-reference), along with what the generator
+validates before it emits anything.
 
 ### Option B — use a pre-built Verilog file
 
@@ -1918,3 +1923,5 @@ hw/quartus/de25_nano/
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Copyright © Leonardo Capossio, [bard0 design](https://www.bard0.com) — hello@bard0.com
