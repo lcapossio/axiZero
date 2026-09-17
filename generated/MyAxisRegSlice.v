@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Generator : SpinalHDL v1.14.2    git head : 78f29dc66110fc099a777992b6daa2f803ab445e
 // Component : AxiStreamRegSlice
-// Git hash  : c6d64bdbe97ed88201bad5226e4588a445011965
+// Git hash  : 953df6fd9f8123f42cc460451c529f0ee1116dbe
 
 `timescale 1ns/1ps
 

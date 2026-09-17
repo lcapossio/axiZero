@@ -1172,16 +1172,26 @@ and two bits of status. Between two RAMs that both answer OKAY, the swapped trac
 one are the same bits. That is a property of AXI4, not of this fabric, and no amount of reading
 memory back reaches it.
 
-So `stress_ids` carries a third full slave at `0x9100_0000` that answers **SLVERR** to every write
-and stores nothing — the same [`Axi4DecErrSlave`](hw/spinal/axizero/crossbar/Axi4DecErrSlave.scala)
-the fabric already uses for an unmapped address, mapped on purpose. Each generator issues one extra
-single-beat write per round into it and keeps, per ID, a queue of what its outstanding writes are
-owed: one bit each, error or OKAY, which is enough because AXI4 orders same-ID writes. Every B is
-checked against the head of the queue its BID names, so a swapped response lands where an OKAY was
-expected and an error was owed. Nothing is ever read back from that region; its whole purpose is to
-make one master's writes answerable in two distinguishable ways. `errRespSeen` reports that an error
-really did come back, and `io.genOk` requires it — a bitstream whose extra writes never arrived
-would otherwise pass a check nothing exercised.
+So each generator issues one extra single-beat write per round to `0x9100_0000`, **an address no
+slave claims**. What answers it is the fabric's own
+[`Axi4DecErrSlave`](hw/spinal/axizero/crossbar/Axi4DecErrSlave.scala), wired into every crossbar as
+one more slave owning everything unmapped: it takes the address, sinks the beat and answers DECERR.
+Each generator keeps, per ID, a queue of what its outstanding writes are owed — one bit each, error
+or OKAY, which is enough because AXI4 orders same-ID writes — and every B is checked against the
+head of the queue its BID names, so a swapped response lands where an OKAY was expected and an error
+was owed. Nothing is ever read back from that region; its whole purpose is to make one master's
+writes answerable in two distinguishable ways. `errRespSeen` reports that an error really did come
+back, and `io.genOk` requires it — a bitstream whose extra writes never arrived would otherwise pass
+a check nothing exercised.
+
+Using the responder that is already there rather than adding a slave for the purpose is not just
+tidiness, and the first attempt here is worth recording. A dedicated SLVERR slave works and was
+measured working on both boards, but a sixth port widens the arbitration and decode it sits inside
+and spreads the logic further apart: it cost **942 LUTs and took the Arty from +0.325 ns of slack to
++0.017 ns**, on a path that is 80% routing. The unmapped address costs no port, no arbiter input and
+no decode term — 203 LUTs and +0.101 ns, against a build with no write-response check at all. It
+also puts the decode-error responder itself on a board, which nothing here did before; until now its
+only coverage was in simulation.
 
 The two generators are also deliberately **different widths**. Each one's port is sized to its own
 ID count, so the two-ID generator reaches the fabric one ID bit wide where the fabric carries two,
@@ -1560,7 +1570,7 @@ Final builds, all six programmed and verified on the board:
 | `stress_wrr` | 3707 | 4571 | 9 | +0.993 ns | 111.0 MHz |
 | `stress_qos` | 3767 | 4617 | 9 | +0.075 ns | 100.8 MHz |
 | `stress_axi3` | 4203 | 5056 | 9 | +0.986 ns | 110.9 MHz |
-| `stress_ids` | 10180 | 8849 | 11 | +0.017 ns | 100.2 MHz |
+| `stress_ids` | 9441 | 8198 | 11 | +0.101 ns | 101.0 MHz |
 
 Those are whole-SoC figures — VexRiscv, 8 KB RAM, peripherals, two traffic generators, a protocol
 checker on every fabric port and the AXI4-Stream island — not the crossbar alone.
@@ -1587,14 +1597,15 @@ or pulse-width violation passes it (the tightest hold margin measured here is +0
 0, having said once, earlier, that the result is not evidence; and `run_vexzero_bench.py` has no
 timing gate at all, so a Dhrystone score can come off a bitstream that missed timing.
 
-`stress_ids` has joined it at the thin end, and the cause is worth stating rather than leaving in
-the table. Its sixth slave — the SLVERR responder the write-response check needs — took the build
-from **+0.325 ns to +0.017 ns** and added 942 LUTs, with the critical path inside the crossbar's own
-ordering and W-routing logic: 12 levels of logic but **80% routing delay**, which is the same
-placement-bound shape the QoS path had. It closes, and the runners refuse to program a board that
-does not, but +0.017 ns is inside this design's run-to-run spread rather than clear of it: read it
-as a build that met timing, not as margin. On the DE25-Nano, where the clock is 50 MHz, the same
-change cost nothing that matters — 9.584 ns to 9.807 ns of slack, in the noise.
+`stress_ids` is worth a note of its own. Adding the write-response check cost it slack — +0.325 ns
+before, **+0.101 ns** now — and the critical path is inside the crossbar's own ordering and
+W-routing logic: 12 levels of logic but **80% routing delay**, the same placement-bound shape the
+QoS path has. The first version of that check, with a slave added for it, came out at +0.017 ns;
+using the decode-error responder already in the fabric bought most of that back. What is left is the
+generators' own per-ID expectation queues and the traffic they add, and +0.101 ns is a real margin
+rather than a rounding error — but it is still a design to re-measure rather than assume when
+anything near the crossbar changes. On the DE25-Nano at 50 MHz none of this matters: the same builds
+sit between +9.0 ns and +9.8 ns, and the variation there is placement noise, not the change.
 
 `stress_qos` is the one to watch: its margin is thin enough that placement variation moves it
 noticeably. Six builds of this design have come out at +0.316 ns, +0.121 ns, +0.540 ns, +0.373 ns,
@@ -1617,7 +1628,7 @@ never the constraint:
 | `stress_wrr` | 7874.8 (16%) | 12108 | 264,464 bits | +12.054 ns | `0x00000706` |
 | `stress_qos` | 8025.1 (17%) | 12191 | 264,464 bits | +9.942 ns | `0x00000706` |
 | `stress_axi3` | 7891.5 (16%) | 12250 | 265,216 bits | +12.801 ns | `0x00000706` |
-| `stress_ids` | 14165.7 (30%) | 20715 | 297,232 bits | +9.807 ns | `0x00000706` |
+| `stress_ids` | 13179.2 (28%) | 19274 | 297,232 bits | +9.093 ns | `0x00000706` |
 
 The ordering matches the Arty: `stress_qos` is the tightest of the four arbitration builds on both
 boards, for the same reason, and `stress_ids` is the largest on both for the reason given above —
