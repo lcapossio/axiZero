@@ -146,7 +146,13 @@ object VexZeroStress {
     * words of each RAM, which at four beats a burst is 32 bursts a pass per region.
     */
   val ram2Base: BigInt = BigInt("90000000", 16)
-  val ram2Size: BigInt = 4 KiB
+
+  /** The error responder's window. It stores nothing and answers SLVERR to every write, which is
+    * the only thing on this bus that makes one write response distinguishable from another: see
+    * [[AxiMultiIdGen]]. Nothing reads from it.
+    */
+  val errSlaveBase: BigInt = BigInt("91000000", 16)
+  val ram2Size: BigInt     = 4 KiB
 
   private val idWindowWords = 128
   private val idWindowBytes = idWindowWords * 4
@@ -169,7 +175,8 @@ object VexZeroStress {
       idCount = 4,
       dataPattern = 0xd1000000L,
       outstandingPerId = 4,
-      respStall = 3
+      respStall = 3,
+      errRegionBase = Some(errSlaveBase)
     ),
     // Two IDs rather than four, and that is the point: its port is one ID bit
     // wide where the fabric carries two, so everything it issues crosses
@@ -186,7 +193,10 @@ object VexZeroStress {
       idCount = 2,
       dataPattern = 0xd2000000L,
       outstandingPerId = 4,
-      respStall = 5
+      respStall = 5,
+      // Its own words in the error region -- one per ID, and the first
+      // generator owns the four below these.
+      errRegionBase = Some(errSlaveBase + 0x10)
     )
   )
 
@@ -228,6 +238,7 @@ object VexZeroStress {
       // on top of everything the others carry, so what it adds is the ordering
       // traffic and not a different design.
       ram2Base = Option.when(policy == Ids)(ram2Base),
+      errSlaveBase = Option.when(policy == Ids)(errSlaveBase),
       ram2Size = ram2Size,
       multiIdGens = if (policy == Ids) multiIdGenerators else Nil
     )
