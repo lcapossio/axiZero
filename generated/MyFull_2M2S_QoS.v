@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Generator : SpinalHDL v1.14.2    git head : 78f29dc66110fc099a777992b6daa2f803ab445e
 // Component : AxiZeroMixedTop
-// Git hash  : 76b21007f23517208b26f60291d5695938f48f5a
+// Git hash  : c6d64bdbe97ed88201bad5226e4588a445011965
 
 `timescale 1ns/1ps
 
@@ -4368,7 +4368,7 @@ module Axi4DecErrSlave (
   reg        [4:0]    write_id;
   wire                io_axi_aw_fire;
   wire                io_axi_w_fire;
-  wire                when_Axi4DecErrSlave_l59;
+  wire                when_Axi4DecErrSlave_l78;
   wire       [6:0]    _zz_io_axi_b_payload_id;
   wire                io_axi_b_fire;
   reg                 read_busy;
@@ -4377,13 +4377,13 @@ module Axi4DecErrSlave (
   wire                io_axi_ar_fire;
   wire       [39:0]   _zz_io_axi_r_payload_data;
   wire                io_axi_r_fire;
-  wire                when_Axi4DecErrSlave_l97;
+  wire                when_Axi4DecErrSlave_l116;
 
   assign io_axi_aw_ready = ((! write_sinking) && (! write_answering));
   assign io_axi_aw_fire = (io_axi_aw_valid && io_axi_aw_ready);
   assign io_axi_w_ready = write_sinking;
   assign io_axi_w_fire = (io_axi_w_valid && io_axi_w_ready);
-  assign when_Axi4DecErrSlave_l59 = ((write_sinking && io_axi_w_fire) && io_axi_w_payload_last);
+  assign when_Axi4DecErrSlave_l78 = ((write_sinking && io_axi_w_fire) && io_axi_w_payload_last);
   assign io_axi_b_valid = write_answering;
   assign _zz_io_axi_b_payload_id = 7'h0;
   always @(*) begin
@@ -4422,7 +4422,7 @@ module Axi4DecErrSlave (
   end
 
   assign io_axi_r_fire = (io_axi_r_valid && io_axi_r_ready);
-  assign when_Axi4DecErrSlave_l97 = (read_beatsLeft == 8'h0);
+  assign when_Axi4DecErrSlave_l116 = (read_beatsLeft == 8'h0);
   always @(posedge aclk) begin
     if(!aresetn) begin
       write_sinking <= 1'b0;
@@ -4436,7 +4436,7 @@ module Axi4DecErrSlave (
         write_sinking <= 1'b1;
         write_id <= io_axi_aw_payload_id;
       end
-      if(when_Axi4DecErrSlave_l59) begin
+      if(when_Axi4DecErrSlave_l78) begin
         write_sinking <= 1'b0;
         write_answering <= 1'b1;
       end
@@ -4449,7 +4449,7 @@ module Axi4DecErrSlave (
         read_beatsLeft <= io_axi_ar_payload_len;
       end
       if(io_axi_r_fire) begin
-        if(when_Axi4DecErrSlave_l97) begin
+        if(when_Axi4DecErrSlave_l116) begin
           read_busy <= 1'b0;
         end else begin
           read_beatsLeft <= (read_beatsLeft - 8'h01);
