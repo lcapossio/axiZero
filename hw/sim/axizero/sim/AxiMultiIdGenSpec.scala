@@ -9,7 +9,6 @@ import spinal.core.sim._
 import spinal.lib._
 import spinal.lib.bus.amba4.axi._
 import axizero._
-import axizero.crossbar.Axi4DecErrSlave
 import axizero.verif._
 
 // ---------------------------------------------------------------------------
@@ -56,12 +55,12 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
   private val regionB = BigInt(0x200)
   private val ramSize = 0x200
 
-  /** The write-only region, in a slave that answers SLVERR rather than storing anything. It is what
-    * gives a write response an identity: between two slaves that both answer OKAY, a B swapped
-    * between two waiting IDs is the same bits as a correct one.
+  /** The write-only region: an address no slave claims, which the crossbar's own decode-error
+    * responder answers. It is what gives a write response an identity -- between two slaves that
+    * both answer OKAY, a B swapped between two waiting IDs is the same bits as a correct one -- and
+    * because that responder is already part of every fabric it costs the design nothing.
     */
   private val regionE = BigInt(0x400)
-  private val errSize = 0x100
 
   private def genCfg(
     windowWords: Int = 32,
@@ -102,29 +101,21 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
       val overflow        = out Bool ()
     }
 
-    private val withErr = cfg.errRegionBase.isDefined
-
+    // regionE is deliberately absent from this map. The crossbar's decode-error
+    // responder owns every address no slave claimed, so a write there is
+    // accepted, its beats are sunk and it is answered DECERR -- which is the
+    // whole arrangement the boards use, tested here as they run it.
     val xbar = new AxiZeroMixedTop(
       AxiZeroConfig(
         masters = Seq(MasterPort(axiCfg, FullAxi4)),
         slaves = Seq(
           SlavePort(axiCfg, FullAxi4, regionA, BigInt(ramSize)),
           SlavePort(axiCfg, FullAxi4, regionB, BigInt(ramSize))
-        ) ++ Option.when(withErr)(
-          SlavePort(axiCfg, FullAxi4, regionE, BigInt(errSize))
         ),
         arbitration = RoundRobin,
         maxOutstanding = 4
       )
     )
-
-    // The same responder the fabric uses for an unmapped address, mapped on
-    // purpose and answering SLVERR: accepts the address, sinks every beat, and
-    // gives the write back an answer that is not OKAY.
-    if (withErr) {
-      val errSlave = new Axi4DecErrSlave(xbar.io.slaves(2).config, respCode = 2)
-      errSlave.io.axi << xbar.io.slaves(2)
-    }
 
     val gen = new AxiMultiIdGen(axiCfg, cfg)
     xbar.io.masters(0) << gen.io.axi
@@ -239,7 +230,7 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
         // the next address.
         if (isErr(addr)) {
           for (_ <- 0 to len) wData.dequeue()
-          bQueue += ((id, 2))
+          bQueue += ((id, 3)) // DECERR, as the decode-error responder gives
         } else {
           for (i <- 0 to len) mem(addr + i * 4) = wData.dequeue()
           bQueue += ((id, 0))
@@ -394,7 +385,7 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
   // IDs is bit-for-bit a correct one. A third region that answers SLVERR gives
   // each response an identity: this run proves the fabric delivers each answer
   // to the ID that is owed it, with the error region actually answering.
-  test("a write-only error region answers, and every response reaches the ID it is owed") {
+  test("an unmapped write region answers, and every response reaches the ID it is owed") {
     simCfg
       .compile(new XbarHarness(genCfg(respStall = 4, errRegionBase = Some(regionE))))
       .doSim("multiid_errregion") { dut =>
@@ -412,10 +403,10 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
         assert(!dut.io.stalled.toBoolean, "the generator stalled against a working fabric")
         assert(
           dut.io.errRespSeen.toBoolean,
-          "no SLVERR ever came back, so the write-response check was never put to work and a " +
+          "no error ever came back, so the write-response check was never put to work and a " +
             "clean result proves nothing"
         )
-        // SLVERR is a legal answer, and a checker that called it a violation
+        // DECERR is a legal answer, and a checker that called it a violation
         // would make this whole arrangement unusable on a board.
         assert(
           dut.io.violation.toBigInt == 0,

@@ -82,9 +82,11 @@
 //
 // So `errRegionBase` gives the write side something to compare against. When
 // it is set, each ID issues one extra single-beat write per round to a third
-// region -- a slave that answers SLVERR rather than storing anything -- and
-// each ID keeps a queue of what it expects back, one bit per outstanding
-// write. A B is then checked against the expectation at the head of its ID's
+// region -- an address no slave claims, which the crossbar's own decode-error
+// responder answers -- and each ID keeps a queue of what it expects back, one
+// bit per outstanding write. That responder is already wired into every fabric
+// as one more slave, so this costs a design no port, no arbiter input and no
+// decode term; a slave built to answer errors would cost all three. A B is then checked against the expectation at the head of its ID's
 // queue, so a response labelled with the wrong ID lands where an OKAY was
 // expected and an error was owed, or the reverse. Nothing is read back from
 // that region; its whole purpose is to make one master's writes answerable in
@@ -108,10 +110,11 @@ import spinal.lib.bus.amba4.axi._
   *   Base of its window in the second slave. The two windows are the same size, and the generator
   *   owns both exclusively: it predicts what every word in them holds.
   * @param errRegionBase
-  *   Optional base of a third region, in a slave that answers every write with an error rather than
-  *   storing it. When set, each ID issues one extra single-beat write per round there and checks
-  *   every write response against what that ID is owed, which is what makes a B swapped between two
-  *   busy IDs visible at all -- see the file header. One word per ID, never read back.
+  *   Optional base of a third region, at an address that decodes to no slave, so the fabric's own
+  *   decode-error responder answers it. When set, each ID issues one extra single-beat write per
+  *   round there and checks every write response against what that ID is owed, which is what makes
+  *   a B swapped between two busy IDs visible at all -- see the file header. One word per ID, never
+  *   read back.
   * @param windowWords
   *   Words in each window. Split evenly between the IDs, so each ID owns `windowWords / idCount`
   *   words of each window and no two IDs ever address the same one.
@@ -237,7 +240,7 @@ case class AxiMultiIdGenConfig(
       require(
         base + errRegionBytes <= other || other + windowBytes <= base,
         f"AxiMultiIdGenConfig: the error region at 0x$base%x overlaps $name 0x$other%x; it is " +
-          "meant to be a third slave, and one that answers an error to everything written there"
+          "meant to be unmapped, so the decode-error responder is what answers it"
       )
     }
   }

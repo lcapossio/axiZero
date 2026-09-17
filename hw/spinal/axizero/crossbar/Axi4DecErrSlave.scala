@@ -29,27 +29,8 @@ import spinal.lib.bus.amba4.axi._
 // write can be in flight together. Each engine handles one transaction at a
 // time and holds READY low until it is done, which is all the backpressure the
 // crossbar needs to throttle itself.
-//
-// The response code is a parameter, and DECERR is only its default. A mapped
-// slave that answers SLVERR is the same hardware and is worth having for one
-// reason: a write response carries nothing but an ID and a response code, so a
-// B swapped between two IDs that are both waiting is invisible when every
-// target answers OKAY. A target that answers something else gives each write
-// response an identity, which is what AxiMultiIdGen's write-side check needs to
-// have anything to compare against. See AxiMultiIdGen's header.
 // ---------------------------------------------------------------------------
-class Axi4DecErrSlave(config: Axi4Config, respCode: Int = 3) extends Component {
-
-  require(
-    respCode == 2 || respCode == 3,
-    s"Axi4DecErrSlave: respCode is SLVERR (2) or DECERR (3), not $respCode -- a responder that " +
-      "answers OKAY would report success for an address it refused"
-  )
-
-  // A def, not a val: each use emits the literal where it stands, so the
-  // default build generates the same Verilog the hardcoded DECERR did rather
-  // than a constant wire threaded through it.
-  private def errResp: Bits = B(respCode, 2 bits)
+class Axi4DecErrSlave(config: Axi4Config) extends Component {
 
   val io = new Bundle {
     val axi = slave(Axi4(config))
@@ -82,7 +63,7 @@ class Axi4DecErrSlave(config: Axi4Config, respCode: Int = 3) extends Component {
 
     io.axi.b.valid := answering
     io.axi.b.payload.clearAll()
-    if (config.useResp) io.axi.b.resp.allowOverride := errResp
+    if (config.useResp) io.axi.b.resp.allowOverride := Axi4.resp.DECERR
     if (config.useId) io.axi.b.id.allowOverride     := id
     when(io.axi.b.fire) { answering := False }
   }
@@ -108,7 +89,7 @@ class Axi4DecErrSlave(config: Axi4Config, respCode: Int = 3) extends Component {
     // Read data is undefined for an errored beat; zero is the least surprising
     // thing to hand back, and keeps the beat reproducible in simulation.
     io.axi.r.data.allowOverride                     := 0
-    if (config.useResp) io.axi.r.resp.allowOverride := errResp
+    if (config.useResp) io.axi.r.resp.allowOverride := Axi4.resp.DECERR
     if (config.useId) io.axi.r.id.allowOverride     := id
     if (config.useLast) io.axi.r.last.allowOverride := beatsLeft === 0
 

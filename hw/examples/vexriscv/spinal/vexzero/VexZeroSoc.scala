@@ -10,7 +10,6 @@ import vexriscv.plugin._
 import vexriscv.{plugin, VexRiscv, VexRiscvConfig}
 import axizero._
 import axizero.adapters.{Axi3Config, Axi3ToAxi4Adapter, Axi4ToAxi3}
-import axizero.crossbar.Axi4DecErrSlave
 import axizero.stream.AxiStreamArtySmoke
 import axizero.verif._
 
@@ -201,18 +200,7 @@ case class VexZeroSocConfig(
     * checks in hardware that every response came back under the right ID and in the right order.
     * See [[AxiMultiIdGen]]. Needs [[ram2Base]].
     */
-  multiIdGens: Seq[AxiMultiIdGenConfig] = Nil,
-  /** A slave that answers every write with SLVERR instead of storing it, and the window it owns.
-    *
-    * It exists so the write side of [[multiIdGens]] has something to compare against. A write
-    * response carries an ID and two bits of status and nothing else, so between two RAMs that both
-    * answer OKAY a B swapped between two waiting IDs is bit-for-bit a correct one -- the data still
-    * lands where its AW said, so the read-back cannot reach it either. A target that answers
-    * differently gives each response an identity. Needs [[multiIdGens]] whose `errRegionBase` falls
-    * inside this window; nothing reads from it.
-    */
-  errSlaveBase: Option[BigInt] = None,
-  errSlaveSize: BigInt = 4 KiB
+  multiIdGens: Seq[AxiMultiIdGenConfig] = Nil
 ) {
   require(ramSize >= (8 KiB), "the boot firmware keeps its data at RAM + 0x1000")
   require(cpuQos >= 0 && cpuQos <= 15, s"cpuQos must fit AXQOS's four bits, not $cpuQos")
@@ -243,6 +231,20 @@ case class VexZeroSocConfig(
     multiIdGens.isEmpty || ram2Base.isDefined,
     "multiIdGens need ram2Base: driving one ID between two slaves needs a second slave"
   )
+
+  /** Every address range a slave of this SoC claims, in the order the fabric decodes them.
+    *
+    * Kept here rather than derived in the elaboration below because a config-time check needs it:
+    * the multi-ID generators' error region has to be an address that decodes to *nothing*.
+    */
+  private def mappedRegions: Seq[(String, BigInt, BigInt)] =
+    Seq(
+      ("the RAM", ramBase, ramSize),
+      ("the GPIO window", gpioBase, peripheralSize),
+      ("the system control window", sysCtrlBase, peripheralSize)
+    ) ++ benchIoBase.map(("the bench IO window", _, VexZeroBenchIo.windowSize)) ++
+      videoBase.map(("the video window", _, VtpgZero.windowSize)) ++
+      ram2Base.map(("the second RAM", _, ram2Size))
   for ((g, i) <- multiIdGens.zipWithIndex) {
     require(
       g.regionABase >= firmwareTop && g.regionABase + g.windowBytes <= ramBase + ramSize,
@@ -275,27 +277,25 @@ case class VexZeroSocConfig(
         )
       }
     }
-    // An error region that is not in the error slave would be answered OKAY by
-    // a RAM, and the write-response check would fail every lap for a reason
-    // that has nothing to do with the fabric.
+    // The error region has to be an address NO slave claims. What answers it is
+    // the crossbar's own decode-error responder, which is already wired into
+    // every fabric as one more slave -- so this costs the design nothing, and a
+    // region that landed in a RAM by mistake would be answered OKAY and fail
+    // the write-response check every lap for a reason that is not the fabric's.
     for (errBase <- g.errRegionBase) {
-      require(
-        errSlaveBase.isDefined,
-        s"multi-ID generator $i has an errRegionBase but the SoC has no errSlaveBase: the region " +
-          "has to land in a slave that actually answers an error"
-      )
-      for (base <- errSlaveBase) {
+      val top = errBase + g.errRegionBytes
+      for ((name, base, size) <- mappedRegions) {
         require(
-          errBase >= base && errBase + g.errRegionBytes <= base + errSlaveSize,
-          f"multi-ID generator $i covers 0x$errBase%x..0x${errBase + g.errRegionBytes}%x, which is " +
-            f"not inside the error slave (0x$base%x..0x${base + errSlaveSize}%x)"
+          top <= base || base + size <= errBase,
+          f"multi-ID generator $i's error region 0x$errBase%x..0x$top%x lands in $name " +
+            f"(0x$base%x..0x${base + size}%x). It has to be unmapped: the decode-error responder " +
+            "is what answers it, and a real slave would answer OKAY"
         )
       }
       for (j <- 0 until i) {
         for (otherErr <- multiIdGens(j).errRegionBase) {
           require(
-            errBase + g.errRegionBytes <= otherErr ||
-              otherErr + multiIdGens(j).errRegionBytes <= errBase,
+            top <= otherErr || otherErr + multiIdGens(j).errRegionBytes <= errBase,
             f"multi-ID generators $j and $i share error-region words at 0x$errBase%x"
           )
         }
@@ -371,12 +371,11 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
   private val multiIdIndex0 = genIndex0 + genCount
   private val hasAnyGen     = cfg.trafficGens.nonEmpty || cfg.multiIdGens.nonEmpty
 
-  // Slaves: RAM, GPIO, system control, then the optional bench IO, video,
-  // second RAM and error responder, each appended in that order.
+  // Slaves: RAM, GPIO, system control, then the optional bench IO, video and
+  // second RAM, each appended in that order.
   private val ram2Index =
     3 + (if (cfg.benchIoBase.isDefined) 1 else 0) + (if (hasVideo) 1 else 0)
-  private val errSlaveIndex = ram2Index + (if (cfg.ram2Base.isDefined) 1 else 0)
-  private val masterCfg     = VexZeroSoc.masterCfg
+  private val masterCfg = VexZeroSoc.masterCfg
 
   /** The multi-ID generators' own port config: the same bus with an ID field wide enough for the
     * IDs they use. Only their ports are widened, so every other design generates exactly the
@@ -485,8 +484,6 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
       // Appended last on purpose: every existing slave keeps the index it had,
       // so a design without a second RAM decodes exactly as it did before.
       SlavePort(fullSlaveCfg, FullAxi4, _, cfg.ram2Size, cfg.slaveRegSlices)
-    ) ++ cfg.errSlaveBase.map(
-      SlavePort(fullSlaveCfg, FullAxi4, _, cfg.errSlaveSize, cfg.slaveRegSlices)
     ),
     arbitration = cfg.arbitration,
     maxOutstanding = cfg.maxOutstanding,
@@ -655,20 +652,6 @@ class VexZeroSoc(cfg: VexZeroSocConfig = VexZeroSocConfig()) extends Component {
     r.ram.init(Seq.fill((cfg.ram2Size / 4).toInt)(B(0, 32 bits)))
     r.io.axi << fabric.io.slaves(ram2Index).toShared()
     r
-  }
-
-  // ── Error responder ──────────────────────────────────────────────────────
-  // Answers SLVERR to everything written to it and stores nothing. It is the
-  // same component the fabric already uses for an unmapped address, mapped on
-  // purpose: what it provides is a second possible answer, so a write response
-  // carries enough to say which target produced it. Without one, every B on
-  // this bus says OKAY and a swapped BID is indistinguishable from a correct
-  // one -- see AxiMultiIdGen's header.
-  val errSlave = cfg.errSlaveBase.map { _ =>
-    val e = new Axi4DecErrSlave(fullSlaveCfg, respCode = 2)
-    e.setWeakName("errSlave")
-    e.io.axi << fabric.io.slaves(errSlaveIndex)
-    e
   }
 
   // ── Multi-ID generators ──────────────────────────────────────────────────
