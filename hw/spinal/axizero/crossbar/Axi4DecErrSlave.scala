@@ -46,7 +46,10 @@ class Axi4DecErrSlave(config: Axi4Config, respCode: Int = 3) extends Component {
       "answers OKAY would report success for an address it refused"
   )
 
-  private val errResp = B(respCode, 2 bits)
+  // A def, not a val: each use emits the literal where it stands, so the
+  // default build generates the same Verilog the hardcoded DECERR did rather
+  // than a constant wire threaded through it.
+  private def errResp: Bits = B(respCode, 2 bits)
 
   val io = new Bundle {
     val axi = slave(Axi4(config))
