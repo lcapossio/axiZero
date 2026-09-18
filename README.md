@@ -87,6 +87,7 @@ axiZero generates a non-blocking AXI interconnect that routes M masters to N sla
 - A third-party video IP core (vtpgZero) as a fourth master, writing real 16-beat frames into RAM while the CPU runs from it — the only bursting write master in the design, and the one that found a response-routing bug in the Lite adapter
 - The same SoC on two FPGA families — Xilinx Artix-7 and Altera Agilex 5 — with a JTAG-to-AXI bridge acting as a third bus master on the board that has no UART
 - Arbitration validated on real silicon rather than only in simulation: four bitstreams — round robin, weighted, QoS, and one with the CPU's load/store path routed through the AXI3 adapter — each driven by two self-checking generators that hold the fabric contended 97% of the time in simulation of the same configuration, and each built for both vendors from one configuration object
+- AXI4's **same-ID ordering rule** validated on silicon too, which needs a master that actually varies its ID — nothing else here does, VexRiscv included. A fifth bitstream runs two multi-ID generators across two RAMs, each checking in hardware that every response came back under the right ID and in the right order, with a probe on the crossbar's own master port watching the single-slave-per-ID rule where it is enforced rather than inferring it from answers that arrived. Write responses carry only an ID and a status, so a swapped BID would be invisible between two RAMs that both answer OKAY: the generators write to an unmapped address as well, and hold every response to what its ID was owed
 
 **Not yet implemented:**
 
@@ -561,7 +562,7 @@ python3 scripts/run_sim.py axis
 | `PipelinedCrossbarSpec` | 8 | Full AXI4: bursts, back-pressure, outstanding transactions |
 | `ChannelSkewSpec` | 3 | The channel skews AXI4 permits and no other slave model here produces: a slave that raises WREADY before AWREADY, so a W beat reaches it ahead of its address; a burst whose data all arrives early, where the forwarding path has to close again so the *next* burst's data is not swallowed by the slave still holding the first address; and a Lite slave whose answer lands on the cycle the next address is accepted |
 | `BlockingWriteBoundarySpec` | 3 | Where one write's data ends and the next begins in the blocking engines, which both crossbars carry their own copy of: a slave holding a write whose data is complete while its response is still outstanding, and a write whose data reached the slave before its address. In both the master may legally offer the next write's data, and the forwarding path has to be shut or that data is written under the previous address — at a slave it was never addressed to |
-| `AxiMultiIdGenSpec` | 8 | The synthesizable multi-ID generator that goes on the boards, checked against a crossbar with two RAMs: that a clean run really did have several IDs in flight and really did ask to move a live ID between slaves, that it catches a dropped byte lane, and — with a deliberately reordering RAM model — that it catches two same-ID reads answered out of order. A self-checking generator that cannot fail is worth nothing on hardware, so each of its checks is shown failing. Three more cover the write side, which the read-back cannot reach at all: a clean run through a crossbar with a third region that answers SLVERR, with that answer required as evidence; a model that exchanges two BIDs between waiting IDs, caught; and the same model labelling every response correctly, clean. The control is also where the limit is written down — a swap between two OKAY responses stays invisible, because the two traces are the same bits |
+| `AxiMultiIdGenSpec` | 8 | The synthesizable multi-ID generator that goes on the boards, checked against a crossbar with two RAMs: that a clean run really did have several IDs in flight and really did ask to move a live ID between slaves, that it catches a dropped byte lane, and — with a deliberately reordering RAM model — that it catches two same-ID reads answered out of order. A self-checking generator that cannot fail is worth nothing on hardware, so each of its checks is shown failing. Three more cover the write side, which the read-back cannot reach at all: a clean run whose extra writes go to an address no slave claims, answered DECERR by the fabric's own decode-error responder, with that answer required as evidence; a model that exchanges two BIDs between waiting IDs, caught; and the same model labelling every response correctly, clean. The control is also where the limit is written down — a swap between two OKAY responses stays invisible, because the two traces are the same bits |
 | `Axi4OrderingProbeSpec` | 6 | The ordering probe that goes on the boards, driven directly so it can be shown failing: the single-slave-per-ID rule broken with **every response still in issue order**, caught (a check that waited for a wrong answer would call that run clean); a request admitted on the cycle the last outstanding one retires, correctly allowed; a crossing request held against two live bursts recorded as the evidence it is; one-burst-at-a-time traffic claiming no evidence it did not earn; reads and writes judged apart; and the same violation on the write channels |
 | `MultiIdOrderingSpec` | 2 | Randomised multi-ID traffic — four IDs, two slaves, both directions, random response latency and master back-pressure — against a per-ID scoreboard. The only coverage of a master that varies its ID; every other master here, VexRiscv included, drives a constant one. B carries nothing but an ID and a response, so a swap between two busy IDs is invisible unless the two slaves answer differently: one slave returns SLVERR, which gives every write response an identity the scoreboard can hold it to, and the second test proves that scoreboard catches an exchanged BID and a same-ID response reordering while passing a correct trace |
 | `MixedCrossbarSpec` | 4 | Full↔Lite adapters, mixed address maps |
@@ -1576,12 +1577,13 @@ Those are whole-SoC figures — VexRiscv, 8 KB RAM, peripherals, two traffic gen
 checker on every fabric port and the AXI4-Stream island — not the crossbar alone.
 
 `stress_ids` is more than twice the size of the others, and the reason is worth being explicit
-about: it is a bigger *system*, not a more expensive crossbar. It carries six masters instead of
-four and six slaves instead of three, and the crossbar's cost is roughly the product of the two —
-every extra master-slave pair is another arbiter input, another decode and another ordering-table
-entry. On top of that its two multi-ID generators carry four and two per-ID expectation queues and the
-comparison logic that checks every R beat against one, and two more protocol checkers come with the
-two extra ports. It is the price of the *test*, paid once in a build that exists to run it.
+about: it is a bigger *system*, not a more expensive crossbar. It carries six masters where the
+others carry four and four slaves where they carry three, and the crossbar's cost is roughly the
+product of the two — every extra master-slave pair is another arbiter input, another decode and
+another ordering-table entry. On top of that its two multi-ID generators carry four and two per-ID
+expectation queues and the comparison logic that checks every R beat against one, and three more
+protocol checkers come with the three extra ports, since every fabric port gets one. It is the
+price of the *test*, paid once in a build that exists to run it.
 
 Test conditions: Vivado 2025.2, `xc7a100tcsg324-1` (speed grade −1), 100 MHz target, Vivado
 Implementation Defaults strategy with no directives, and implementation at `--jobs 8` (the
@@ -1632,7 +1634,7 @@ never the constraint:
 
 The ordering matches the Arty: `stress_qos` is the tightest of the four arbitration builds on both
 boards, for the same reason, and `stress_ids` is the largest on both for the reason given above —
-six masters and six slaves, plus the checking hardware inside the generators themselves.
+six masters and four slaves, plus the checking hardware inside the generators themselves.
 
 The verdict word is read back over JTAG-AXI *across the crossbar under test*, because the
 board has no serial link to a host — a fabric broken badly enough to hide its own verdict cannot
