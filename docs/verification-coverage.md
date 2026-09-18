@@ -1,6 +1,8 @@
 # axiZero Verification Coverage Report
 
-Status as of 2026-04-06 — 86 SpinalSim + 28 cocotb tests passing.
+Status as of 2026-09-18 — 181 SpinalSim tests in 27 suites, 24 VexZero SoC tests in 10
+suites, 36 cocotb tests in 6 suites, and 2 SymbiYosys proofs, all passing. Every design
+listed below is also built and run on an Arty A7-100T (Vivado) and a DE25-Nano (Quartus).
 
 ---
 
@@ -10,7 +12,7 @@ Status as of 2026-04-06 — 86 SpinalSim + 28 cocotb tests passing.
 
 | Area | Suites | Notes |
 |------|--------|-------|
-| Address routing / decode | all 5 cocotb suites + SpinalSim | Writes to each slave verified via read-back |
+| Address routing / decode | all 6 cocotb suites + SpinalSim | Writes to each slave verified via read-back |
 | Single-beat read/write | all suites | AXI4-Lite and full AXI4 |
 | INCR bursts (16, 64 beats) | `full`, `qos` cocotb + `PipelinedCrossbarSpec` | Multi-beat write + per-beat read-back |
 | Multi-master WRR arbitration | `wrr` cocotb + `ArbitrationSpec` | Bandwidth proportionality, starvation prevention |
@@ -19,28 +21,38 @@ Status as of 2026-04-06 — 86 SpinalSim + 28 cocotb tests passing.
 | AXI3 adapter (WID reorder) | `Axi3ToAxi4Spec` + `Axi3MixedCrossbarSpec` | Single-beat, burst, interleaving, locked→SLVERR |
 | Width conversion (32↔64) | `WidthConverterSpec` + `NarrowPortSpec` | Upsize, downsize, passthrough |
 | FIXED/WRAP burst downsizing | `BurstTypeSpec` | SpinalSim only — not in cocotb |
-| Register slices | `RegSliceAndLiteWidthSpec` + `Axi3MixedCrossbarSpec` | Full, Lite, Axi3Mode, both sides |
 | Pipelined mode (maxOutstanding>1) | `PipelinedArbitrationSpec` | FP, WRR, QoS with concurrent bursts |
 | Backpressure (B-channel) | `ipif` cocotb (`test_ipif_backpressure`) | Master holds bready low |
+| Same-ID ordering / SSPID | `MultiIdOrderingSpec`, `AxiMultiIdGenSpec`, `Axi4OrderingProbeSpec` | Per-ID response order and single-slave-per-ID, plus a formal proof (`write_response_routing.sby`) |
+| Write-response identity | `MultiIdOrderingSpec`, `AxiMultiIdGenSpec` | A per-ID expectation queue catches a B delivered under the wrong ID — which needs a target answering something other than OKAY |
+| Error responses (SLVERR / DECERR) | `DecodeErrorSpec`, `MultiIdOrderingSpec`, `AxiMultiIdGenSpec` | Decode errors from the fabric's own responder; a slave returning SLVERR |
+| Protocol compliance (synthesizable) | `Axi4ProtocolCheckerSpec` + every VexZero board build | One passive checker per fabric port, on hardware as well as in simulation. See ADR 003 |
+| Register slices / skid buffers | `RegSliceSkidSpec`, `RegSliceAndLiteWidthSpec`, `Axi3MixedCrossbarSpec` | Full, Lite and Axi3Mode, both sides; capacity while stalled, READY-arc recovery, throughput, plus a formal proof (`axis_ready_valid_regslice.sby`) |
+| Channel skew / response stability | `ChannelSkewSpec`, `ResponseStabilitySpec` | AW/W arriving apart; payload stable while VALID && !READY |
+| Real CPU through the fabric | VexZero suites + both boards | VexRiscv boots and runs its self test while traffic generators saturate the crossbar |
 
 ### Gaps — not tested
 
 | Gap | Severity | Notes |
 |-----|----------|-------|
-| **Narrow transfers (sub-word WSTRB)** | HIGH | Every cocotb write uses full strobe. Never verified that untouched bytes are preserved. |
+| **Narrow transfers (sub-word WSTRB)** | HIGH | Every cocotb write uses full strobe. `NarrowPortSpec` drives a partial strobe, but no test verifies that untouched bytes are preserved. |
 | **WRAP / FIXED bursts in cocotb** | HIGH | Only INCR tested in cocotb. SpinalSim covers WRAP/FIXED via `BurstTypeSpec` but generated Verilog is never exercised with non-INCR. |
 | **Mid-burst backpressure** | HIGH | No test where slave holds WREADY low mid-burst or master stalls WVALID between beats. |
 | **Varied burst lengths** | MEDIUM | Only 1, 4, 16, 64 tested. No 2, 3, 8, 32. |
-| **Response error injection (SLVERR/DECERR)** | MEDIUM | All slaves return OKAY. Error path never exercised. |
-| **ID interleaving / out-of-order** | MEDIUM | No cocotb test issues multiple outstanding reads with different IDs and verifies RID matching. |
 | **Unaligned addresses** | MEDIUM | All accesses are naturally aligned. |
-| **Write-data ordering (AW before W, W before AW)** | LOW | `AxiMaster.write()` always presents AW+W together. No test of split ordering. |
+| **ID interleaving in cocotb** | LOW | Covered in SpinalSim and on both boards by the multi-ID generators, but no cocotb test issues multiple outstanding reads with different IDs against the generated Verilog. |
+| **Write-data ordering in cocotb** | LOW | `ChannelSkewSpec` covers AW/W skew in SpinalSim, but `AxiMaster.write()` always presents AW+W together, so the generated Verilog never sees split ordering. |
 | **Exclusive access (AWLOCK)** | LOW | Not exercised. `AxiMaster` API does not expose AWLOCK. |
 | **Cache/protection attributes** | LOW | BFM does not expose AWCACHE/AWPROT for targeted testing. |
 
 ---
 
 ## BFM & Protocol Checking
+
+*The survey below is what was read before ADR 003 was written. The decision it led to —
+a synthesizable checker of axiZero's own, in `hw/spinal/axizero/verif/Axi4ProtocolChecker.scala`
+— is in place and runs on both boards. The survey is kept for the reasoning, not as a
+statement of what is missing.*
 
 ### Current state
 
@@ -113,7 +125,9 @@ axiZero's `SimHelpers.scala` wraps these in convenience functions
 | Arbitration (RR, FP, WRR, QoS) | Strong |
 | Burst types (INCR) | Strong |
 | Burst types (WRAP, FIXED) | SpinalSim only |
-| Protocol compliance checking | None (BFMs only) |
-| Narrow / sub-word transfers | Not tested |
+| Protocol compliance checking | Strong — synthesizable checker on every fabric port, in simulation and on both boards |
+| Same-ID ordering / response identity | Strong — simulation, formal, and both boards |
+| Error response handling | Strong — SLVERR and DECERR paths exercised, including on hardware |
+| Narrow / sub-word transfers | Weak — no byte-preservation test |
 | Mid-burst backpressure | Not tested |
-| Error response handling | Not tested |
+| Exclusive access (AWLOCK) | Not tested |
