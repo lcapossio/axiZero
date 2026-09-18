@@ -78,6 +78,10 @@ class VexZeroGenStressSpec extends AnyFunSuite {
     stalled: Boolean,
     multiIdSeen: Boolean,
     crossSlaveTried: Boolean,
+    /** A write response came back carrying the error the error region owes it, which is what makes
+      * a B swapped between two waiting IDs visible at all.
+      */
+    errRespSeen: Boolean,
     /** What the probe at the crossbar's own master port saw; see [[Axi4OrderingProbe]]. */
     sspidViolation: Boolean,
     probeTwoIdsLive: Boolean,
@@ -157,6 +161,7 @@ class VexZeroGenStressSpec extends AnyFunSuite {
           g.io.stalled.simPublic()
           g.io.multiIdSeen.simPublic()
           g.io.crossSlaveTried.simPublic()
+          g.io.errRespSeen.simPublic()
         }
         dut
       }
@@ -248,6 +253,7 @@ class VexZeroGenStressSpec extends AnyFunSuite {
                 stalled = g.io.stalled.toBoolean,
                 multiIdSeen = g.io.multiIdSeen.toBoolean,
                 crossSlaveTried = g.io.crossSlaveTried.toBoolean,
+                errRespSeen = g.io.errRespSeen.toBoolean,
                 sspidViolation = p.sspidViolation.toBoolean,
                 probeTwoIdsLive = p.twoIdsLive.toBoolean,
                 probeDeepLive = p.deepLive.toBoolean,
@@ -297,7 +303,8 @@ class VexZeroGenStressSpec extends AnyFunSuite {
       println(
         f"  multiId$i%d laps ${g.laps}%,d, errors ${g.dataErrors}%d data / ${g.respErrors}%d resp " +
           f"/ ${g.orderErrors}%d order, several IDs in flight ${g.multiIdSeen}%s, " +
-          f"live ID asked to cross ${g.crossSlaveTried}%s"
+          f"live ID asked to cross ${g.crossSlaveTried}%s, error region answered " +
+          f"${g.errRespSeen}%s"
       )
       println(
         f"           at the crossbar: rule broken ${g.sspidViolation}%s, two IDs live " +
@@ -341,6 +348,14 @@ class VexZeroGenStressSpec extends AnyFunSuite {
         g.crossSlaveTried,
         s"multi-ID generator $i never asked to move a live ID to the other RAM, so the " +
           "single-slave-per-ID rule was never put under load"
+      )
+      // The write side's own evidence. Its responses are only distinguishable
+      // because one target answers SLVERR, so a run where none came back never
+      // put the write-response identity check to work.
+      assert(
+        g.errRespSeen,
+        s"multi-ID generator $i never got an error back from the error region, so its write " +
+          "responses carried nothing that could tell one target from another"
       )
 
       // And what the crossbar itself did about it. The generator sits behind a

@@ -55,6 +55,13 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
   private val regionB = BigInt(0x200)
   private val ramSize = 0x200
 
+  /** The write-only region: an address no slave claims, which the crossbar's own decode-error
+    * responder answers. It is what gives a write response an identity -- between two slaves that
+    * both answer OKAY, a B swapped between two waiting IDs is the same bits as a correct one -- and
+    * because that responder is already part of every fabric it costs the design nothing.
+    */
+  private val regionE = BigInt(0x400)
+
   private def genCfg(
     windowWords: Int = 32,
     idCount: Int = 4,
@@ -62,10 +69,12 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
     respStall: Int = 0,
     continuous: Boolean = true,
     passes: Int = 4,
-    hangCycles: Int = 2000
+    hangCycles: Int = 2000,
+    errRegionBase: Option[BigInt] = None
   ) = AxiMultiIdGenConfig(
     regionABase = regionA,
     regionBBase = regionB,
+    errRegionBase = errRegionBase,
     windowWords = windowWords,
     idCount = idCount,
     dataPattern = 0xd1000000L,
@@ -87,10 +96,15 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
       val stalled         = out Bool ()
       val multiIdSeen     = out Bool ()
       val crossSlaveTried = out Bool ()
+      val errRespSeen     = out Bool ()
       val violation       = out Bits (Axi4ProtocolChecker.ruleCount bits)
       val overflow        = out Bool ()
     }
 
+    // regionE is deliberately absent from this map. The crossbar's decode-error
+    // responder owns every address no slave claimed, so a write there is
+    // accepted, its beats are sunk and it is answered DECERR -- which is the
+    // whole arrangement the boards use, tested here as they run it.
     val xbar = new AxiZeroMixedTop(
       AxiZeroConfig(
         masters = Seq(MasterPort(axiCfg, FullAxi4)),
@@ -126,6 +140,7 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
     io.stalled         := gen.io.stalled
     io.multiIdSeen     := gen.io.multiIdSeen
     io.crossSlaveTried := gen.io.crossSlaveTried
+    io.errRespSeen     := gen.io.errRespSeen
     io.violation       := check.sticky
     io.overflow        := check.overflow
   }
@@ -144,10 +159,13 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
       val stalled         = out Bool ()
       val multiIdSeen     = out Bool ()
       val crossSlaveTried = out Bool ()
+      val errRespSeen     = out Bool ()
     }
 
     val gen = new AxiMultiIdGen(axiCfg, cfg)
     io.axi <> gen.io.axi
+
+    io.errRespSeen := gen.io.errRespSeen
 
     io.dataErrors      := gen.io.dataErrors
     io.respErrors      := gen.io.respErrors
@@ -168,13 +186,21 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
     * queued read bursts share an ID the younger one is answered first -- individually plausible
     * responses in an order AXI4 forbids.
     */
-  private class ReorderingRam(axi: Axi4, cd: ClockDomain, swapSameId: Boolean) {
+  private class ReorderingRam(
+    axi: Axi4,
+    cd: ClockDomain,
+    swapSameId: Boolean,
+    errBase: Option[Long] = None,
+    swapBId: Boolean = false
+  ) {
     val mem = mutable.HashMap[Long, Long]()
 
     private val wData   = mutable.Queue[Long]()
     private val awQueue = mutable.Queue[(Long, Int, Int)]() // addr, len, id
     private val arQueue = mutable.ArrayBuffer[(Long, Int, Int)]()
-    private val bQueue  = mutable.Queue[Int]()
+    private val bQueue  = mutable.ArrayBuffer[(Int, Int)]() // id, resp
+
+    private def isErr(addr: Long): Boolean = errBase.exists(b => addr >= b && addr < b + 0x100)
 
     axi.aw.ready #= true
     axi.w.ready #= true
@@ -198,19 +224,42 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
       while (true) {
         cd.waitSamplingWhere(awQueue.nonEmpty && wData.size > awQueue.head._2)
         val (addr, len, id) = awQueue.dequeue()
-        for (i <- 0 to len) mem(addr + i * 4) = wData.dequeue()
-        bQueue.enqueue(id)
+        // The error region stores nothing and answers SLVERR, exactly as the
+        // mapped responder does in hardware. Its beats are still taken off the
+        // W queue, because W carries no ID and the beats that follow belong to
+        // the next address.
+        if (isErr(addr)) {
+          for (_ <- 0 to len) wData.dequeue()
+          bQueue += ((id, 3)) // DECERR, as the decode-error responder gives
+        } else {
+          for (i <- 0 to len) mem(addr + i * 4) = wData.dequeue()
+          bQueue += ((id, 0))
+        }
       }
     }
 
     fork {
       while (true) {
         cd.waitSamplingWhere(bQueue.nonEmpty)
+        // A BID exchanged between two IDs that are both waiting: each response
+        // still arrives, each ID still has one outstanding write to retire, and
+        // every count stays consistent. Only the labels are crossed -- which is
+        // why nothing but a per-ID expectation can see it.
+        if (swapBId) {
+          cd.waitSamplingWhere(bQueue.size >= 2)
+          if (bQueue(0)._1 != bQueue(1)._1) {
+            val (id0, resp0) = bQueue(0)
+            val (id1, resp1) = bQueue(1)
+            bQueue(0) = ((id1, resp0))
+            bQueue(1) = ((id0, resp1))
+          }
+        }
+        val (id, resp) = bQueue.head
         axi.b.valid #= true
-        axi.b.id #= bQueue.head
-        axi.b.resp #= 0
+        axi.b.id #= id
+        axi.b.resp #= resp
         cd.waitSamplingWhere(axi.b.ready.toBoolean)
-        bQueue.dequeue()
+        bQueue.remove(0)
         axi.b.valid #= false
       }
     }
@@ -330,7 +379,112 @@ class AxiMultiIdGenSpec extends AnyFunSuite {
     }
   }
 
-  // ── 5. A fabric that stops answering ─────────────────────────────────────
+  // ── 5. The write side given something to compare against ─────────────────
+  // A write response carries an ID and two bits of status and nothing else, so
+  // between two slaves that both answer OKAY a B swapped between two waiting
+  // IDs is bit-for-bit a correct one. A third region that answers SLVERR gives
+  // each response an identity: this run proves the fabric delivers each answer
+  // to the ID that is owed it, with the error region actually answering.
+  test("an unmapped write region answers, and every response reaches the ID it is owed") {
+    simCfg
+      .compile(new XbarHarness(genCfg(respStall = 4, errRegionBase = Some(regionE))))
+      .doSim("multiid_errregion") { dut =>
+        SimTimeout(4000000)
+        dut.clockDomain.forkStimulus(10)
+        dut.clockDomain.waitSampling(5)
+        dut.clockDomain.waitSamplingWhere(dut.io.laps.toInt >= 2)
+
+        assert(dut.io.dataErrors.toInt == 0, s"${dut.io.dataErrors.toInt} data errors")
+        assert(
+          dut.io.respErrors.toInt == 0,
+          s"${dut.io.respErrors.toInt} write responses went to an ID that was not owed them"
+        )
+        assert(dut.io.orderErrors.toInt == 0, s"${dut.io.orderErrors.toInt} ordering errors")
+        assert(!dut.io.stalled.toBoolean, "the generator stalled against a working fabric")
+        assert(
+          dut.io.errRespSeen.toBoolean,
+          "no error ever came back, so the write-response check was never put to work and a " +
+            "clean result proves nothing"
+        )
+        // DECERR is a legal answer, and a checker that called it a violation
+        // would make this whole arrangement unusable on a board.
+        assert(
+          dut.io.violation.toBigInt == 0,
+          s"the run broke AXI4: ${decode(dut.io.violation.toBigInt)}"
+        )
+        assert(!dut.io.overflow.toBoolean, "the protocol checker lost track")
+      }
+  }
+
+  // ── 6. A pair of BIDs exchanged between two waiting IDs ──────────────────
+  // The failure the read-back cannot reach: the data still lands at the address
+  // its AW named, so memory is correct and reads back correct. Only the label
+  // on the response is wrong.
+  test("a pair of BIDs exchanged between two waiting IDs is caught") {
+    simCfg
+      .compile(
+        new BareHarness(genCfg(outstandingPerId = 2, errRegionBase = Some(regionE)))
+      )
+      .doSim("multiid_bid_swap") { dut =>
+        SimTimeout(8000000)
+        val cd = dut.clockDomain
+        new ReorderingRam(
+          dut.io.axi,
+          cd,
+          swapSameId = false,
+          errBase = Some(regionE.toLong),
+          swapBId = true
+        )
+        cd.forkStimulus(10)
+        cd.waitSampling(5)
+        cd.waitSamplingWhere(
+          dut.io.respErrors.toInt != 0 || dut.io.laps.toInt >= 2 || dut.io.stalled.toBoolean
+        )
+        assert(
+          dut.io.respErrors.toInt != 0,
+          "a fabric that exchanged two BIDs went unreported -- the write side of the board check " +
+            "proves nothing about where a response went"
+        )
+      }
+  }
+
+  // ── 7. The same model leaving the labels alone ───────────────────────────
+  // The control for test 6: the exchange is what fails it, not the error region
+  // or the model. It also fixes what test 6 does NOT claim -- a swap between two
+  // responses that are both OKAY stays invisible here, because the two traces
+  // are the same bits. That is AXI, not this fabric.
+  test("the same model leaving the labels alone reports nothing") {
+    simCfg
+      .compile(
+        new BareHarness(genCfg(outstandingPerId = 2, errRegionBase = Some(regionE)))
+      )
+      .doSim("multiid_bid_intact") { dut =>
+        SimTimeout(8000000)
+        val cd = dut.clockDomain
+        new ReorderingRam(
+          dut.io.axi,
+          cd,
+          swapSameId = false,
+          errBase = Some(regionE.toLong),
+          swapBId = false
+        )
+        cd.forkStimulus(10)
+        cd.waitSampling(5)
+        cd.waitSamplingWhere(dut.io.laps.toInt >= 1 || dut.io.respErrors.toInt != 0)
+        assert(
+          dut.io.respErrors.toInt == 0,
+          s"${dut.io.respErrors.toInt} response errors against a model that labelled every B " +
+            "correctly"
+        )
+        assert(
+          dut.io.errRespSeen.toBoolean,
+          "the error region never answered, so the control proves nothing either"
+        )
+        assert(dut.io.dataErrors.toInt == 0, s"${dut.io.dataErrors.toInt} data errors")
+      }
+  }
+
+  // ── 8. A fabric that stops answering ─────────────────────────────────────
   test("a fabric that stops answering is reported as a stall") {
     simCfg.compile(new BareHarness(genCfg(hangCycles = 64))).doSim("multiid_stall") { dut =>
       SimTimeout(400000)

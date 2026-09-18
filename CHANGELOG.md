@@ -4,7 +4,21 @@ All notable changes to axiZero will be documented in this file.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **`RegSliceSkidSpec`** — 6 tests, the first that tell `regSliceSkid` apart from the plain register slice. It is on the AW/W/AR path of every registered master on both boards, and until now the only evidence it did anything was that timing closed. The tests measure what it buys: a stalled plain slice accepts one beat and a skid two; the plain slice's READY is combinational from the far side and the skid's is not, shown by stalling and releasing on the same cycle; 400 beats survive random back-pressure through both with their payloads intact and in order; latency stays one cycle and throughput full either way; B and R keep the plain slice they are given rather than quietly getting a skid; and the Lite slice behaves the same. Mutation-verified — disabling the skid fails three of them.
+- **A write-response identity check in `MultiIdOrderingSpec`** — a second test, and an error-returning slave in the first. B carries nothing but an ID and a response, so a BID exchanged between two *busy* IDs is invisible when every slave answers OKAY, which is what the existing scoreboard was watching. One slave now returns SLVERR, which gives each write response an identity tied to where it was sent, and the run asserts it saw both kinds. The new test feeds that scoreboard three traces directly: an exchanged BID, caught; a same-ID response reordering, caught; and a correct trace, clean.
+
+- **A write-only error region, and a per-ID expectation queue for write responses** (`errRegionBase` on `AxiMultiIdGenConfig`). A BID exchanged between two IDs that are both waiting is the one failure the read-back cannot reach: W beats follow the AW that preceded them, so a mislabelled B moves no data and memory ends up correct either way. The error is in the label, and a label is an ID and two bits of status — between two targets that both answer OKAY the swapped trace and the correct one are the same bits, which is AXI4 and not this fabric. Each generator now writes one extra single-beat burst per round to an address **no slave claims**, which the crossbar's own `Axi4DecErrSlave` answers with DECERR, and each ID keeps a queue of what its outstanding writes are owed. `errRespSeen` reports that an error really came back and `io.genOk` requires it, so a bitstream that never exercised the check cannot pass it. Closes on silicon what `MultiIdOrderingSpec` closed in simulation, and puts the decode-error responder on a board for the first time — until now it was only ever exercised in simulation. Costs the Arty build 203 LUTs and 0.22 ns of slack; a slave added for the purpose, which is where this started, cost 942 LUTs and left only +0.017 ns.
+
+### Changed
+
+- **Each multi-ID generator's port is now sized to its own ID count** rather than to the widest generator's, and the second `stress_ids` generator runs two IDs instead of four. `Axi4IdWidener` sits in every mixed-width design here, but with every generator built to the same width the only narrow master on either board was the CPU, whose ID is a constant — so the zero-extension was carried by a signal that never moved, which is where a padding or truncation bug survives a bitstream. The two-ID generator now reaches the fabric one ID bit wide against the fabric's two, with an ID that varies, and two IDs still leaves the ordering rule something to hold: one ID crossing while the other is live.
+- **Both board runners now watch the verdict instead of reading it once.** Each sampled the design a fraction of a second after configuration and called that the result. Every verdict either board reports is sticky — a generator error, a protocol violation and a checker that lost track all latch and never clear — so a fault appearing a second later is real, is still being reported, and was simply never looked at; and the first read is the least traffic the generators will ever have run behind them. The Arty runner now compares every later UART report line against the first for `--observe` seconds (default 5), and the DE25-Nano runner re-reads the verdict word over JTAG-AXI the same way. A verdict that moves fails the run, with both values printed.
+
+### Removed
+
+- **`generated/fcapz_axi_interconnect.v`** — an untracked netlist with no producer in this repository and no consumer, left over from an unrelated design.
 
 ## [0.4.0] — 2026-09-16
 

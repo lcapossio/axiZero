@@ -146,7 +146,18 @@ object VexZeroStress {
     * words of each RAM, which at four beats a burst is 32 bursts a pass per region.
     */
   val ram2Base: BigInt = BigInt("90000000", 16)
-  val ram2Size: BigInt = 4 KiB
+
+  /** An address no slave claims, which the crossbar's own decode-error responder answers.
+    *
+    * It is the only thing on this bus that makes one write response distinguishable from another:
+    * every RAM here answers OKAY, so a B swapped between two waiting IDs is bit-for-bit a correct
+    * one. See [[AxiMultiIdGen]]. Nothing is stored there and nothing reads it back -- and because
+    * the responder is already part of every fabric, this costs the design no slave port, no arbiter
+    * input and no decode term. It also puts the responder itself on the board, which nothing else
+    * here does.
+    */
+  val errRegionBase: BigInt = BigInt("91000000", 16)
+  val ram2Size: BigInt      = 4 KiB
 
   private val idWindowWords = 128
   private val idWindowBytes = idWindowWords * 4
@@ -169,16 +180,28 @@ object VexZeroStress {
       idCount = 4,
       dataPattern = 0xd1000000L,
       outstandingPerId = 4,
-      respStall = 3
+      respStall = 3,
+      errRegionBase = Some(errRegionBase)
     ),
+    // Two IDs rather than four, and that is the point: its port is one ID bit
+    // wide where the fabric carries two, so everything it issues crosses
+    // Axi4IdWidener with an ID that changes. The widener is in every mixed-width
+    // design in this repository and until now the only narrow master on either
+    // board was the CPU, whose ID is a constant -- so the zero-extension was
+    // carried by a signal that never moved, which is exactly where a padding or
+    // truncation bug survives. Two IDs is still enough for the ordering rule to
+    // have something to hold: one ID crossing while the other is live.
     AxiMultiIdGenConfig(
       regionABase = ramBase + 0x6000 + idWindowBytes,
       regionBBase = ram2Base + idWindowBytes,
       windowWords = idWindowWords,
-      idCount = 4,
+      idCount = 2,
       dataPattern = 0xd2000000L,
       outstandingPerId = 4,
-      respStall = 5
+      respStall = 5,
+      // Its own words in the error region -- one per ID, and the first
+      // generator owns the four below these.
+      errRegionBase = Some(errRegionBase + 0x10)
     )
   )
 

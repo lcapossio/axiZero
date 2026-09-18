@@ -33,13 +33,26 @@ import axizero._
 // one at the head. A read answered out of order, answered under the wrong ID,
 // or never answered fails here.
 //
-// The write side cannot be checked that way and does not claim to be. B carries
-// an ID and a response and nothing else, so two same-ID writes answered in the
-// wrong order are indistinguishable. What it checks instead is where the data
-// went: every beat is unique to its address, and every address written is read
-// back out of the slave models at the end. That catches a burst steered to the
-// wrong slave, a dropped beat and a shifted one. The ordering rule itself, on
-// the write side, is what ResponseStabilitySpec tests directly.
+// The write side cannot be checked the same way. B carries an ID and a response
+// and nothing else, so two same-ID writes answered in the wrong order are
+// indistinguishable -- and so, with every slave answering OKAY, is a pair of
+// BIDs exchanged between two IDs that are both waiting: each decrements a
+// non-zero counter and the run looks clean.
+//
+// So the response is made to carry identity. Slave 1 answers SLVERR on B, not
+// because anything is wrong with those writes but because it is the only field
+// AXI4 leaves free on the write side. Each ID's outstanding writes are held in
+// issue order with the code the slave they went to will answer with, and every
+// B is checked against the oldest. A BID exchanged between two waiting IDs now
+// fails as soon as the two writes went to different slaves, which the traffic
+// makes routine. The run also asserts that both codes were actually seen, since
+// a run that reached one slave only could not have failed the check.
+//
+// What it still checks is where the data went: every beat is unique to its
+// address, and every address written is read back out of the slave models at
+// the end. That catches a burst steered to the wrong slave, a dropped beat and
+// a shifted one. Same-ID write *ordering* remains what ResponseStabilitySpec
+// tests directly.
 //
 // The seed is fixed so a failure is reproducible.
 // ---------------------------------------------------------------------------
@@ -58,6 +71,48 @@ class MultiIdOrderingSpec extends AnyFunSuite {
   private val s0Base    = BigInt("00000000", 16)
   private val s1Base    = BigInt("00010000", 16)
   private val slaveSize = BigInt("00010000", 16)
+
+  /** AXI4 BRESP/RRESP codes, used here as an identity bit rather than as an error. */
+  private val slverr = 2
+  private def respName(code: Int): String = code match {
+    case 0 => "OKAY"
+    case 1 => "EXOKAY"
+    case 2 => "SLVERR"
+    case _ => "DECERR"
+  }
+
+  /** The write-side check: each ID's outstanding writes in issue order, each with the response the
+    * slave it was sent to will answer with.
+    *
+    * Separate from the simulation so the test below can hand it a trace the fabric would have to
+    * misbehave to produce. A checker that cannot fail is worth nothing, and this one's whole claim
+    * is that it catches something the counter-only version could not.
+    */
+  private class WriteRespScoreboard(ids: Int) {
+    private val outstanding = Array.fill(ids)(mutable.Queue[(Long, Int)]())
+    val failures            = mutable.ArrayBuffer[String]()
+    var okay                = 0
+    var slverrs             = 0
+    def pending: Seq[String] =
+      outstanding.zipWithIndex.collect { case (q, i) if q.nonEmpty => s"id $i: ${q.size}" }.toSeq
+
+    def issued(id: Int, addr: Long, resp: Int): Unit = outstanding(id).enqueue((addr, resp))
+
+    def answered(id: Int, resp: Int): Unit = {
+      if (resp == slverr) slverrs += 1 else okay += 1
+      if (outstanding(id).isEmpty) failures += s"B arrived under id $id with nothing outstanding"
+      else {
+        val (addr, want) = outstanding(id).dequeue()
+        // The oldest write outstanding under this ID went to a known slave, so
+        // it has a known response. A BID exchanged with another ID that was
+        // also waiting lands here as soon as the two went to different slaves.
+        if (resp != want)
+          failures +=
+            f"B under id $id answered ${respName(resp)}, but its oldest outstanding write " +
+              f"(0x$addr%08X) went to the slave that answers ${respName(want)}"
+      }
+    }
+  }
 
   // Reads and writes work in separate windows of each slave so a write landing
   // between a read's issue and its answer cannot change what the read expects.
@@ -105,7 +160,13 @@ class MultiIdOrderingSpec extends AnyFunSuite {
       // Different stalls per slave, so a read at one is routinely still in
       // flight when a read at the other has already been answered.
       val mem0 = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd, stallR = 1)
-      val mem1 = SimHelpers.spawnFullSlave(dut.io.slaves(1), cd, stallW = 2, stallR = 4)
+      // Slave 1 answers SLVERR on B. Nothing is wrong with these writes -- the
+      // code is being used as an identity bit, because it is the only one the
+      // write side has. With both slaves answering OKAY, a pair of BIDs
+      // exchanged between two IDs that are both waiting decrements two
+      // non-zero counters and looks exactly like a correct run.
+      val mem1 =
+        SimHelpers.spawnFullSlave(dut.io.slaves(1), cd, stallW = 2, stallR = 4, bresp = slverr)
       for (w <- 0 until winWords) {
         val off = (readWin + w * 4).toLong
         mem0(off) = wordOf(off)
@@ -120,7 +181,7 @@ class MultiIdOrderingSpec extends AnyFunSuite {
       // Per ID, the bursts issued under it, oldest first: each is the sequence
       // of words its R beats must carry.
       val rdExpect = Array.fill(ids)(mutable.Queue[mutable.Queue[Long]]())
-      val wrExpect = Array.fill(ids)(mutable.Queue[Long]())
+      val wrExpect = new WriteRespScoreboard(ids)
       val failures = mutable.ArrayBuffer[String]()
       // What each written address should hold when the run is over. B carries
       // nothing but an ID, so counting B responses proves almost nothing on its
@@ -163,10 +224,8 @@ class MultiIdOrderingSpec extends AnyFunSuite {
         if (m.aw.valid.toBoolean && m.aw.ready.toBoolean) awFires += 1
         if (m.w.valid.toBoolean && m.w.ready.toBoolean) wFires += 1
         if (m.b.valid.toBoolean && m.b.ready.toBoolean) {
-          val id = m.b.id.toInt
           bSeen += 1
-          if (wrExpect(id).isEmpty) failures += s"B arrived under id $id with nothing outstanding"
-          else wrExpect(id).dequeue()
+          wrExpect.answered(m.b.id.toInt, m.b.resp.toInt)
         }
       }
 
@@ -217,7 +276,7 @@ class MultiIdOrderingSpec extends AnyFunSuite {
           val word = rnd.nextInt(winWords - len)
           val addr = base + writeWin + word * 4
           nWrBeats += len + 1
-          wrExpect(id).enqueue(addr.toLong)
+          wrExpect.issued(id, addr.toLong, if (base == s0Base) 0 else slverr)
           m.aw.valid #= true
           m.aw.addr #= addr
           m.aw.id #= id
@@ -263,22 +322,30 @@ class MultiIdOrderingSpec extends AnyFunSuite {
       // Drain. A fabric that has stranded a thread stops answering, so this
       // bound is what turns a wedge into a failure instead of a timeout.
       var idle = 0
-      while (idle < 4000 && (rdExpect.exists(_.nonEmpty) || wrExpect.exists(_.nonEmpty))) {
+      while (idle < 4000 && (rdExpect.exists(_.nonEmpty) || wrExpect.pending.nonEmpty)) {
         cd.waitSampling()
         idle += 1
       }
 
       val rdLeft =
         rdExpect.zipWithIndex.collect { case (q, i) if q.nonEmpty => s"id $i: ${q.size}" }
-      val wrLeft =
-        wrExpect.zipWithIndex.collect { case (q, i) if q.nonEmpty => s"id $i: ${q.size}" }
+      val wrLeft = wrExpect.pending
       assert(rdLeft.isEmpty, s"reads never answered -- ${rdLeft.mkString(", ")}")
       assert(wrLeft.isEmpty, s"writes never answered -- ${wrLeft.mkString(", ")}")
+      val allFailures = failures ++ wrExpect.failures
       assert(
-        failures.isEmpty,
-        s"${failures.size} ordering failures:\n  ${failures.take(10).mkString("\n  ")}"
+        allFailures.isEmpty,
+        s"${allFailures.size} ordering failures:\n  ${allFailures.take(10).mkString("\n  ")}"
       )
       assert(bSeen == nWrites, s"saw $bSeen B responses, expected $nWrites")
+      // The identity check only says anything while both codes are actually in
+      // play. A run that reached one slave only would pass it without ever
+      // having been able to fail.
+      assert(
+        wrExpect.okay > 0 && wrExpect.slverrs > 0,
+        s"the write traffic has to reach both slaves for the response code to identify anything, " +
+          s"but saw ${wrExpect.okay} OKAY and ${wrExpect.slverrs} SLVERR"
+      )
       assert(awFires == nWrites, s"the fabric took $awFires write addresses, expected $nWrites")
       assert(wFires == nWrBeats, s"the fabric took $wFires W beats, expected $nWrBeats")
 
@@ -297,5 +364,44 @@ class MultiIdOrderingSpec extends AnyFunSuite {
       )
       assert(rBeats >= nReads, s"saw only $rBeats R beats for $nReads reads")
     }
+  }
+
+  test("the write-response check catches a pair of BIDs exchanged between two waiting IDs") {
+    // The trace a swap produces, and the reason the old counter-only check
+    // could not see it: both IDs were waiting, both get exactly one B, and
+    // every response is legal on its own. The only thing wrong is which ID
+    // each one was handed to -- and that is visible only because the two
+    // writes went to slaves that answer differently.
+    val sb = new WriteRespScoreboard(4)
+    sb.issued(1, 0x1000L, 0)      // id 1 wrote to the slave that answers OKAY
+    sb.issued(2, 0x2000L, slverr) // id 2 wrote to the slave that answers SLVERR
+    sb.answered(1, slverr)        // ... and the answers come back exchanged
+    sb.answered(2, 0)
+    assert(
+      sb.failures.size == 2,
+      s"a BID swap between two waiting IDs went unnoticed: ${sb.failures.mkString("; ")}"
+    )
+
+    // The control: the same two writes answered correctly, and the counter-only
+    // version of this check would have been just as happy with the trace above.
+    val ok = new WriteRespScoreboard(4)
+    ok.issued(1, 0x1000L, 0)
+    ok.issued(2, 0x2000L, slverr)
+    ok.answered(1, 0)
+    ok.answered(2, slverr)
+    assert(ok.failures.isEmpty, s"a correct trace was reported: ${ok.failures.mkString("; ")}")
+
+    // Two writes under one ID to slaves that answer differently: the rule is
+    // that they come back in issue order, and swapping them is caught too.
+    val sameId = new WriteRespScoreboard(4)
+    sameId.issued(3, 0x3000L, 0)
+    sameId.issued(3, 0x4000L, slverr)
+    sameId.answered(3, slverr)
+    sameId.answered(3, 0)
+    assert(
+      sameId.failures.size == 2,
+      "two same-ID writes answered out of order went unnoticed even with the responses telling " +
+        "them apart"
+    )
   }
 }

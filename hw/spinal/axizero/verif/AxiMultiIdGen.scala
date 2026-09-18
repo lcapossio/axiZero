@@ -67,9 +67,34 @@
 // side. A write's only response is BID and BRESP, so two same-ID writes
 // answered in the wrong order are indistinguishable, and so is a pair of BIDs
 // exchanged between two IDs that are both waiting -- each decrements a
-// non-zero counter and every response is OKAY. What the write side proves is
-// that the fabric routed every beat to the address its AW named, which the
-// read-back checks word by word.
+// non-zero counter and every response is OKAY. What the write side proves on
+// its own is that the fabric routed every beat to the address its AW named,
+// which the read-back checks word by word.
+//
+// A BID swap is worth being precise about, because it is the one failure the
+// read-back cannot reach by construction. W beats follow the AW that preceded
+// them, so a mislabelled B does not move any data: memory ends up correct and
+// reads back correct either way. The error is in the *label* on the response,
+// and the label's only content is an ID and two bits of status. Between two
+// targets that both answer OKAY, the correct trace and the swapped trace are
+// identical on the wire -- not hard to tell apart, but the same bits. That is
+// a property of AXI, not of this fabric.
+//
+// So `errRegionBase` gives the write side something to compare against. When
+// it is set, each ID issues one extra single-beat write per round to a third
+// region -- an address no slave claims, which the crossbar's own decode-error
+// responder answers -- and each ID keeps a queue of what it expects back, one
+// bit per outstanding write. That responder is already wired into every fabric
+// as one more slave, so this costs a design no port, no arbiter input and no
+// decode term; a slave built to answer errors would cost all three. A B is then checked against the expectation at the head of its ID's
+// queue, so a response labelled with the wrong ID lands where an OKAY was
+// expected and an error was owed, or the reverse. Nothing is read back from
+// that region; its whole purpose is to make one master's writes answerable in
+// two distinguishable ways.
+//
+// `errRespSeen` reports that the error region really did answer, because a
+// build whose extra writes never went anywhere would pass this check by never
+// putting it to work -- the same reason `multiIdSeen` exists.
 
 package axizero.verif
 
@@ -84,6 +109,12 @@ import spinal.lib.bus.amba4.axi._
   * @param regionBBase
   *   Base of its window in the second slave. The two windows are the same size, and the generator
   *   owns both exclusively: it predicts what every word in them holds.
+  * @param errRegionBase
+  *   Optional base of a third region, at an address that decodes to no slave, so the fabric's own
+  *   decode-error responder answers it. When set, each ID issues one extra single-beat write per
+  *   round there and checks every write response against what that ID is owed, which is what makes
+  *   a B swapped between two busy IDs visible at all -- see the file header. One word per ID, never
+  *   read back.
   * @param windowWords
   *   Words in each window. Split evenly between the IDs, so each ID owns `windowWords / idCount`
   *   words of each window and no two IDs ever address the same one.
@@ -121,6 +152,7 @@ import spinal.lib.bus.amba4.axi._
 case class AxiMultiIdGenConfig(
   regionABase: BigInt,
   regionBBase: BigInt,
+  errRegionBase: Option[BigInt] = None,
   windowWords: Int = 128,
   idCount: Int = 4,
   dataPattern: Long = 0xd1000000L,
@@ -195,6 +227,23 @@ case class AxiMultiIdGenConfig(
     f"AxiMultiIdGenConfig: the two windows overlap at 0x$regionABase%x; they are meant to be in " +
       "two different slaves"
   )
+
+  /** Bytes the error region covers: one word per ID. */
+  val errRegionBytes: BigInt = BigInt(idCount) * 4
+
+  errRegionBase.foreach { base =>
+    require(
+      (base % 4) == 0,
+      f"AxiMultiIdGenConfig: errRegionBase 0x$base%x must be word aligned"
+    )
+    for ((name, other) <- Seq(("regionABase", regionABase), ("regionBBase", regionBBase))) {
+      require(
+        base + errRegionBytes <= other || other + windowBytes <= base,
+        f"AxiMultiIdGenConfig: the error region at 0x$base%x overlaps $name 0x$other%x; it is " +
+          "meant to be unmapped, so the decode-error responder is what answers it"
+      )
+    }
+  }
 }
 
 /** A self-checking AXI4 master that varies its transaction ID. See the file header.
@@ -266,6 +315,15 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
       * put under load: the request was there, and the fabric held it.
       */
     val crossSlaveTried = out Bool ()
+
+    /** Latched once a write response came back carrying the error the error region owes it.
+      *
+      * Low for good when no error region is configured, because there is then nothing that could
+      * set it: a build wanting this evidence has to ask for it. Where one is configured, a run
+      * without it is a *failure* -- the write-response identity check was never put to work, and a
+      * check nothing exercised proves as little as one that cannot fail.
+      */
+    val errRespSeen = out Bool ()
   }
 
   private val idW    = log2Up(cfg.idCount)
@@ -323,6 +381,20 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
     (B(cfg.dataPattern, 32 bits) | (pass.resize(32) |<< 16).asBits |
       (region.asUInt.resize(32) |<< 15).asBits | word.resize(32).asBits)
 
+  private val errEnabled = cfg.errRegionBase.isDefined
+
+  /** The word this generator owns in the error region: one per ID, so two IDs never share an
+    * address there either. Nothing is stored, but a slave is entitled to decode the address.
+    */
+  private def errAddrOf(id: UInt): UInt =
+    U(cfg.errRegionBase.getOrElse(BigInt(0)), axiConfig.addressWidth bits) +
+      (id.resize(axiConfig.addressWidth) |<< 2)
+
+  /** Beats in a burst: the error write is always one beat, so it cannot straddle anything or leave
+    * W out of step with a slave that answers before the data is done.
+    */
+  private def beatsOf(isErr: Bool): UInt = isErr ? U(1, 5 bits) | beats
+
   private val errData  = Reg(UInt(8 bits)) init (0)
   private val errResp  = Reg(UInt(8 bits)) init (0)
   private val errOrder = Reg(UInt(8 bits)) init (0)
@@ -348,7 +420,7 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
     * still changes every fourth burst here, so different IDs remain concurrent -- which is the
     * other half of what is being tested.
     */
-  private class Cursor(name: String) {
+  private class Cursor(name: String, withErr: Boolean = false) {
     val id     = Reg(UInt(idW bits)) init (0)
     val mate   = Reg(Bool()) init (False) // which of the pair at this region
     val region = Reg(Bool()) init (False)
@@ -358,33 +430,53 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
     region.setName(s"${name}_region")
     round.setName(s"${name}_round")
 
+    /** This burst goes to the error region: the fifth of the round, after the two pairs, and only
+      * on the write cursors. The read cursors never visit it -- nothing is stored there to read.
+      */
+    val err: Bool =
+      if (!withErr) False
+      else {
+        val r = Reg(Bool()) init (False)
+        r.setName(s"${name}_err")
+        r
+      }
+
     /** Every burst of this pass has been issued. */
     def exhausted: Bool = round === roundsPerPass
 
+    private def nextId(): Unit =
+      when(id === (cfg.idCount - 1)) {
+        id    := 0
+        round := round + 1
+      } otherwise {
+        id := id + 1
+      }
+
     def step(): Unit = {
-      when(!mate) {
+      when(err) {
+        // The error write is the last of the round, so this is where the ID
+        // moves on when there is one.
+        if (withErr) err := False
+        nextId()
+      } elsewhen (!mate) {
         mate := True
       } otherwise {
         mate := False
         when(!region) {
           region := True
         } otherwise {
-          region := False
-          when(id === (cfg.idCount - 1)) {
-            id    := 0
-            round := round + 1
-          } otherwise {
-            id := id + 1
-          }
+          region           := False
+          if (withErr) err := True else nextId()
         }
       }
     }
 
     def rewind(): Unit = {
-      id     := 0
-      mate   := False
-      region := False
-      round  := 0
+      id               := 0
+      mate             := False
+      region           := False
+      round            := 0
+      if (withErr) err := False
     }
   }
 
@@ -412,18 +504,19 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
   }
 
   // ── Write address ─────────────────────────────────────────────────────────
-  private val awCur     = new Cursor("aw")
+  private val awCur     = new Cursor("aw", withErr = errEnabled)
   private val wrPending = Vec(Reg(UInt(outW bits)) init (0), cfg.idCount) // AW issued, B not back
   private val awId      = awCur.id
   private val awRoom    = wrPending(awId) < cfg.outstandingPerId
 
   io.axi.aw.valid := False
   io.axi.aw.payload.assignDontCare()
-  io.axi.aw.addr  := addrOf(awCur.region, startWord(awCur.id, awCur.round, awCur.mate))
-  io.axi.aw.id    := awCur.id.resized
-  io.axi.aw.len   := (beats - 1).resized
-  io.axi.aw.size  := U(2, 3 bits) // 4 bytes
-  io.axi.aw.burst := B(1, 2 bits) // INCR
+  io.axi.aw.addr := awCur.err ? errAddrOf(awCur.id) |
+    addrOf(awCur.region, startWord(awCur.id, awCur.round, awCur.mate))
+  io.axi.aw.id                              := awCur.id.resized
+  io.axi.aw.len                             := (beatsOf(awCur.err) - 1).resized
+  io.axi.aw.size                            := U(2, 3 bits) // 4 bytes
+  io.axi.aw.burst                           := B(1, 2 bits) // INCR
   if (axiConfig.useLock) io.axi.aw.lock     := 0
   if (axiConfig.useCache) io.axi.aw.cache   := 0
   if (axiConfig.useProt) io.axi.aw.prot     := 0
@@ -440,7 +533,7 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
   // trails it. It is deliberately not gated on AWREADY -- AXI4 A3.3.1 permits
   // data before address, and a slave that merges AW and W into one command
   // channel will not accept the address until a beat is there to go with it.
-  private val wCur   = new Cursor("w")
+  private val wCur   = new Cursor("w", withErr = errEnabled)
   private val wBeat  = Reg(UInt(beatW + 1 bits)) init (0)
   private val wAhead = Reg(UInt(log2Up(cfg.idCount * cfg.outstandingPerId + 2) bits)) init (0)
   private val wArmed =
@@ -449,10 +542,13 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
 
   private val wWord = (startWord(wCur.id, wCur.round, wCur.mate) + wBeat).resize(wordW + 1)
 
-  io.axi.w.valid                       := io.enable && wArmed
+  io.axi.w.valid := io.enable && wArmed
+  // The error region stores nothing, so what the beat carries there is
+  // immaterial; it is still the generator's own pattern so a stray beat that
+  // reached a RAM would be recognisable.
   io.axi.w.data                        := dataOf(wWord, wCur.region, passIdx)
   if (axiConfig.useStrb) io.axi.w.strb := B(axiConfig.bytePerWord bits, default -> True)
-  if (axiConfig.useLast) io.axi.w.last := wBeat === (beats - 1)
+  if (axiConfig.useLast) io.axi.w.last := wBeat === (beatsOf(wCur.err) - 1)
 
   io.axi.b.ready := respReady(0)
 
@@ -507,7 +603,7 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
   when(arFire) { arCur.step() }
 
   when(wFire) {
-    when(wBeat === (beats - 1)) {
+    when(wBeat === (beatsOf(wCur.err) - 1)) {
       wBeat := 0
       wCur.step()
     } otherwise {
@@ -517,7 +613,7 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
 
   // Bursts whose W is done but whose AW has not been issued, so W cannot run
   // arbitrarily far ahead of the addresses it belongs to.
-  private val wBurstDone = wFire && wBeat === (beats - 1)
+  private val wBurstDone = wFire && wBeat === (beatsOf(wCur.err) - 1)
   when(wBurstDone && !awFire) {
     wAhead := wAhead + 1
   } elsewhen (!wBurstDone && awFire && wAhead =/= 0) {
@@ -525,12 +621,54 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
   }
 
   // ── Write responses ───────────────────────────────────────────────────────
-  // B carries an ID and a response and nothing else, so what can be checked
-  // here is that the fabric answered an ID that was actually waiting for one.
-  // Where the write data went is checked by the read-back, word by word.
+  // B carries an ID and a response and nothing else. Without an error region
+  // all that can be checked is that the fabric answered an ID which was
+  // actually waiting for one, and that the answer was OKAY; where the write
+  // data went is checked by the read-back, word by word.
+  //
+  // With one, each ID also keeps a queue of what its outstanding writes are
+  // owed -- one bit each, error or OKAY, oldest first, which is enough because
+  // AXI orders same-ID writes. A response is compared against the head of the
+  // queue its BID names, so a B labelled with the wrong ID arrives where the
+  // other ID's expectation is waiting and the two disagree. That is the swap
+  // the read-back cannot see.
+  private val bQExp =
+    if (!errEnabled) null
+    else Vec(Vec(Reg(Bool()) init (False), cfg.outstandingPerId), cfg.idCount)
+  private val bQHead =
+    if (!errEnabled) null
+    else Vec(Reg(UInt(log2Up(cfg.outstandingPerId) bits)) init (0), cfg.idCount)
+  private val bQTail =
+    if (!errEnabled) null
+    else Vec(Reg(UInt(log2Up(cfg.outstandingPerId) bits)) init (0), cfg.idCount)
+
+  /** Latched once the error region answered a write with the error it owes. A run whose extra
+    * writes never arrived would otherwise pass this check by never putting it to work. With no
+    * error region there is nothing that could set it, and it stays low.
+    */
+  private val errRespSeen: Bool =
+    if (!errEnabled) False
+    else {
+      val r = Reg(Bool()) init (False)
+      r.setName("errRespSeen")
+      r
+    }
+
   when(bFire) {
-    if (axiConfig.useResp) when(io.axi.b.resp =/= 0) { bump(errResp) }
-    when(wrPending(bId) === 0) { bump(errOrder) }
+    val waiting = wrPending(bId) =/= 0
+    if (axiConfig.useResp) {
+      val sawErr = io.axi.b.resp =/= 0
+      if (errEnabled) {
+        val owed = bQExp(bId)(bQHead(bId))
+        when(waiting) {
+          when(sawErr =/= owed) { bump(errResp) }
+          when(sawErr && owed) { errRespSeen := True }
+        }
+      } else {
+        when(sawErr) { bump(errResp) }
+      }
+    }
+    when(!waiting) { bump(errOrder) }
   }
   for (i <- 0 until cfg.idCount) {
     val inc = awFire && awId === i
@@ -539,6 +677,13 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
       wrPending(i) := wrPending(i) + 1
     } elsewhen (!inc && dec) {
       wrPending(i) := wrPending(i) - 1
+    }
+    if (errEnabled) {
+      when(inc) {
+        bQExp(i)(bQTail(i)) := awCur.err
+        bQTail(i)           := (bQTail(i) + 1).resized
+      }
+      when(dec) { bQHead(i) := (bQHead(i) + 1).resized }
     }
   }
 
@@ -670,6 +815,7 @@ class AxiMultiIdGen(axiConfig: Axi4Config, cfg: AxiMultiIdGenConfig) extends Com
   io.done            := done
   io.dataErrors      := errData
   io.respErrors      := errResp
+  io.errRespSeen     := errRespSeen
   io.orderErrors     := errOrder
   io.laps            := laps
   io.stalled         := stalled

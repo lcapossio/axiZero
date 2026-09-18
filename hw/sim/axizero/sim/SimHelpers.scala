@@ -28,61 +28,61 @@ object SimHelpers {
 
   def initMaster(m: Axi4): Unit = {
     m.aw.valid #= false
-    m.aw.addr  #= 0
-    if (m.config.useProt)  m.aw.prot  #= 0
-    if (m.config.useId)    m.aw.id    #= 0
-    if (m.config.useLen)   m.aw.len   #= 0
-    if (m.config.useSize)  m.aw.size  #= 0
-    if (m.config.useBurst) m.aw.burst #= 1  // INCR
-    if (m.config.useLock)  m.aw.lock  #= 0
+    m.aw.addr #= 0
+    if (m.config.useProt) m.aw.prot #= 0
+    if (m.config.useId) m.aw.id #= 0
+    if (m.config.useLen) m.aw.len #= 0
+    if (m.config.useSize) m.aw.size #= 0
+    if (m.config.useBurst) m.aw.burst #= 1 // INCR
+    if (m.config.useLock) m.aw.lock #= 0
     if (m.config.useCache) m.aw.cache #= 0
-    if (m.config.useQos)   m.aw.qos   #= 0
+    if (m.config.useQos) m.aw.qos #= 0
 
     m.w.valid #= false
-    m.w.data  #= 0
+    m.w.data #= 0
     if (m.config.useStrb) m.w.strb #= 0
     if (m.config.useLast) m.w.last #= false
 
     m.b.ready #= false
 
     m.ar.valid #= false
-    m.ar.addr  #= 0
-    if (m.config.useProt)  m.ar.prot  #= 0
-    if (m.config.useId)    m.ar.id    #= 0
-    if (m.config.useLen)   m.ar.len   #= 0
-    if (m.config.useSize)  m.ar.size  #= 0
+    m.ar.addr #= 0
+    if (m.config.useProt) m.ar.prot #= 0
+    if (m.config.useId) m.ar.id #= 0
+    if (m.config.useLen) m.ar.len #= 0
+    if (m.config.useSize) m.ar.size #= 0
     if (m.config.useBurst) m.ar.burst #= 1
-    if (m.config.useLock)  m.ar.lock  #= 0
+    if (m.config.useLock) m.ar.lock #= 0
     if (m.config.useCache) m.ar.cache #= 0
-    if (m.config.useQos)   m.ar.qos   #= 0
+    if (m.config.useQos) m.ar.qos #= 0
 
     m.r.ready #= false
   }
 
   def initSlave(s: Axi4): Unit = {
     s.aw.ready #= false
-    s.w.ready  #= false
-    s.b.valid  #= false
+    s.w.ready #= false
+    s.b.valid #= false
     if (s.config.useResp) s.b.resp #= 0
-    if (s.config.useId)   s.b.id   #= 0
+    if (s.config.useId) s.b.id #= 0
     s.ar.ready #= false
-    s.r.valid  #= false
-    s.r.data   #= 0
+    s.r.valid #= false
+    s.r.data #= 0
     if (s.config.useResp) s.r.resp #= 0
-    if (s.config.useId)   s.r.id   #= 0
+    if (s.config.useId) s.r.id #= 0
     if (s.config.useLast) s.r.last #= false
   }
 
   // ── AXI4-Lite master driver ─────────────────────────────────────────────────
 
-  def liteWrite(m: Axi4, cd: ClockDomain, addr: Long, data: Long, strb: Int = 0xF): Unit = {
+  def liteWrite(m: Axi4, cd: ClockDomain, addr: Long, data: Long, strb: Int = 0xf): Unit = {
     m.aw.valid #= true
-    m.aw.addr  #= addr
+    m.aw.addr #= addr
     while ({ cd.waitSampling(); !m.aw.ready.toBoolean }) {}
     m.aw.valid #= false
 
     m.w.valid #= true
-    m.w.data  #= data
+    m.w.data #= data
     if (m.config.useStrb) m.w.strb #= strb
     if (m.config.useLast) m.w.last #= true
     while ({ cd.waitSampling(); !m.w.ready.toBoolean }) {}
@@ -95,7 +95,7 @@ object SimHelpers {
 
   def liteRead(m: Axi4, cd: ClockDomain, addr: Long): Long = {
     m.ar.valid #= true
-    m.ar.addr  #= addr
+    m.ar.addr #= addr
     while ({ cd.waitSampling(); !m.ar.ready.toBoolean }) {}
     m.ar.valid #= false
 
@@ -111,12 +111,19 @@ object SimHelpers {
   private def sizeOf(m: Axi4): Int = {
     var n = m.config.dataWidth / 8; var s = 0
     while (n > 1) { n >>= 1; s += 1 }
-    s   // log2(dataWidth/8)
+    s // log2(dataWidth/8)
   }
 
   /** Single-beat write. Returns echoed B.id. */
-  def fullWrite(m: Axi4, cd: ClockDomain, addr: Long, data: Long,
-                id: Int = 0, strb: Int = 0xF, qos: Int = 0): Int =
+  def fullWrite(
+    m: Axi4,
+    cd: ClockDomain,
+    addr: Long,
+    data: Long,
+    id: Int = 0,
+    strb: Int = 0xf,
+    qos: Int = 0
+  ): Int =
     fullBurstWrite(m, cd, addr, Seq(data), id, strb, qos)
 
   /** Single-beat read. Returns (data, echoed R.id). */
@@ -125,27 +132,32 @@ object SimHelpers {
     (data.head, rid)
   }
 
-  /**
-   * Multi-beat INCR burst write.  data.length = number of beats.
-   * The slave receives consecutive addresses: addr, addr+4, addr+8, …
-   * Returns the echoed B.id.
-   */
-  def fullBurstWrite(m: Axi4, cd: ClockDomain, addr: Long, data: Seq[Long],
-                     id: Int = 0, strb: Int = 0xF, qos: Int = 0): Int = {
+  /** Multi-beat INCR burst write. data.length = number of beats. The slave receives consecutive
+    * addresses: addr, addr+4, addr+8, … Returns the echoed B.id.
+    */
+  def fullBurstWrite(
+    m: Axi4,
+    cd: ClockDomain,
+    addr: Long,
+    data: Seq[Long],
+    id: Int = 0,
+    strb: Int = 0xf,
+    qos: Int = 0
+  ): Int = {
     val numBeats = data.length
     m.aw.valid #= true
-    m.aw.addr  #= addr
-    if (m.config.useId)    m.aw.id    #= id
-    if (m.config.useLen)   m.aw.len   #= numBeats - 1
-    if (m.config.useSize)  m.aw.size  #= sizeOf(m)
-    if (m.config.useBurst) m.aw.burst #= 1  // INCR
-    if (m.config.useQos)   m.aw.qos   #= qos
+    m.aw.addr #= addr
+    if (m.config.useId) m.aw.id #= id
+    if (m.config.useLen) m.aw.len #= numBeats - 1
+    if (m.config.useSize) m.aw.size #= sizeOf(m)
+    if (m.config.useBurst) m.aw.burst #= 1 // INCR
+    if (m.config.useQos) m.aw.qos #= qos
     while ({ cd.waitSampling(); !m.aw.ready.toBoolean }) {}
     m.aw.valid #= false
 
     for ((beat, i) <- data.zipWithIndex) {
       m.w.valid #= true
-      m.w.data  #= beat
+      m.w.data #= beat
       if (m.config.useStrb) m.w.strb #= strb
       if (m.config.useLast) m.w.last #= (i == numBeats - 1)
       while ({ cd.waitSampling(); !m.w.ready.toBoolean }) {}
@@ -160,29 +172,35 @@ object SimHelpers {
     bid
   }
 
-  /**
-   * Multi-beat INCR burst read.
-   *
-   * stallCycles: master deasserts r.ready for this many cycles between
-   * beats, exercising R-channel back-pressure.
-   *
-   * Returns (Seq of beat data, echoed R.id from last beat).
-   */
-  def fullBurstRead(m: Axi4, cd: ClockDomain, addr: Long, beats: Int,
-                    id: Int = 0, stallCycles: Int = 0, qos: Int = 0): (Seq[Long], Int) = {
+  /** Multi-beat INCR burst read.
+    *
+    * stallCycles: master deasserts r.ready for this many cycles between beats, exercising R-channel
+    * back-pressure.
+    *
+    * Returns (Seq of beat data, echoed R.id from last beat).
+    */
+  def fullBurstRead(
+    m: Axi4,
+    cd: ClockDomain,
+    addr: Long,
+    beats: Int,
+    id: Int = 0,
+    stallCycles: Int = 0,
+    qos: Int = 0
+  ): (Seq[Long], Int) = {
     m.ar.valid #= true
-    m.ar.addr  #= addr
-    if (m.config.useId)    m.ar.id    #= id
-    if (m.config.useLen)   m.ar.len   #= beats - 1
-    if (m.config.useSize)  m.ar.size  #= sizeOf(m)
+    m.ar.addr #= addr
+    if (m.config.useId) m.ar.id #= id
+    if (m.config.useLen) m.ar.len #= beats - 1
+    if (m.config.useSize) m.ar.size #= sizeOf(m)
     if (m.config.useBurst) m.ar.burst #= 1
-    if (m.config.useQos)   m.ar.qos   #= qos
+    if (m.config.useQos) m.ar.qos #= qos
     while ({ cd.waitSampling(); !m.ar.ready.toBoolean }) {}
     m.ar.valid #= false
 
     val collected = mutable.ArrayBuffer[Long]()
-    var rid    = 0
-    var isLast = false
+    var rid       = 0
+    var isLast    = false
     while (!isLast) {
       m.r.ready #= true
       while ({ cd.waitSampling(); !m.r.valid.toBoolean }) {}
@@ -197,17 +215,15 @@ object SimHelpers {
 
   // ── IPIF-style simultaneous AW+W master driver ──────────────────────────────
 
-  /**
-   * Write that presents AW and W simultaneously — required to exercise
-   * Xilinx IPIF slaves which stall until both AWVALID and WVALID are high
-   * in the same cycle before asserting AWREADY/WREADY.
-   */
-  def liteWriteSimul(m: Axi4, cd: ClockDomain, addr: Long, data: Long,
-                     strb: Int = 0xF): Unit = {
+  /** Write that presents AW and W simultaneously — required to exercise Xilinx IPIF slaves which
+    * stall until both AWVALID and WVALID are high in the same cycle before asserting
+    * AWREADY/WREADY.
+    */
+  def liteWriteSimul(m: Axi4, cd: ClockDomain, addr: Long, data: Long, strb: Int = 0xf): Unit = {
     m.aw.valid #= true
-    m.aw.addr  #= addr
-    m.w.valid  #= true
-    m.w.data   #= data
+    m.aw.addr #= addr
+    m.w.valid #= true
+    m.w.data #= data
     if (m.config.useStrb) m.w.strb #= strb
     if (m.config.useLast) m.w.last #= true
 
@@ -216,7 +232,7 @@ object SimHelpers {
     while (!awDone || !wDone) {
       cd.waitSampling()
       if (!awDone && m.aw.ready.toBoolean) { awDone = true; m.aw.valid #= false }
-      if (!wDone  && m.w.ready.toBoolean)  {
+      if (!wDone && m.w.ready.toBoolean) {
         wDone = true; m.w.valid #= false
         if (m.config.useLast) m.w.last #= false
       }
@@ -229,12 +245,13 @@ object SimHelpers {
 
   // ── Slave models ────────────────────────────────────────────────────────────
 
-  /**
-   * Spawn a simple AXI4-Lite slave responder (single-beat, no IDs).
-   */
-  def spawnLiteSlave(s: Axi4, cd: ClockDomain,
-                     mem: mutable.HashMap[Long, Long] = mutable.HashMap()
-                    ): mutable.HashMap[Long, Long] = {
+  /** Spawn a simple AXI4-Lite slave responder (single-beat, no IDs).
+    */
+  def spawnLiteSlave(
+    s: Axi4,
+    cd: ClockDomain,
+    mem: mutable.HashMap[Long, Long] = mutable.HashMap()
+  ): mutable.HashMap[Long, Long] = {
     initSlave(s)
 
     fork {
@@ -263,7 +280,7 @@ object SimHelpers {
         val addr = s.ar.addr.toLong
         s.ar.ready #= false
 
-        s.r.data  #= mem.getOrElse(addr, 0xDEADBEEFL)
+        s.r.data #= mem.getOrElse(addr, 0xdeadbeefL)
         s.r.valid #= true
         if (s.config.useResp) s.r.resp #= 0
         if (s.config.useLast) s.r.last #= true
@@ -275,42 +292,42 @@ object SimHelpers {
     mem
   }
 
-  /**
-   * Spawn an IPIF-style AXI4-Lite slave that only accepts a write when
-   * AWVALID and WVALID are asserted simultaneously (mirrors Xilinx GPIO /
-   * UART-Lite IPIF behaviour).  The slave will never assert AWREADY or
-   * WREADY unless both are valid in the same cycle.
-   */
-  def spawnIpifLiteSlave(s: Axi4, cd: ClockDomain,
-                         mem: mutable.HashMap[Long, Long] = mutable.HashMap()
-                        ): mutable.HashMap[Long, Long] = {
+  /** Spawn an IPIF-style AXI4-Lite slave that only accepts a write when AWVALID and WVALID are
+    * asserted simultaneously (mirrors Xilinx GPIO / UART-Lite IPIF behaviour). The slave will never
+    * assert AWREADY or WREADY unless both are valid in the same cycle.
+    */
+  def spawnIpifLiteSlave(
+    s: Axi4,
+    cd: ClockDomain,
+    mem: mutable.HashMap[Long, Long] = mutable.HashMap()
+  ): mutable.HashMap[Long, Long] = {
     initSlave(s)
 
     // Write path: require simultaneous AWVALID + WVALID
     fork {
       while (true) {
         s.aw.ready #= false
-        s.w.ready  #= false
+        s.w.ready #= false
         // Wait until both valid simultaneously
         while ({ cd.waitSampling(); !(s.aw.valid.toBoolean && s.w.valid.toBoolean) }) {}
         // Accept both in the same cycle
         s.aw.ready #= true
-        s.w.ready  #= true
-        val addr = s.aw.addr.toLong
-        val data = s.w.data.toLong
-        val strb = if (s.config.useStrb) s.w.strb.toInt else 0xFF
+        s.w.ready #= true
+        val addr         = s.aw.addr.toLong
+        val data         = s.w.data.toLong
+        val strb         = if (s.config.useStrb) s.w.strb.toInt else 0xff
         val bytesPerBeat = s.config.dataWidth / 8
-        var merged = mem.getOrElse(addr, 0L)
+        var merged       = mem.getOrElse(addr, 0L)
         for (b <- 0 until bytesPerBeat) {
           if (((strb >> b) & 1) != 0) {
             val shift = b * 8
-            merged = (merged & ~(0xFFL << shift)) | ((data >> shift & 0xFFL) << shift)
+            merged = (merged & ~(0xffL << shift)) | ((data >> shift & 0xffL) << shift)
           }
         }
         mem(addr) = merged
         cd.waitSampling()
         s.aw.ready #= false
-        s.w.ready  #= false
+        s.w.ready #= false
 
         s.b.valid #= true
         if (s.config.useResp) s.b.resp #= 0
@@ -327,7 +344,7 @@ object SimHelpers {
         val addr = s.ar.addr.toLong
         s.ar.ready #= false
 
-        s.r.data  #= mem.getOrElse(addr, 0xDEADBEEFL)
+        s.r.data #= mem.getOrElse(addr, 0xdeadbeefL)
         s.r.valid #= true
         if (s.config.useResp) s.r.resp #= 0
         if (s.config.useLast) s.r.last #= true
@@ -339,22 +356,31 @@ object SimHelpers {
     mem
   }
 
-  /**
-   * Spawn a full-AXI4 slave responder with burst and back-pressure support.
-   *
-   * Write path: accepts AW, then accepts each W beat (optionally stalling
-   *   stallW cycles before asserting w.ready), then sends B with echoed ID.
-   * Read path: accepts AR, then sends len+1 R beats (optionally stalling
-   *   stallR cycles before asserting r.valid on each beat), with last on
-   *   the final beat.
-   *
-   * Addresses for INCR burst: base + beatIndex * (dataWidth/8).
-   */
-  def spawnFullSlave(s: Axi4, cd: ClockDomain,
-                     mem:   mutable.HashMap[Long, Long] = mutable.HashMap(),
-                     stallW: Int = 0,
-                     stallR: Int = 0
-                    ): mutable.HashMap[Long, Long] = {
+  /** Spawn a full-AXI4 slave responder with burst and back-pressure support.
+    *
+    * Write path: accepts AW, then accepts each W beat (optionally stalling stallW cycles before
+    * asserting w.ready), then sends B with echoed ID. Read path: accepts AR, then sends len+1 R
+    * beats (optionally stalling stallR cycles before asserting r.valid on each beat), with last on
+    * the final beat.
+    *
+    * Addresses for INCR burst: base + beatIndex * (dataWidth/8).
+    */
+  /** A full AXI4 slave model.
+    *
+    * `bresp` is the response code this slave returns on B. It defaults to OKAY, and the reason it
+    * is settable is identity: B carries an ID and a response and nothing else, so two slaves that
+    * both answer OKAY make a pair of BIDs exchanged between two waiting IDs indistinguishable. Give
+    * the two slaves different codes and the response itself says which slave answered, which is the
+    * only handle AXI4 offers on the write side.
+    */
+  def spawnFullSlave(
+    s: Axi4,
+    cd: ClockDomain,
+    mem: mutable.HashMap[Long, Long] = mutable.HashMap(),
+    stallW: Int = 0,
+    stallR: Int = 0,
+    bresp: Int = 0
+  ): mutable.HashMap[Long, Long] = {
     initSlave(s)
     val bytesPerBeat = s.config.dataWidth / 8
 
@@ -381,8 +407,8 @@ object SimHelpers {
         }
 
         s.b.valid #= true
-        if (s.config.useId)   s.b.id   #= id
-        if (s.config.useResp) s.b.resp #= 0
+        if (s.config.useId) s.b.id #= id
+        if (s.config.useResp) s.b.resp #= bresp
         while ({ cd.waitSampling(); !s.b.ready.toBoolean }) {}
         s.b.valid #= false
       }
@@ -401,10 +427,10 @@ object SimHelpers {
         for (i <- 0 to len) {
           for (_ <- 0 until stallR) cd.waitSampling()
           // Use unsigned BigInt so 64-bit values with bit 63 set don't fail #=
-          val rRaw = mem.getOrElse(baseAddr + i * bytesPerBeat, 0xDEADBEEFL)
-          s.r.data  #= BigInt(java.lang.Long.toUnsignedString(rRaw))
+          val rRaw = mem.getOrElse(baseAddr + i * bytesPerBeat, 0xdeadbeefL)
+          s.r.data #= BigInt(java.lang.Long.toUnsignedString(rRaw))
           s.r.valid #= true
-          if (s.config.useId)   s.r.id   #= id
+          if (s.config.useId) s.r.id #= id
           if (s.config.useResp) s.r.resp #= 0
           if (s.config.useLast) s.r.last #= (i == len)
           while ({ cd.waitSampling(); !s.r.ready.toBoolean }) {}

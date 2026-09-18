@@ -258,19 +258,36 @@ def find_serial_port():
     sys.exit(1)
 
 
-def step_serial(design, port, seconds):
+def step_serial(design, port, seconds, observe):
+    """Read the board's report line, then keep reading for `observe` more seconds.
+
+    Stopping at the first report line samples the design once, a fraction of a second after
+    configuration, and calls that the result. Every verdict the board reports is sticky -- a
+    generator error, a protocol violation and a checker that lost track all latch and never clear --
+    so a fault that first appears a second in is real, is still being reported, and was simply never
+    looked at. The generators run for as long as the board is powered, and the first report line is
+    the least traffic they will ever have run.
+
+    So the verdict is required to hold. Every report seen during the window has to match the first;
+    one that changes fails the run, and both lines are printed, because which bit moved and in which
+    direction is the whole of the information.
+    """
     import serial
 
     print(f"\n{'=' * 60}")
     print(f"  serial: listening on {port} at 115200 8N1 for {seconds}s")
+    print(f"  then holding the verdict under observation for {observe}s")
     print(f"{'=' * 60}\n", flush=True)
 
     reports = []
     deadline = time.time() + seconds
+    observe_deadline = None
     with serial.Serial(port, 115200, timeout=1) as ser:
         ser.reset_input_buffer()
         buf = ""
-        while time.time() < deadline and not reports:
+        while time.time() < deadline and (
+            observe_deadline is None or time.time() < observe_deadline
+        ):
             chunk = ser.read(64).decode("ascii", errors="replace")
             if not chunk:
                 continue
@@ -280,8 +297,18 @@ def step_serial(design, port, seconds):
                 line = line.strip("\r")
                 if not line:
                     continue
-                print(f"  <- {line}")
-                if REPORT_RE.match(line):
+                if not REPORT_RE.match(line):
+                    print(f"  <- {line}")
+                elif not reports:
+                    # The first report starts the observation window, and pushes
+                    # the overall deadline out so a slow boot cannot eat it.
+                    observe_deadline = time.time() + observe
+                    deadline = max(deadline, observe_deadline + 1.0)
+                    print(f"  <- {line}")
+                    reports.append(line)
+                else:
+                    if line != reports[0]:
+                        print(f"  <- {line}   <-- changed")
                     reports.append(line)
 
     print()
@@ -289,6 +316,16 @@ def step_serial(design, port, seconds):
         print("*** FAILED: no report line on the serial port.")
         print("    LD7 (heartbeat) dark means the design is not being clocked;")
         print("    lit means it runs but nothing reached the UART.")
+        sys.exit(1)
+
+    changed = [r for r in reports if r != reports[0]]
+    print(f"  observed {len(reports)} report lines over {observe}s")
+    if changed:
+        print("*** FAILED: the verdict changed while the board kept running.")
+        print(f"    first = {reports[0]}")
+        print(f"    later = {changed[-1]}")
+        print("    Every reported verdict is sticky, so this is a fault that took longer")
+        print("    to appear than the first report line took to arrive.")
         sys.exit(1)
 
     latest = reports[-1]
@@ -371,7 +408,17 @@ def parse_args():
         "--seconds",
         type=int,
         default=20,
-        help="How long to listen for a report line (default: 20).",
+        help="How long to listen for the first report line (default: 20).",
+    )
+    parser.add_argument(
+        "--observe",
+        type=float,
+        default=5.0,
+        help=(
+            "After the first report line, how long to keep reading and require the verdict to "
+            "stay the same (default: 5). The verdicts are sticky, so this is what catches a "
+            "fault that takes longer to appear than the first line takes to arrive."
+        ),
     )
     return parser.parse_args()
 
@@ -430,7 +477,7 @@ def run_design(design, args, port):
     step_timing(design, args.allow_timing_failure)
     if not args.skip_program:
         step_program(design)
-    step_serial(design, port, args.seconds)
+    step_serial(design, port, args.seconds, args.observe)
 
 
 def main():
