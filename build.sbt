@@ -57,13 +57,26 @@ lazy val root = project
     coverageOutputCobertura  := false,
     coverageOutputHTML       := true,
     coverageOutputXML        := false,
-    // Floors, not targets. Measured at 74.45% statement and 57.91% branch on
-    // 2026-09-23 (183 tests, 27 suites); these sit a few points under that, so
-    // a refactor that adds a defensive branch or two does not trip them but
-    // losing a suite does. A report without them is a number nobody reads
-    // until someone goes looking, which is the wrong time to find out.
-    // Raise them when coverage rises -- they are only useful just below it.
-    coverageMinimumStmtTotal   := 72,
+    // axizero.gen holds the `main` entry points that write the tracked
+    // netlists. `sbt test` never runs a main, so they scored 0% and dragged
+    // the total down by 866 statements while being gated harder than anything
+    // measured here: CI runs each one and check_generated.py compares all 15
+    // netlists byte for byte. Counting them made the number say "a quarter of
+    // this is untested" when what it meant was "some of this is tested by
+    // something else".
+    coverageExcludedPackages := "axizero\\.gen\\..*",
+    // Floors, not targets. Measured at 82.30% statement and 58.40% branch on
+    // 2026-09-23 over 185 tests in 28 suites; these sit three to four points
+    // under, so a refactor that adds a defensive branch or two does not trip
+    // them but losing a suite does. A report without them is a number nobody
+    // reads until someone goes looking, which is the wrong time.
+    //
+    // Branch sits much lower than statement because a branch here is usually a
+    // configuration choice, and no test builds every combination -- that is a
+    // real gap and the floor is set to catch it getting worse, not to bless it.
+    //
+    // Raise them when coverage rises; they are only useful just below it.
+    coverageMinimumStmtTotal   := 78,
     coverageMinimumBranchTotal := 55,
     coverageFailOnMinimum      := true
   )

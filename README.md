@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 183 SpinalSim + 36 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 185 SpinalSim + 36 cocotb tests pass.
 
 ---
 
@@ -547,7 +547,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-183 tests pass across 27 suites:
+185 tests pass across 28 suites:
 
 For the focused AXI4-Stream loop, including lint, YAML generator smoke tests, and cocotbext-axi generated-RTL tests:
 
@@ -572,6 +572,7 @@ python3 scripts/run_sim.py axis
 | `BurstTypeSpec` | 6 | Downsizer burst types: INCR baseline, FIXED 1-beat and 2-beat overwrite, WRAP aligned, WRAP 4-beat, WRAP with actual wrap-around |
 | `ArbitrationSpec` | 7 | FixedPriority and WeightedRoundRobin: contention ordering, throughput proportionality, data integrity |
 | `RegSliceAndLiteWidthSpec` | 10 | Register slices (Full + Lite, master/slave/both), AXI4-Lite width conversion (16→32 upsizing) including byte-lane placement and strobe preservation |
+| `MixedIdWidthSpec` | 2 | Masters declaring different numbers of IDs, so the narrow port's requests cross `Axi4IdWidener`. Every test checks the ID a response came back under, not just the data: the padding is constant zero outward, so the truncation back is exact only if the fabric returns the same zeros. No other root test builds a mixed-ID-width config — the widener's only exercise was through the VexRiscv example, a separate sbt project |
 | `RegSliceSkidSpec` | 6 | What `regSliceSkid` actually buys, rather than inferring it from timing closure: a stalled plain slice accepts one beat and a skid two; the plain slice's READY is combinational from the far side and the skid's is not, shown by stalling and releasing on one cycle; 400 beats survive random back-pressure through both; latency stays one cycle and throughput full for both; B and R keep the plain slice they are given; and the Lite slice behaves the same way. The skid buffer is on the AW/W/AR path of every registered master on both boards, and until now no test told the two apart |
 | `PipelinedArbitrationSpec` | 9 | Pipelined FixedPriority, WRR, and QoS: contention, concurrent bursts, data integrity |
 | `NarrowPortSpec` | 6 | Narrow ports: 32→16 downsizing, 16→32 upsizing, mixed Full+Lite concurrent traffic |

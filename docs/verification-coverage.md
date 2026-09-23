@@ -1,6 +1,6 @@
 # axiZero Verification Coverage Report
 
-Status as of 2026-09-23 — 183 SpinalSim tests in 27 suites, 24 VexZero SoC tests in 10
+Status as of 2026-09-23 — 185 SpinalSim tests in 28 suites, 24 VexZero SoC tests in 10
 suites, 36 cocotb tests in 6 suites, and 2 SymbiYosys proofs, all passing. Every design
 listed below is also built and run on an Arty A7-100T (Vivado) and a DE25-Nano (Quartus).
 
@@ -31,6 +31,7 @@ listed below is also built and run on an Arty A7-100T (Vivado) and a DE25-Nano (
 | Channel skew / response stability | `ChannelSkewSpec`, `ResponseStabilitySpec` | AW/W arriving apart; payload stable while VALID && !READY |
 | Real CPU through the fabric | VexZero suites + both boards | VexRiscv boots and runs its self test while traffic generators saturate the crossbar |
 | Byte-lane placement (Lite width conversion) | `RegSliceAndLiteWidthSpec` | Both halves of one wide word through a narrow port, and a partial strobe leaving its neighbour alone |
+| Mixed master ID widths | `MixedIdWidthSpec` | `Axi4IdWidener` zero-extends outward and truncates back; the returned ID is checked, not just the data |
 
 ### Gaps — not tested
 
