@@ -38,9 +38,11 @@ jobs:
       - name: Run scalafix
         run: sbt "scalafix --check"
 
-      - name: Coverage report (SpinalSim)
+      - name: Coverage gate (SpinalSim)
         # -Dcoverage=true must be set at JVM startup so scalacOptions are
         # evaluated correctly; coverageTest = test + coverageReport.
+        # coverageReport fails the build below the floors in build.sbt, so this
+        # is a gate and not just the artifact uploaded in the next step.
         run: sbt -Dcoverage=true coverageTest
 
       - name: Upload coverage report

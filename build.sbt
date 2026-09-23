@@ -56,7 +56,16 @@ lazy val root = project
     coverageHighlighting     := true,
     coverageOutputCobertura  := false,
     coverageOutputHTML       := true,
-    coverageOutputXML        := false
+    coverageOutputXML        := false,
+    // Floors, not targets. Measured at 74.45% statement and 57.91% branch on
+    // 2026-09-23 (183 tests, 27 suites); these sit a few points under that, so
+    // a refactor that adds a defensive branch or two does not trip them but
+    // losing a suite does. A report without them is a number nobody reads
+    // until someone goes looking, which is the wrong time to find out.
+    // Raise them when coverage rises -- they are only useful just below it.
+    coverageMinimumStmtTotal   := 72,
+    coverageMinimumBranchTotal := 55,
+    coverageFailOnMinimum      := true
   )
 
 // ---------------------------------------------------------------------------
