@@ -31,8 +31,8 @@ class Axi3MixedCrossbarSpec extends AnyFunSuite {
 
   private val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -51,26 +51,37 @@ class Axi3MixedCrossbarSpec extends AnyFunSuite {
   // to declare the io.masters(0) port; the bridge sits internally).
   // AXI3 constraints: len ≤ 15, no QoS, no region.  idWidth=4.
   private val axi3MasterAxi4Cfg = Axi4Config(
-    addressWidth = 32, dataWidth = 32, idWidth = 4
+    addressWidth = 32,
+    dataWidth = 32,
+    idWidth = 4
   )
 
   private val axi3Cfg = Axi3Config(addressWidth = 32, dataWidth = 32, idWidth = 4)
 
   private val liteCfg = Axi4Config(
-    addressWidth = 32, dataWidth = 32,
-    useId        = false, useRegion = false,
-    useBurst     = false, useLock   = false,
-    useCache     = false, useSize   = false,
-    useQos       = false, useLen    = false,
-    useLast      = false, useResp   = true,
-    useProt      = true,  useStrb   = true
+    addressWidth = 32,
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
   )
 
   // slaveIdW = effectiveIdW(4) + masterIndexBits(0 since numMasters=1) = 4
   private val fullSlaveIdW = 4
 
   private val fullSlaveCfg = Axi4Config(
-    addressWidth = 32, dataWidth = 32, idWidth = fullSlaveIdW
+    addressWidth = 32,
+    dataWidth = 32,
+    idWidth = fullSlaveIdW
   )
 
   // ── DUT ──────────────────────────────────────────────────────────────────
@@ -78,29 +89,29 @@ class Axi3MixedCrossbarSpec extends AnyFunSuite {
   private def makeCfg: AxiZeroConfig = AxiZeroConfig(
     masters = Seq(
       MasterPort(
-        config   = axi3MasterAxi4Cfg,
-        mode     = Axi3Mode,
-        axi3Cfg  = Some(axi3Cfg)
+        config = axi3MasterAxi4Cfg,
+        mode = Axi3Mode,
+        axi3Cfg = Some(axi3Cfg)
       )
     ),
     slaves = Seq(
       SlavePort(fullSlaveCfg, FullAxi4, slave0Base, slaveSize),
-      SlavePort(liteCfg,      LiteAxi4, slave1Base, slaveSize)
+      SlavePort(liteCfg, LiteAxi4, slave1Base, slaveSize)
     )
   )
 
   private def makeCfgWithRegSlice: AxiZeroConfig = AxiZeroConfig(
     masters = Seq(
       MasterPort(
-        config   = axi3MasterAxi4Cfg,
-        mode     = Axi3Mode,
-        axi3Cfg  = Some(axi3Cfg),
+        config = axi3MasterAxi4Cfg,
+        mode = Axi3Mode,
+        axi3Cfg = Some(axi3Cfg),
         regSlice = true
       )
     ),
     slaves = Seq(
       SlavePort(fullSlaveCfg, FullAxi4, slave0Base, slaveSize, regSlice = true),
-      SlavePort(liteCfg,      LiteAxi4, slave1Base, slaveSize)
+      SlavePort(liteCfg, LiteAxi4, slave1Base, slaveSize)
     )
   )
 
@@ -120,11 +131,11 @@ class Axi3MixedCrossbarSpec extends AnyFunSuite {
       SimHelpers.spawnLiteSlave(slave1, cd)
       cd.waitSampling(5)
 
-      SimHelpers.fullWrite(master, cd, slave0Base.toLong + 0x100L, 0xDEAD1234L, id = 2)
+      SimHelpers.fullWrite(master, cd, slave0Base.toLong + 0x100L, 0xdead1234L, id = 2)
       val (data, _) = SimHelpers.fullRead(master, cd, slave0Base.toLong + 0x100L, id = 2)
 
-      assert(data == 0xDEAD1234L, f"expected 0xDEAD1234, got 0x$data%08X")
-      assert(mem0(slave0Base.toLong + 0x100L) == 0xDEAD1234L)
+      assert(data == 0xdead1234L, f"expected 0xDEAD1234, got 0x$data%08X")
+      assert(mem0(slave0Base.toLong + 0x100L) == 0xdead1234L)
       cd.waitSampling(5)
     }
   }
@@ -143,10 +154,10 @@ class Axi3MixedCrossbarSpec extends AnyFunSuite {
       val mem1 = SimHelpers.spawnLiteSlave(slave1, cd)
       cd.waitSampling(5)
 
-      SimHelpers.fullWrite(master, cd, slave1Base.toLong + 0x10L, 0xCAFEBABEL, id = 0)
+      SimHelpers.fullWrite(master, cd, slave1Base.toLong + 0x10L, 0xcafebabeL, id = 0)
       val (data, _) = SimHelpers.fullRead(master, cd, slave1Base.toLong + 0x10L, id = 0)
 
-      assert(data == 0xCAFEBABEL, f"expected 0xCAFEBABE, got 0x$data%08X")
+      assert(data == 0xcafebabeL, f"expected 0xCAFEBABE, got 0x$data%08X")
       cd.waitSampling(5)
     }
   }
@@ -165,8 +176,8 @@ class Axi3MixedCrossbarSpec extends AnyFunSuite {
       SimHelpers.spawnLiteSlave(slave1, cd)
       cd.waitSampling(5)
 
-      val v0 = 0xAAAA0000L
-      val v1 = 0xBBBB1111L
+      val v0 = 0xaaaa0000L
+      val v1 = 0xbbbb1111L
 
       SimHelpers.fullWrite(master, cd, slave0Base.toLong, v0, id = 1)
       SimHelpers.fullWrite(master, cd, slave1Base.toLong, v1, id = 2)
@@ -195,14 +206,13 @@ class Axi3MixedCrossbarSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       val baseAddr = slave0Base.toLong + 0x200L
-      val beats = Seq(0x11111111L, 0x22222222L, 0x33333333L, 0x44444444L)
+      val beats    = Seq(0x11111111L, 0x22222222L, 0x33333333L, 0x44444444L)
 
       SimHelpers.fullBurstWrite(master, cd, baseAddr, beats, id = 3)
 
       for ((expected, i) <- beats.zipWithIndex) {
         val (data, _) = SimHelpers.fullRead(master, cd, baseAddr + i * 4, id = 3)
-        assert(data == expected,
-          f"burst beat $i: expected 0x$expected%08X, got 0x$data%08X")
+        assert(data == expected, f"burst beat $i: expected 0x$expected%08X, got 0x$data%08X")
       }
       cd.waitSampling(5)
     }
@@ -223,18 +233,20 @@ class Axi3MixedCrossbarSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       // Single-beat write+read through register slices
-      SimHelpers.fullWrite(master, cd, slave0Base.toLong + 0x40L, 0xFACEFEEDL, id = 1)
+      SimHelpers.fullWrite(master, cd, slave0Base.toLong + 0x40L, 0xfacefeedL, id = 1)
       val (d0, _) = SimHelpers.fullRead(master, cd, slave0Base.toLong + 0x40L, id = 1)
-      assert(d0 == 0xFACEFEEDL, f"regSlice single: expected 0xFACEFEED, got 0x$d0%08X")
+      assert(d0 == 0xfacefeedL, f"regSlice single: expected 0xFACEFEED, got 0x$d0%08X")
 
       // 4-beat burst through register slices
       val baseAddr = slave0Base.toLong + 0x300L
-      val beats = Seq(0xAA000001L, 0xBB000002L, 0xCC000003L, 0xDD000004L)
+      val beats    = Seq(0xaa000001L, 0xbb000002L, 0xcc000003L, 0xdd000004L)
       SimHelpers.fullBurstWrite(master, cd, baseAddr, beats, id = 2)
       for ((expected, i) <- beats.zipWithIndex) {
         val (data, _) = SimHelpers.fullRead(master, cd, baseAddr + i * 4, id = 2)
-        assert(data == expected,
-          f"regSlice burst beat $i: expected 0x$expected%08X, got 0x$data%08X")
+        assert(
+          data == expected,
+          f"regSlice burst beat $i: expected 0x$expected%08X, got 0x$data%08X"
+        )
       }
       cd.waitSampling(5)
     }

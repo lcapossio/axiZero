@@ -37,8 +37,8 @@ class AxiStreamCoreSpec extends AnyFunSuite {
 
   /** Config with the sideband fields enabled.
     *
-    * The Axi4StreamMaster/Slave helpers only carry data bytes, so the sideband tests drive the
-    * bus directly rather than through the BFMs.
+    * The Axi4StreamMaster/Slave helpers only carry data bytes, so the sideband tests drive the bus
+    * directly rather than through the BFMs.
     */
   private def axisSidebandCfg(dataWidth: Int): Axi4StreamConfig =
     Axi4StreamConfig(
@@ -56,14 +56,13 @@ class AxiStreamCoreSpec extends AnyFunSuite {
 
   /** Park a stream input at a defined idle state.
     *
-    * Every payload field must be driven, not just valid: an undriven field stays at X, and
-    * reading one through a core's payload mux fails with a raw64ToInt error rather than a
-    * useful mismatch.
+    * Every payload field must be driven, not just valid: an undriven field stays at X, and reading
+    * one through a core's payload mux fails with a raw64ToInt error rather than a useful mismatch.
     */
   private def idleSidebandInput(stream: Axi4Stream.Axi4Stream): Unit = {
-    stream.valid        #= false
+    stream.valid #= false
     stream.payload.data #= 0
-    stream.payload.id   #= 0
+    stream.payload.id #= 0
     stream.payload.dest #= 0
     stream.payload.user #= 0
     stream.payload.last #= false
@@ -81,9 +80,9 @@ class AxiStreamCoreSpec extends AnyFunSuite {
     user: Int,
     last: Boolean = true
   ): Unit = {
-    stream.valid       #= true
+    stream.valid #= true
     stream.payload.data #= data
-    stream.payload.id   #= id
+    stream.payload.id #= id
     stream.payload.dest #= dest
     stream.payload.user #= user
     stream.payload.last #= last
@@ -95,8 +94,8 @@ class AxiStreamCoreSpec extends AnyFunSuite {
 
   /** Wait for a beat and return its sideband fields.
     *
-    * All four are read as BigInt rather than Int: TUSER is userWidth bits *per data byte*, so on
-    * an 8-byte bus a userWidth of 5 is a 40-bit field and toInt overflows.
+    * All four are read as BigInt rather than Int: TUSER is userWidth bits *per data byte*, so on an
+    * 8-byte bus a userWidth of 5 is a 40-bit field and toInt overflows.
     */
   private def recvSidebandBeat(
     stream: Axi4Stream.Axi4Stream,
@@ -159,12 +158,17 @@ class AxiStreamCoreSpec extends AnyFunSuite {
       val beats = Seq((0x11, 0x01), (0x22, 0x02), (0x33, 0x04))
 
       val send = fork {
-        beats.zipWithIndex.foreach { case ((data, user), i) =>
-          sendSidebandBeat(
-            dut.io.input, cd,
-            data = data, id = 0x7, dest = 0x2, user = user,
-            last = i == beats.length - 1
-          )
+        beats.zipWithIndex.foreach {
+          case ((data, user), i) =>
+            sendSidebandBeat(
+              dut.io.input,
+              cd,
+              data = data,
+              id = 0x7,
+              dest = 0x2,
+              user = user,
+              last = i == beats.length - 1
+            )
         }
       }
 

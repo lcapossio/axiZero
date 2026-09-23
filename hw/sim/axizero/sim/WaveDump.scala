@@ -23,8 +23,8 @@ object WaveDump extends App {
 
   val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -38,11 +38,11 @@ object WaveDump extends App {
 
   val cfg = AxiZeroConfig(
     masters = Seq.fill(2)(MasterPort(masterCfg, FullAxi4)),
-    slaves  = Seq(
+    slaves = Seq(
       SlavePort(slaveCfg, FullAxi4, slave0Base, slaveSize),
       SlavePort(slaveCfg, FullAxi4, slave1Base, slaveSize)
     ),
-    arbitration    = RoundRobin,
+    arbitration = RoundRobin,
     maxOutstanding = 4
   )
 
@@ -65,10 +65,10 @@ object WaveDump extends App {
       cd.waitSampling(5)
 
       val base0 = slave0Base.toLong + 0x100L
-      val base1 = slave0Base.toLong + 0x200L   // both in slave 0 region
+      val base1 = slave0Base.toLong + 0x200L // both in slave 0 region
 
-      val data0 = (0 until 16).map(i => 0xA0000000L | i.toLong)
-      val data1 = (0 until 16).map(i => 0xB0000000L | i.toLong)
+      val data0 = (0 until 16).map(i => 0xa0000000L | i.toLong)
+      val data1 = (0 until 16).map(i => 0xb0000000L | i.toLong)
 
       // M0 burst write (16 beats, W stall = 2 cycles each)
       SimHelpers.fullBurstWrite(dut.io.masters(0), cd, base0, data0, id = 1)

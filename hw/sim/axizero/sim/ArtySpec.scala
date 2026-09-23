@@ -28,8 +28,8 @@ class ArtySpec extends AnyFunSuite {
 
   private val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -37,35 +37,42 @@ class ArtySpec extends AnyFunSuite {
   private def simCfg = SimConfig.withConfig(spinalCfg)
 
   // ── Address map (matches Arty hardware) ───────────────────────────────────
-  private val bram0Base  = BigInt("C0000000", 16)
-  private val bram1Base  = BigInt("C0010000", 16)
-  private val gpioBase   = BigInt("C0020000", 16)
-  private val uartBase   = BigInt("C0030000", 16)
-  private val slaveSize  = BigInt("00010000", 16)
-  private val liteSize   = BigInt("00001000", 16)
+  private val bram0Base = BigInt("C0000000", 16)
+  private val bram1Base = BigInt("C0010000", 16)
+  private val gpioBase  = BigInt("C0020000", 16)
+  private val uartBase  = BigInt("C0030000", 16)
+  private val slaveSize = BigInt("00010000", 16)
+  private val liteSize  = BigInt("00001000", 16)
 
   // ── Bus configs (exact match with ArtyDutGen) ─────────────────────────────
-  private val masterCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
+  private val masterCfg    = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
   private val fullSlaveCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 1)
   private val liteSlaveCfg = Axi4Config(
-    addressWidth = 32, dataWidth = 32,
-    useId     = false, useRegion = false,
-    useBurst  = false, useLock   = false,
-    useCache  = false, useSize   = false,
-    useQos    = false, useLen    = false,
-    useLast   = false, useResp   = true,
-    useProt   = true,  useStrb   = true
+    addressWidth = 32,
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
   )
 
   private def makeArtyConfig = AxiZeroConfig(
     masters = Seq(MasterPort(masterCfg, FullAxi4)),
-    slaves  = Seq(
+    slaves = Seq(
       SlavePort(fullSlaveCfg, FullAxi4, bram0Base, slaveSize),
       SlavePort(fullSlaveCfg, FullAxi4, bram1Base, slaveSize),
-      SlavePort(liteSlaveCfg, LiteAxi4, gpioBase,  liteSize),
-      SlavePort(liteSlaveCfg, LiteAxi4, uartBase,  liteSize)
+      SlavePort(liteSlaveCfg, LiteAxi4, gpioBase, liteSize),
+      SlavePort(liteSlaveCfg, LiteAxi4, uartBase, liteSize)
     ),
-    arbitration    = RoundRobin,
+    arbitration = RoundRobin,
     maxOutstanding = 4
   )
 
@@ -83,19 +90,18 @@ class ArtySpec extends AnyFunSuite {
 
       cd.waitSampling(5)
 
-      val base  = bram0Base.toLong + 0x1000L
+      val base   = bram0Base.toLong + 0x1000L
       val nWords = 64
 
       // 64 individual single-beat writes (len=0 each) — mirrors firmware wr32 loop
       for (i <- 0 until nWords)
-        SimHelpers.fullWrite(dut.io.masters(0), cd, base + i * 4, 0xA0000000L | i)
+        SimHelpers.fullWrite(dut.io.masters(0), cd, base + i * 4, 0xa0000000L | i)
 
       // Read back
       for (i <- 0 until nWords) {
         val (got, _) = SimHelpers.fullRead(dut.io.masters(0), cd, base + i * 4)
-        val exp = 0xA0000000L | i
-        assert(got == exp,
-          f"T4 word $i: wrote 0x${exp}%08x, read back 0x${got}%08x")
+        val exp      = 0xa0000000L | i
+        assert(got == exp, f"T4 word $i: wrote 0x${exp}%08x, read back 0x${got}%08x")
       }
     }
   }
@@ -123,10 +129,9 @@ class ArtySpec extends AnyFunSuite {
       }
 
       for (i <- 0 until nWords) {
-        val exp = 1L << (i & 31)
+        val exp      = 1L << (i & 31)
         val (got, _) = SimHelpers.fullRead(dut.io.masters(0), cd, base + i * 4)
-        assert(got == exp,
-          f"T5 word $i: wrote 0x${exp}%08x, read back 0x${got}%08x")
+        assert(got == exp, f"T5 word $i: wrote 0x${exp}%08x, read back 0x${got}%08x")
       }
     }
   }
@@ -152,16 +157,15 @@ class ArtySpec extends AnyFunSuite {
       // Write alternating: odd i → BRAM0, even i → BRAM1 (matches firmware)
       for (i <- 0 until nWords) {
         val addr = if ((i & 1) != 0) base0 + i * 4 else base1 + i * 4
-        SimHelpers.fullWrite(dut.io.masters(0), cd, addr, 0xB0000000L | i)
+        SimHelpers.fullWrite(dut.io.masters(0), cd, addr, 0xb0000000L | i)
       }
 
       // Read back
       for (i <- 0 until nWords) {
-        val addr = if ((i & 1) != 0) base0 + i * 4 else base1 + i * 4
-        val exp  = 0xB0000000L | i
+        val addr     = if ((i & 1) != 0) base0 + i * 4 else base1 + i * 4
+        val exp      = 0xb0000000L | i
         val (got, _) = SimHelpers.fullRead(dut.io.masters(0), cd, addr)
-        assert(got == exp,
-          f"T6 word $i: wrote 0x${exp}%08x, read back 0x${got}%08x")
+        assert(got == exp, f"T6 word $i: wrote 0x${exp}%08x, read back 0x${got}%08x")
       }
     }
   }
@@ -185,14 +189,14 @@ class ArtySpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       // T1 – single write+read BRAM0+0x100
-      SimHelpers.fullWrite(dut.io.masters(0), cd, bram0Base.toLong + 0x100L, 0xDEADBEEFL)
+      SimHelpers.fullWrite(dut.io.masters(0), cd, bram0Base.toLong + 0x100L, 0xdeadbeefL)
       val (t1got, _) = SimHelpers.fullRead(dut.io.masters(0), cd, bram0Base.toLong + 0x100L)
-      assert(t1got == 0xDEADBEEFL, f"T1 readback: got 0x$t1got%08x expected 0xDEADBEEF")
+      assert(t1got == 0xdeadbeefL, f"T1 readback: got 0x$t1got%08x expected 0xDEADBEEF")
 
       // T2 – single write+read BRAM1+0x200
-      SimHelpers.fullWrite(dut.io.masters(0), cd, bram1Base.toLong + 0x200L, 0xCAFEBABEL)
+      SimHelpers.fullWrite(dut.io.masters(0), cd, bram1Base.toLong + 0x200L, 0xcafebabeL)
       val (t2got, _) = SimHelpers.fullRead(dut.io.masters(0), cd, bram1Base.toLong + 0x200L)
-      assert(t2got == 0xCAFEBABEL, f"T2 readback: got 0x$t2got%08x expected 0xCAFEBABE")
+      assert(t2got == 0xcafebabeL, f"T2 readback: got 0x$t2got%08x expected 0xCAFEBABE")
 
       // T3 – 2 writes (BRAM0+0x10, BRAM1+0x10) then 2 reads
       SimHelpers.fullWrite(dut.io.masters(0), cd, bram0Base.toLong + 0x10L, 0x11111111L)
@@ -206,12 +210,11 @@ class ArtySpec extends AnyFunSuite {
       val base4  = bram0Base.toLong + 0x1000L
       val nWords = 64
       for (i <- 0 until nWords)
-        SimHelpers.fullWrite(dut.io.masters(0), cd, base4 + i * 4, 0xA0000000L | i)
+        SimHelpers.fullWrite(dut.io.masters(0), cd, base4 + i * 4, 0xa0000000L | i)
       for (i <- 0 until nWords) {
-        val exp = 0xA0000000L | i
+        val exp      = 0xa0000000L | i
         val (got, _) = SimHelpers.fullRead(dut.io.masters(0), cd, base4 + i * 4)
-        assert(got == exp,
-          f"T4 word $i after T1+T2+T3: wrote 0x$exp%08x, read back 0x$got%08x")
+        assert(got == exp, f"T4 word $i after T1+T2+T3: wrote 0x$exp%08x, read back 0x$got%08x")
       }
     }
   }
@@ -236,17 +239,15 @@ class ArtySpec extends AnyFunSuite {
       val base   = bram0Base.toLong
       val nWords = 256
       val EVEN   = 0x55555555L
-      val ODD    = 0xAAAAAAAAL
+      val ODD    = 0xaaaaaaaaL
 
       for (i <- 0 until nWords)
-        SimHelpers.fullWrite(dut.io.masters(0), cd, base + i * 4,
-          if ((i & 1) == 0) EVEN else ODD)
+        SimHelpers.fullWrite(dut.io.masters(0), cd, base + i * 4, if ((i & 1) == 0) EVEN else ODD)
 
       for (i <- 0 until nWords) {
-        val exp = if ((i & 1) == 0) EVEN else ODD
+        val exp      = if ((i & 1) == 0) EVEN else ODD
         val (got, _) = SimHelpers.fullRead(dut.io.masters(0), cd, base + i * 4)
-        assert(got == exp,
-          f"T9 word $i: wrote 0x${exp}%08x, read back 0x${got}%08x")
+        assert(got == exp, f"T9 word $i: wrote 0x${exp}%08x, read back 0x${got}%08x")
       }
     }
   }

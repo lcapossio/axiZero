@@ -22,8 +22,8 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
 
   private val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -43,11 +43,12 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
 
   private def makeFullRegSliceCfg(masterRS: Boolean, slaveRS: Boolean) = AxiZeroConfig(
     masters = Seq(MasterPort(fullCfg, FullAxi4, regSlice = masterRS)),
-    slaves  = Seq(SlavePort(fullSlaveCfg, FullAxi4, slaveBase, slaveSize, regSlice = slaveRS))
+    slaves = Seq(SlavePort(fullSlaveCfg, FullAxi4, slaveBase, slaveSize, regSlice = slaveRS))
   )
 
   test("regSlice: Full AXI4 master-side register slice write-read") {
-    simCfg.compile(new AxiZeroMixedTop(makeFullRegSliceCfg(masterRS = true, slaveRS = false)))
+    simCfg
+      .compile(new AxiZeroMixedTop(makeFullRegSliceCfg(masterRS = true, slaveRS = false)))
       .doSim { dut =>
         val cd  = dut.clockDomain
         val mem = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
@@ -55,14 +56,15 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
         cd.forkStimulus(10)
         cd.waitSampling(10)
 
-        SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0000L, 0xDEADBEEFL)
+        SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0000L, 0xdeadbeefL)
         val (rdata, _) = SimHelpers.fullBurstRead(dut.io.masters(0), cd, 0x0000L, 1)
-        assert(rdata.head == 0xDEADBEEFL, f"master-RS: got 0x${rdata.head}%08X")
+        assert(rdata.head == 0xdeadbeefL, f"master-RS: got 0x${rdata.head}%08X")
       }
   }
 
   test("regSlice: Full AXI4 slave-side register slice write-read") {
-    simCfg.compile(new AxiZeroMixedTop(makeFullRegSliceCfg(masterRS = false, slaveRS = true)))
+    simCfg
+      .compile(new AxiZeroMixedTop(makeFullRegSliceCfg(masterRS = false, slaveRS = true)))
       .doSim { dut =>
         val cd  = dut.clockDomain
         val mem = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
@@ -70,14 +72,15 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
         cd.forkStimulus(10)
         cd.waitSampling(10)
 
-        SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0004L, 0xCAFEBABEL)
+        SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0004L, 0xcafebabeL)
         val (rdata, _) = SimHelpers.fullBurstRead(dut.io.masters(0), cd, 0x0004L, 1)
-        assert(rdata.head == 0xCAFEBABEL, f"slave-RS: got 0x${rdata.head}%08X")
+        assert(rdata.head == 0xcafebabeL, f"slave-RS: got 0x${rdata.head}%08X")
       }
   }
 
   test("regSlice: Full AXI4 both master and slave register slices write-read") {
-    simCfg.compile(new AxiZeroMixedTop(makeFullRegSliceCfg(masterRS = true, slaveRS = true)))
+    simCfg
+      .compile(new AxiZeroMixedTop(makeFullRegSliceCfg(masterRS = true, slaveRS = true)))
       .doSim { dut =>
         val cd  = dut.clockDomain
         val mem = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
@@ -90,13 +93,17 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
           SimHelpers.fullWrite(dut.io.masters(0), cd, addr, data)
         for ((addr, exp) <- pairs) {
           val (rdata, _) = SimHelpers.fullBurstRead(dut.io.masters(0), cd, addr, 1)
-          assert(rdata.head == exp, f"both-RS addr=0x$addr%04X: exp=0x$exp%08X got=0x${rdata.head}%08X")
+          assert(
+            rdata.head == exp,
+            f"both-RS addr=0x$addr%04X: exp=0x$exp%08X got=0x${rdata.head}%08X"
+          )
         }
       }
   }
 
   test("regSlice: Full AXI4 multi-beat burst through both register slices") {
-    simCfg.compile(new AxiZeroMixedTop(makeFullRegSliceCfg(masterRS = true, slaveRS = true)))
+    simCfg
+      .compile(new AxiZeroMixedTop(makeFullRegSliceCfg(masterRS = true, slaveRS = true)))
       .doSim { dut =>
         val cd  = dut.clockDomain
         val mem = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
@@ -105,7 +112,7 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
         cd.waitSampling(10)
 
         val base  = 0x0100L
-        val beats = (0 until 4).map(i => 0xA0000000L | i.toLong)
+        val beats = (0 until 4).map(i => 0xa0000000L | i.toLong)
         SimHelpers.fullBurstWrite(dut.io.masters(0), cd, base, beats)
         val (rdata, _) = SimHelpers.fullBurstRead(dut.io.masters(0), cd, base, 4)
         assert(rdata == beats, s"burst through both RS: data mismatch\n  exp=$beats\n  got=$rdata")
@@ -116,18 +123,28 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
   // AXI4-Lite register slice (Lite master → Lite slave, regSlice=true)
   // =========================================================================
 
-  private val liteCfg = Axi4Config(addressWidth = 32, dataWidth = 32,
-    useId = false, useLen = false, useSize = false, useBurst = false,
-    useLock = false, useCache = false, useQos = false, useRegion = false,
-    useLast = false)
+  private val liteCfg = Axi4Config(
+    addressWidth = 32,
+    dataWidth = 32,
+    useId = false,
+    useLen = false,
+    useSize = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useQos = false,
+    useRegion = false,
+    useLast = false
+  )
 
   private def makeLiteRegSliceCfg(masterRS: Boolean, slaveRS: Boolean) = AxiZeroConfig(
     masters = Seq(MasterPort(liteCfg, LiteAxi4, regSlice = masterRS)),
-    slaves  = Seq(SlavePort(liteCfg, LiteAxi4, slaveBase, slaveSize, regSlice = slaveRS))
+    slaves = Seq(SlavePort(liteCfg, LiteAxi4, slaveBase, slaveSize, regSlice = slaveRS))
   )
 
   test("regSlice: AXI4-Lite master-side register slice write-read") {
-    simCfg.compile(new AxiZeroLiteTop(makeLiteRegSliceCfg(masterRS = true, slaveRS = false)))
+    simCfg
+      .compile(new AxiZeroLiteTop(makeLiteRegSliceCfg(masterRS = true, slaveRS = false)))
       .doSim { dut =>
         val cd  = dut.clockDomain
         val mem = SimHelpers.spawnLiteSlave(dut.io.slaves(0), cd)
@@ -135,43 +152,61 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
         cd.forkStimulus(10)
         cd.waitSampling(10)
 
-        SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0000L, 0xABCD1234L)
+        SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0000L, 0xabcd1234L)
         val rdata = SimHelpers.liteRead(dut.io.masters(0), cd, 0x0000L)
-        assert(rdata == 0xABCD1234L, f"Lite master-RS: got 0x$rdata%08X")
+        assert(rdata == 0xabcd1234L, f"Lite master-RS: got 0x$rdata%08X")
       }
   }
 
   test("regSlice: AXI4-Lite both sides register slices write-read") {
-    simCfg.compile(new AxiZeroLiteTop(makeLiteRegSliceCfg(masterRS = true, slaveRS = true)))
-      .doSim { dut =>
+    simCfg.compile(new AxiZeroLiteTop(makeLiteRegSliceCfg(masterRS = true, slaveRS = true))).doSim {
+      dut =>
         val cd  = dut.clockDomain
         val mem = SimHelpers.spawnLiteSlave(dut.io.slaves(0), cd)
         SimHelpers.initMaster(dut.io.masters(0))
         cd.forkStimulus(10)
         cd.waitSampling(10)
 
-        SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0010L, 0x55AA55AAL)
+        SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0010L, 0x55aa55aaL)
         val rdata = SimHelpers.liteRead(dut.io.masters(0), cd, 0x0010L)
-        assert(rdata == 0x55AA55AAL, f"Lite both-RS: got 0x$rdata%08X")
-      }
+        assert(rdata == 0x55aa55aaL, f"Lite both-RS: got 0x$rdata%08X")
+    }
   }
 
   // =========================================================================
   // Axi4LiteWidthConverter — narrow 16-bit Lite master → 32-bit Lite fabric
   // =========================================================================
 
-  private val narrow16 = Axi4Config(addressWidth = 32, dataWidth = 16,
-    useId = false, useLen = false, useSize = false, useBurst = false,
-    useLock = false, useCache = false, useQos = false, useRegion = false,
-    useLast = false)
-  private val wide32 = Axi4Config(addressWidth = 32, dataWidth = 32,
-    useId = false, useLen = false, useSize = false, useBurst = false,
-    useLock = false, useCache = false, useQos = false, useRegion = false,
-    useLast = false)
+  private val narrow16 = Axi4Config(
+    addressWidth = 32,
+    dataWidth = 16,
+    useId = false,
+    useLen = false,
+    useSize = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useQos = false,
+    useRegion = false,
+    useLast = false
+  )
+  private val wide32 = Axi4Config(
+    addressWidth = 32,
+    dataWidth = 32,
+    useId = false,
+    useLen = false,
+    useSize = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useQos = false,
+    useRegion = false,
+    useLast = false
+  )
 
   private def makeLiteWidthConvCfg = AxiZeroConfig(
     masters = Seq(MasterPort(narrow16, LiteAxi4)),
-    slaves  = Seq(SlavePort(wide32,   LiteAxi4, slaveBase, slaveSize))
+    slaves = Seq(SlavePort(wide32, LiteAxi4, slaveBase, slaveSize))
     // fabricDataWidth = max(16, 32) = 32 → LiteWidthConverter at master port
   )
 
@@ -185,11 +220,13 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
 
       // Write 0xBEEF (16-bit value): zero-extended to 0x0000BEEF in slave memory
       // strb=0x3 for 16-bit bus (2 byte lanes)
-      SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0000L, 0xBEEFL, strb = 0x3)
+      SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0000L, 0xbeefL, strb = 0x3)
       // Read back: slave returns full 32-bit word; converter truncates to 16 bits
       val rdata = SimHelpers.liteRead(dut.io.masters(0), cd, 0x0000L)
-      assert((rdata & 0xFFFFL) == 0xBEEFL,
-        f"LiteWidthConv 16→32: exp 0xBEEF got 0x${rdata & 0xFFFFL}%04X")
+      assert(
+        (rdata & 0xffffL) == 0xbeefL,
+        f"LiteWidthConv 16→32: exp 0xBEEF got 0x${rdata & 0xffffL}%04X"
+      )
     }
   }
 
@@ -209,13 +246,13 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
       cd.forkStimulus(10)
       cd.waitSampling(5)
 
-      SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0000L, 0xAAAAL, strb = 0x3)
-      SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0002L, 0xBBBBL, strb = 0x3)
+      SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0000L, 0xaaaaL, strb = 0x3)
+      SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0002L, 0xbbbbL, strb = 0x3)
 
-      val lo = SimHelpers.liteRead(dut.io.masters(0), cd, 0x0000L) & 0xFFFFL
-      val hi = SimHelpers.liteRead(dut.io.masters(0), cd, 0x0002L) & 0xFFFFL
-      assert(lo == 0xAAAAL, f"low half: exp 0xAAAA got 0x$lo%04X (upper write clobbered it)")
-      assert(hi == 0xBBBBL, f"high half: exp 0xBBBB got 0x$hi%04X (read off the wrong lanes)")
+      val lo = SimHelpers.liteRead(dut.io.masters(0), cd, 0x0000L) & 0xffffL
+      val hi = SimHelpers.liteRead(dut.io.masters(0), cd, 0x0002L) & 0xffffL
+      assert(lo == 0xaaaaL, f"low half: exp 0xAAAA got 0x$lo%04X (upper write clobbered it)")
+      assert(hi == 0xbbbbL, f"high half: exp 0xBBBB got 0x$hi%04X (read off the wrong lanes)")
     }
   }
 
@@ -230,12 +267,12 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
       cd.forkStimulus(10)
       cd.waitSampling(5)
 
-      SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0002L, 0xFFFFL, strb = 0x3)
+      SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0002L, 0xffffL, strb = 0x3)
       // Rewrite only the low byte of that half-word.
       SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0002L, 0x0011L, strb = 0x1)
 
-      val got = SimHelpers.liteRead(dut.io.masters(0), cd, 0x0002L) & 0xFFFFL
-      assert(got == 0xFF11L, f"strobed byte write: exp 0xFF11 got 0x$got%04X")
+      val got = SimHelpers.liteRead(dut.io.masters(0), cd, 0x0002L) & 0xffffL
+      assert(got == 0xff11L, f"strobed byte write: exp 0xFF11 got 0x$got%04X")
     }
   }
 
@@ -247,11 +284,11 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
       cd.forkStimulus(10)
       cd.waitSampling(5)
 
-      val pairs = Seq(0x0000L -> 0x1234L, 0x0004L -> 0x5678L, 0x0008L -> 0xABCDL)
+      val pairs = Seq(0x0000L -> 0x1234L, 0x0004L -> 0x5678L, 0x0008L -> 0xabcdL)
       for ((addr, data) <- pairs)
         SimHelpers.liteWrite(dut.io.masters(0), cd, addr, data, strb = 0x3)
       for ((addr, exp) <- pairs) {
-        val got = SimHelpers.liteRead(dut.io.masters(0), cd, addr) & 0xFFFFL
+        val got = SimHelpers.liteRead(dut.io.masters(0), cd, addr) & 0xffffL
         assert(got == exp, f"LiteWidthConv addr=0x$addr%04X: exp=0x$exp%04X got=0x$got%04X")
       }
     }

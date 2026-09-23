@@ -31,7 +31,9 @@ jobs:
         run: sbt compile
 
       - name: Check formatting (scalafmt)
-        run: sbt scalafmtCheck
+        # Test sources too, the way the vexZero job checks both. Leaving them
+        # out let 18 test files drift out of format unnoticed.
+        run: sbt scalafmtCheck Test/scalafmtCheck
 
       - name: Run scalafix
         run: sbt "scalafix --check"

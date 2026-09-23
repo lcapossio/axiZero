@@ -27,8 +27,8 @@ class MixedCrossbarSpec extends AnyFunSuite {
 
   private val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -44,22 +44,33 @@ class MixedCrossbarSpec extends AnyFunSuite {
   // ── Bus configs ───────────────────────────────────────────────────────────
 
   private val fullMasterCfg = Axi4Config(
-    addressWidth = 32, dataWidth = 32, idWidth = 4
+    addressWidth = 32,
+    dataWidth = 32,
+    idWidth = 4
   )
 
   private val liteCfg = Axi4Config(
-    addressWidth = 32, dataWidth = 32,
-    useId     = false, useRegion = false,
-    useBurst  = false, useLock   = false,
-    useCache  = false, useSize   = false,
-    useQos    = false, useLen    = false,
-    useLast   = false, useResp   = true,
-    useProt   = true,  useStrb   = true
+    addressWidth = 32,
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
   )
 
   // slaveIdW = effectiveIdW(4) + masterIndexBits(1) = 5
   private val fullSlaveCfg = Axi4Config(
-    addressWidth = 32, dataWidth = 32, idWidth = 5
+    addressWidth = 32,
+    dataWidth = 32,
+    idWidth = 5
   )
 
   // ── Design factory ────────────────────────────────────────────────────────
@@ -67,11 +78,11 @@ class MixedCrossbarSpec extends AnyFunSuite {
   private def makeMixed = AxiZeroConfig(
     masters = Seq(
       MasterPort(fullMasterCfg, FullAxi4),
-      MasterPort(liteCfg,       LiteAxi4)
+      MasterPort(liteCfg, LiteAxi4)
     ),
     slaves = Seq(
       SlavePort(fullSlaveCfg, FullAxi4, slave0Base, slaveSize),
-      SlavePort(liteCfg,      LiteAxi4, slave1Base, slaveSize)
+      SlavePort(liteCfg, LiteAxi4, slave1Base, slaveSize)
     ),
     arbitration = RoundRobin
   )
@@ -93,12 +104,17 @@ class MixedCrossbarSpec extends AnyFunSuite {
 
       cd.waitSampling(5)
 
-      val wId = SimHelpers.fullWrite(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x0100L, data = 0x12345678L, id = 3)
+      val wId = SimHelpers.fullWrite(
+        dut.io.masters(0),
+        cd,
+        addr = slave0Base.toLong + 0x0100L,
+        data = 0x12345678L,
+        id = 3
+      )
       assert(wId == 3, s"B.id echo mismatch: expected 3, got $wId")
 
-      val (rData, rId) = SimHelpers.fullRead(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x0100L, id = 7)
+      val (rData, rId) =
+        SimHelpers.fullRead(dut.io.masters(0), cd, addr = slave0Base.toLong + 0x0100L, id = 7)
       assert(rData == 0x12345678L, f"read data mismatch: 0x${rData}%08x")
       assert(rId == 7, s"R.id echo mismatch: expected 7, got $rId")
 
@@ -123,11 +139,13 @@ class MixedCrossbarSpec extends AnyFunSuite {
 
       cd.waitSampling(5)
 
-      SimHelpers.fullWrite(dut.io.masters(0), cd,
-        addr = slave1Base.toLong + 0x0040L, data = 0xDEADBEEFL)
+      SimHelpers
+        .fullWrite(dut.io.masters(0), cd, addr = slave1Base.toLong + 0x0040L, data = 0xdeadbeefL)
 
-      assert(mem1.getOrElse(slave1Base.toLong + 0x0040L, -1L) == 0xDEADBEEFL,
-        "full master write to lite slave must land in slave-1 memory")
+      assert(
+        mem1.getOrElse(slave1Base.toLong + 0x0040L, -1L) == 0xdeadbeefL,
+        "full master write to lite slave must land in slave-1 memory"
+      )
 
       cd.waitSampling(5)
     }
@@ -151,13 +169,11 @@ class MixedCrossbarSpec extends AnyFunSuite {
 
       cd.waitSampling(5)
 
-      SimHelpers.liteWrite(dut.io.masters(1), cd,
-        addr = slave0Base.toLong + 0x0200L, data = 0xCAFEF00DL)
+      SimHelpers
+        .liteWrite(dut.io.masters(1), cd, addr = slave0Base.toLong + 0x0200L, data = 0xcafef00dL)
 
-      val rData = SimHelpers.liteRead(dut.io.masters(1), cd,
-        addr = slave0Base.toLong + 0x0200L)
-      assert(rData == 0xCAFEF00DL,
-        f"lite master round-trip via full slave failed: 0x${rData}%08x")
+      val rData = SimHelpers.liteRead(dut.io.masters(1), cd, addr = slave0Base.toLong + 0x0200L)
+      assert(rData == 0xcafef00dL, f"lite master round-trip via full slave failed: 0x${rData}%08x")
 
       cd.waitSampling(5)
     }
@@ -180,13 +196,11 @@ class MixedCrossbarSpec extends AnyFunSuite {
 
       cd.waitSampling(5)
 
-      SimHelpers.liteWrite(dut.io.masters(1), cd,
-        addr = slave1Base.toLong + 0x0080L, data = 0xBEEFCAFEL)
+      SimHelpers
+        .liteWrite(dut.io.masters(1), cd, addr = slave1Base.toLong + 0x0080L, data = 0xbeefcafeL)
 
-      val rData = SimHelpers.liteRead(dut.io.masters(1), cd,
-        addr = slave1Base.toLong + 0x0080L)
-      assert(rData == 0xBEEFCAFEL,
-        f"lite→lite round-trip failed: 0x${rData}%08x")
+      val rData = SimHelpers.liteRead(dut.io.masters(1), cd, addr = slave1Base.toLong + 0x0080L)
+      assert(rData == 0xbeefcafeL, f"lite→lite round-trip failed: 0x${rData}%08x")
 
       cd.waitSampling(5)
     }

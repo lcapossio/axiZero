@@ -22,8 +22,8 @@ class PipelinedCrossbarSpec extends AnyFunSuite {
 
   private val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -50,11 +50,11 @@ class PipelinedCrossbarSpec extends AnyFunSuite {
 
   private def makePipelinedCfg = AxiZeroConfig(
     masters = Seq.fill(2)(MasterPort(masterCfg, FullAxi4)),
-    slaves  = Seq(
+    slaves = Seq(
       SlavePort(slaveCfg, FullAxi4, slave0Base, slaveSize),
       SlavePort(slaveCfg, FullAxi4, slave1Base, slaveSize)
     ),
-    arbitration    = RoundRobin,
+    arbitration = RoundRobin,
     maxOutstanding = 4
   )
 
@@ -73,14 +73,19 @@ class PipelinedCrossbarSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       // Write to slave 0 from master 0
-      val wId = SimHelpers.fullWrite(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x100L, data = 0xAABBCCDDL, id = 5)
+      val wId = SimHelpers.fullWrite(
+        dut.io.masters(0),
+        cd,
+        addr = slave0Base.toLong + 0x100L,
+        data = 0xaabbccddL,
+        id = 5
+      )
       assert(wId == 5, s"B.id echo mismatch: expected 5, got $wId")
 
       // Read back
-      val (rData, rId) = SimHelpers.fullRead(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x100L, id = 9)
-      assert(rData == 0xAABBCCDDL, f"read data mismatch: 0x${rData}%08x")
+      val (rData, rId) =
+        SimHelpers.fullRead(dut.io.masters(0), cd, addr = slave0Base.toLong + 0x100L, id = 9)
+      assert(rData == 0xaabbccddL, f"read data mismatch: 0x${rData}%08x")
       assert(rId == 9, s"R.id echo mismatch: expected 9, got $rId")
 
       cd.waitSampling(5)
@@ -97,27 +102,41 @@ class PipelinedCrossbarSpec extends AnyFunSuite {
 
       SimHelpers.initMaster(dut.io.masters(0))
       SimHelpers.initMaster(dut.io.masters(1))
-      val mem0 = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
-      val mem1 = SimHelpers.spawnFullSlave(dut.io.slaves(1), cd)
+      val mem0         = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
+      val mem1         = SimHelpers.spawnFullSlave(dut.io.slaves(1), cd)
       val (mon0, mon1) = attachMonitors(dut, cd)
 
       cd.waitSampling(5)
 
       // Fork both masters writing to different slaves simultaneously
       val t0 = fork {
-        SimHelpers.fullWrite(dut.io.masters(0), cd,
-          addr = slave0Base.toLong + 0x200L, data = 0x11111111L, id = 1)
+        SimHelpers.fullWrite(
+          dut.io.masters(0),
+          cd,
+          addr = slave0Base.toLong + 0x200L,
+          data = 0x11111111L,
+          id = 1
+        )
       }
       val t1 = fork {
-        SimHelpers.fullWrite(dut.io.masters(1), cd,
-          addr = slave1Base.toLong + 0x300L, data = 0x22222222L, id = 2)
+        SimHelpers.fullWrite(
+          dut.io.masters(1),
+          cd,
+          addr = slave1Base.toLong + 0x300L,
+          data = 0x22222222L,
+          id = 2
+        )
       }
       t0.join(); t1.join()
 
-      assert(mem0.getOrElse(slave0Base.toLong + 0x200L, -1L) == 0x11111111L,
-        "master 0 write to slave 0 missing")
-      assert(mem1.getOrElse(slave1Base.toLong + 0x300L, -1L) == 0x22222222L,
-        "master 1 write to slave 1 missing")
+      assert(
+        mem0.getOrElse(slave0Base.toLong + 0x200L, -1L) == 0x11111111L,
+        "master 0 write to slave 0 missing"
+      )
+      assert(
+        mem1.getOrElse(slave1Base.toLong + 0x300L, -1L) == 0x22222222L,
+        "master 1 write to slave 1 missing"
+      )
 
       cd.waitSampling(5)
       mon0.assertNoErrors()
@@ -140,20 +159,34 @@ class PipelinedCrossbarSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       // Master 0 writes first
-      SimHelpers.fullWrite(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x400L, data = 0x33333333L, id = 3)
+      SimHelpers.fullWrite(
+        dut.io.masters(0),
+        cd,
+        addr = slave0Base.toLong + 0x400L,
+        data = 0x33333333L,
+        id = 3
+      )
       // Master 1 writes second
-      SimHelpers.fullWrite(dut.io.masters(1), cd,
-        addr = slave0Base.toLong + 0x404L, data = 0x44444444L, id = 4)
+      SimHelpers.fullWrite(
+        dut.io.masters(1),
+        cd,
+        addr = slave0Base.toLong + 0x404L,
+        data = 0x44444444L,
+        id = 4
+      )
 
-      assert(mem0.getOrElse(slave0Base.toLong + 0x400L, -1L) == 0x33333333L,
-        "master 0 write to slave 0 missing")
-      assert(mem0.getOrElse(slave0Base.toLong + 0x404L, -1L) == 0x44444444L,
-        "master 1 write to slave 0 missing")
+      assert(
+        mem0.getOrElse(slave0Base.toLong + 0x400L, -1L) == 0x33333333L,
+        "master 0 write to slave 0 missing"
+      )
+      assert(
+        mem0.getOrElse(slave0Base.toLong + 0x404L, -1L) == 0x44444444L,
+        "master 1 write to slave 0 missing"
+      )
 
       // Read back from master 1 to verify
-      val (rData, _) = SimHelpers.fullRead(dut.io.masters(1), cd,
-        addr = slave0Base.toLong + 0x400L, id = 0)
+      val (rData, _) =
+        SimHelpers.fullRead(dut.io.masters(1), cd, addr = slave0Base.toLong + 0x400L, id = 0)
       assert(rData == 0x33333333L, f"cross-master read-back failed: 0x${rData}%08x")
 
       cd.waitSampling(5)
@@ -170,25 +203,39 @@ class PipelinedCrossbarSpec extends AnyFunSuite {
 
       SimHelpers.initMaster(dut.io.masters(0))
       SimHelpers.initMaster(dut.io.masters(1))
-      val mem0 = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
-      val mem1 = SimHelpers.spawnFullSlave(dut.io.slaves(1), cd)
+      val mem0         = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
+      val mem1         = SimHelpers.spawnFullSlave(dut.io.slaves(1), cd)
       val (mon0, mon1) = attachMonitors(dut, cd)
 
       cd.waitSampling(5)
 
-      SimHelpers.fullWrite(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x10L, data = 0xAAAAAAAAL, id = 0)
-      SimHelpers.fullWrite(dut.io.masters(0), cd,
-        addr = slave1Base.toLong + 0x20L, data = 0xBBBBBBBBL, id = 1)
+      SimHelpers.fullWrite(
+        dut.io.masters(0),
+        cd,
+        addr = slave0Base.toLong + 0x10L,
+        data = 0xaaaaaaaaL,
+        id = 0
+      )
+      SimHelpers.fullWrite(
+        dut.io.masters(0),
+        cd,
+        addr = slave1Base.toLong + 0x20L,
+        data = 0xbbbbbbbbL,
+        id = 1
+      )
 
-      assert(mem0.getOrElse(slave0Base.toLong + 0x10L, -1L) == 0xAAAAAAAAL,
-        "write to slave 0 region must land in slave 0")
-      assert(mem1.getOrElse(slave1Base.toLong + 0x20L, -1L) == 0xBBBBBBBBL,
-        "write to slave 1 region must land in slave 1")
+      assert(
+        mem0.getOrElse(slave0Base.toLong + 0x10L, -1L) == 0xaaaaaaaaL,
+        "write to slave 0 region must land in slave 0"
+      )
+      assert(
+        mem1.getOrElse(slave1Base.toLong + 0x20L, -1L) == 0xbbbbbbbbL,
+        "write to slave 1 region must land in slave 1"
+      )
 
-      val (rData, _) = SimHelpers.fullRead(dut.io.masters(0), cd,
-        addr = slave1Base.toLong + 0x20L, id = 2)
-      assert(rData == 0xBBBBBBBBL, f"read from slave 1 failed: 0x${rData}%08x")
+      val (rData, _) =
+        SimHelpers.fullRead(dut.io.masters(0), cd, addr = slave1Base.toLong + 0x20L, id = 2)
+      assert(rData == 0xbbbbbbbbL, f"read from slave 1 failed: 0x${rData}%08x")
 
       cd.waitSampling(5)
       mon0.assertNoErrors()
@@ -214,16 +261,18 @@ class PipelinedCrossbarSpec extends AnyFunSuite {
 
       cd.waitSampling(5)
 
-      val baseAddr = slave0Base.toLong + 0x1000L
-      val writeData = (0 until 64).map(i => 0xAB000000L | i.toLong)
+      val baseAddr  = slave0Base.toLong + 0x1000L
+      val writeData = (0 until 64).map(i => 0xab000000L | i.toLong)
 
       SimHelpers.fullBurstWrite(dut.io.masters(0), cd, baseAddr, writeData, id = 1)
 
       val (readData, rid) = SimHelpers.fullBurstRead(dut.io.masters(0), cd, baseAddr, 64, id = 2)
       assert(rid == 2, s"R.id mismatch: expected 2, got $rid")
       for (i <- 0 until 64) {
-        assert(readData(i) == writeData(i),
-          f"beat $i mismatch: wrote 0x${writeData(i)}%08x, read 0x${readData(i)}%08x")
+        assert(
+          readData(i) == writeData(i),
+          f"beat $i mismatch: wrote 0x${writeData(i)}%08x, read 0x${readData(i)}%08x"
+        )
       }
 
       cd.waitSampling(5)
@@ -253,15 +302,17 @@ class PipelinedCrossbarSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       val baseAddr  = slave0Base.toLong + 0x2000L
-      val writeData = (0 until 64).map(i => 0xCD000000L | i.toLong)
+      val writeData = (0 until 64).map(i => 0xcd000000L | i.toLong)
 
       SimHelpers.fullBurstWrite(dut.io.masters(0), cd, baseAddr, writeData, id = 3)
 
       val (readData, _) = SimHelpers.fullBurstRead(dut.io.masters(0), cd, baseAddr, 64, id = 4)
       for (i <- 0 until 64) {
-        assert(readData(i) == writeData(i),
+        assert(
+          readData(i) == writeData(i),
           f"beat $i mismatch after W back-pressure: wrote 0x${writeData(i)}%08x, " +
-          f"read 0x${readData(i)}%08x")
+            f"read 0x${readData(i)}%08x"
+        )
       }
 
       cd.waitSampling(5)
@@ -289,18 +340,20 @@ class PipelinedCrossbarSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       val baseAddr  = slave0Base.toLong + 0x3000L
-      val writeData = (0 until 64).map(i => 0xEF000000L | i.toLong)
+      val writeData = (0 until 64).map(i => 0xef000000L | i.toLong)
 
       // Pre-load with no back-pressure
       SimHelpers.fullBurstWrite(dut.io.masters(0), cd, baseAddr, writeData, id = 5)
 
       // Read back with 2-cycle stall between beats (master-side back-pressure)
-      val (readData, _) = SimHelpers.fullBurstRead(dut.io.masters(0), cd, baseAddr, 64,
-        id = 6, stallCycles = 2)
+      val (readData, _) =
+        SimHelpers.fullBurstRead(dut.io.masters(0), cd, baseAddr, 64, id = 6, stallCycles = 2)
       for (i <- 0 until 64) {
-        assert(readData(i) == writeData(i),
+        assert(
+          readData(i) == writeData(i),
           f"beat $i mismatch after R back-pressure: wrote 0x${writeData(i)}%08x, " +
-          f"read 0x${readData(i)}%08x")
+            f"read 0x${readData(i)}%08x"
+        )
       }
 
       cd.waitSampling(5)
@@ -322,8 +375,8 @@ class PipelinedCrossbarSpec extends AnyFunSuite {
 
       SimHelpers.initMaster(dut.io.masters(0))
       SimHelpers.initMaster(dut.io.masters(1))
-      val mem0 = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
-      val mem1 = SimHelpers.spawnFullSlave(dut.io.slaves(1), cd)
+      val mem0         = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
+      val mem1         = SimHelpers.spawnFullSlave(dut.io.slaves(1), cd)
       val (mon0, mon1) = attachMonitors(dut, cd)
 
       cd.waitSampling(5)
@@ -341,16 +394,20 @@ class PipelinedCrossbarSpec extends AnyFunSuite {
       for (i <- 0 until 16) {
         val a0 = base0 + i * 4
         val a1 = base1 + i * 4
-        assert(mem0.getOrElse(a0, -1L) == data0(i),
-          f"slave 0 beat $i: expected 0x${data0(i)}%08x, got 0x${mem0.getOrElse(a0,-1L)}%08x")
-        assert(mem1.getOrElse(a1, -1L) == data1(i),
-          f"slave 1 beat $i: expected 0x${data1(i)}%08x, got 0x${mem1.getOrElse(a1,-1L)}%08x")
+        assert(
+          mem0.getOrElse(a0, -1L) == data0(i),
+          f"slave 0 beat $i: expected 0x${data0(i)}%08x, got 0x${mem0.getOrElse(a0, -1L)}%08x"
+        )
+        assert(
+          mem1.getOrElse(a1, -1L) == data1(i),
+          f"slave 1 beat $i: expected 0x${data1(i)}%08x, got 0x${mem1.getOrElse(a1, -1L)}%08x"
+        )
       }
 
       // Read back via opposite masters (cross-master verification)
       val (rd0, rid0) = SimHelpers.fullBurstRead(dut.io.masters(1), cd, base0, 16, id = 9)
       val (rd1, rid1) = SimHelpers.fullBurstRead(dut.io.masters(0), cd, base1, 16, id = 10)
-      assert(rid0 == 9,  s"R.id mismatch for master 1 reading slave 0: $rid0")
+      assert(rid0 == 9, s"R.id mismatch for master 1 reading slave 0: $rid0")
       assert(rid1 == 10, s"R.id mismatch for master 0 reading slave 1: $rid1")
       for (i <- 0 until 16) {
         assert(rd0(i) == data0(i), f"cross-read slave 0 beat $i mismatch")

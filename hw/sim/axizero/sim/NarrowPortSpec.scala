@@ -21,8 +21,8 @@ class NarrowPortSpec extends AnyFunSuite {
 
   private val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -37,12 +37,12 @@ class NarrowPortSpec extends AnyFunSuite {
   // Narrow slave: 32-bit master → 16-bit slave (downsizer at slave)
   // =========================================================================
 
-  private val wide32Master = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = idW)
+  private val wide32Master  = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = idW)
   private val narrow16Slave = Axi4Config(addressWidth = 32, dataWidth = 16, idWidth = idW)
 
   private def makeNarrowSlaveCfg = AxiZeroConfig(
     masters = Seq(MasterPort(wide32Master, FullAxi4)),
-    slaves  = Seq(SlavePort(narrow16Slave, FullAxi4, slaveBase, slaveSize))
+    slaves = Seq(SlavePort(narrow16Slave, FullAxi4, slaveBase, slaveSize))
   )
 
   test("narrow slave 32→16: single-beat write-read") {
@@ -54,9 +54,9 @@ class NarrowPortSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       // Write 0xAABBCCDD: downsizer splits into two 16-bit writes
-      SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0100L, 0xAABBCCDDL, id = 1)
+      SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0100L, 0xaabbccddL, id = 1)
       val (rdata, rid) = SimHelpers.fullBurstRead(dut.io.masters(0), cd, 0x0100L, 1, id = 2)
-      assert(rdata.head == 0xAABBCCDDL, f"narrow slave 32→16: got 0x${rdata.head}%08X")
+      assert(rdata.head == 0xaabbccddL, f"narrow slave 32→16: got 0x${rdata.head}%08X")
       assert(rid == 2)
     }
   }
@@ -86,9 +86,9 @@ class NarrowPortSpec extends AnyFunSuite {
 
       val pairs = Seq(
         0x0000L -> 0x12345678L,
-        0x0010L -> 0xDEADBEEFL,
-        0x0020L -> 0xCAFEBABEL,
-        0x0030L -> 0x0BADF00DL
+        0x0010L -> 0xdeadbeefL,
+        0x0020L -> 0xcafebabeL,
+        0x0030L -> 0x0badf00dL
       )
       for ((addr, data) <- pairs)
         SimHelpers.fullWrite(dut.io.masters(0), cd, addr, data, id = 0)
@@ -109,7 +109,7 @@ class NarrowPortSpec extends AnyFunSuite {
 
   private def makeNarrowMasterCfg = AxiZeroConfig(
     masters = Seq(MasterPort(narrow16Master, FullAxi4)),
-    slaves  = Seq(SlavePort(wide32Slave, FullAxi4, slaveBase, slaveSize))
+    slaves = Seq(SlavePort(wide32Slave, FullAxi4, slaveBase, slaveSize))
   )
 
   test("narrow master 16→32: single-beat write-read") {
@@ -122,16 +122,16 @@ class NarrowPortSpec extends AnyFunSuite {
 
       // 16-bit master: write 0xBEEF, upsizer zero-extends W to 0x0000BEEF
       dut.io.masters(0).aw.valid #= true
-      dut.io.masters(0).aw.addr  #= 0x0000L
-      if (dut.io.masters(0).config.useId)    dut.io.masters(0).aw.id    #= 1
-      if (dut.io.masters(0).config.useLen)   dut.io.masters(0).aw.len   #= 0
-      if (dut.io.masters(0).config.useSize)  dut.io.masters(0).aw.size  #= 1  // 2 bytes
+      dut.io.masters(0).aw.addr #= 0x0000L
+      if (dut.io.masters(0).config.useId) dut.io.masters(0).aw.id #= 1
+      if (dut.io.masters(0).config.useLen) dut.io.masters(0).aw.len #= 0
+      if (dut.io.masters(0).config.useSize) dut.io.masters(0).aw.size #= 1 // 2 bytes
       if (dut.io.masters(0).config.useBurst) dut.io.masters(0).aw.burst #= 1
       while ({ cd.waitSampling(); !dut.io.masters(0).aw.ready.toBoolean }) {}
       dut.io.masters(0).aw.valid #= false
 
       dut.io.masters(0).w.valid #= true
-      dut.io.masters(0).w.data  #= 0xBEEF
+      dut.io.masters(0).w.data #= 0xbeef
       if (dut.io.masters(0).config.useStrb) dut.io.masters(0).w.strb #= 0x3
       if (dut.io.masters(0).config.useLast) dut.io.masters(0).w.last #= true
       while ({ cd.waitSampling(); !dut.io.masters(0).w.ready.toBoolean }) {}
@@ -145,20 +145,20 @@ class NarrowPortSpec extends AnyFunSuite {
 
       // Read back the 16-bit value
       dut.io.masters(0).ar.valid #= true
-      dut.io.masters(0).ar.addr  #= 0x0000L
-      if (dut.io.masters(0).config.useId)    dut.io.masters(0).ar.id    #= 2
-      if (dut.io.masters(0).config.useLen)   dut.io.masters(0).ar.len   #= 0
-      if (dut.io.masters(0).config.useSize)  dut.io.masters(0).ar.size  #= 1
+      dut.io.masters(0).ar.addr #= 0x0000L
+      if (dut.io.masters(0).config.useId) dut.io.masters(0).ar.id #= 2
+      if (dut.io.masters(0).config.useLen) dut.io.masters(0).ar.len #= 0
+      if (dut.io.masters(0).config.useSize) dut.io.masters(0).ar.size #= 1
       if (dut.io.masters(0).config.useBurst) dut.io.masters(0).ar.burst #= 1
       while ({ cd.waitSampling(); !dut.io.masters(0).ar.ready.toBoolean }) {}
       dut.io.masters(0).ar.valid #= false
 
       dut.io.masters(0).r.ready #= true
       while ({ cd.waitSampling(); !dut.io.masters(0).r.valid.toBoolean }) {}
-      val rdata = dut.io.masters(0).r.data.toLong & 0xFFFFL
+      val rdata = dut.io.masters(0).r.data.toLong & 0xffffL
       dut.io.masters(0).r.ready #= false
 
-      assert(rdata == 0xBEEFL, f"narrow master 16→32 read: got 0x$rdata%04X")
+      assert(rdata == 0xbeefL, f"narrow master 16→32 read: got 0x$rdata%04X")
     }
   }
 
@@ -169,16 +169,28 @@ class NarrowPortSpec extends AnyFunSuite {
 
   private val fullMasterCfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 4)
   private val fullSlaveCfg  = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = 5)
-  private val liteSlaveCfg  = Axi4Config(addressWidth = 32, dataWidth = 32,
-    useId = false, useRegion = false, useBurst = false, useLock = false,
-    useCache = false, useSize = false, useQos = false, useLen = false,
-    useLast = false, useResp = true, useProt = true, useStrb = true)
+  private val liteSlaveCfg = Axi4Config(
+    addressWidth = 32,
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
+  )
 
   private val slave1Base = BigInt("00010000", 16)
 
   private def makeMixedConcurrentCfg = AxiZeroConfig(
     masters = Seq.fill(2)(MasterPort(fullMasterCfg, FullAxi4)),
-    slaves  = Seq(
+    slaves = Seq(
       SlavePort(fullSlaveCfg, FullAxi4, slaveBase, slaveSize),
       SlavePort(liteSlaveCfg, LiteAxi4, slave1Base, slaveSize)
     ),
@@ -200,11 +212,18 @@ class NarrowPortSpec extends AnyFunSuite {
       SimHelpers.fullWrite(dut.io.masters(0), cd, slave1Base.toLong + 0x0000L, 0x11111111L, id = 1)
       SimHelpers.fullWrite(dut.io.masters(1), cd, slave1Base.toLong + 0x0004L, 0x22222222L, id = 2)
 
-      assert(mem1.getOrElse(slave1Base.toLong + 0x0000L, -1L) == 0x11111111L, "master 0 → lite slave")
-      assert(mem1.getOrElse(slave1Base.toLong + 0x0004L, -1L) == 0x22222222L, "master 1 → lite slave")
+      assert(
+        mem1.getOrElse(slave1Base.toLong + 0x0000L, -1L) == 0x11111111L,
+        "master 0 → lite slave"
+      )
+      assert(
+        mem1.getOrElse(slave1Base.toLong + 0x0004L, -1L) == 0x22222222L,
+        "master 1 → lite slave"
+      )
 
       // Cross-read: master 1 reads what master 0 wrote
-      val (rdata, rid) = SimHelpers.fullBurstRead(dut.io.masters(1), cd, slave1Base.toLong + 0x0000L, 1, id = 3)
+      val (rdata, rid) =
+        SimHelpers.fullBurstRead(dut.io.masters(1), cd, slave1Base.toLong + 0x0000L, 1, id = 3)
       assert(rdata.head == 0x11111111L, f"cross-read: got 0x${rdata.head}%08X")
       assert(rid == 3)
     }
@@ -221,17 +240,18 @@ class NarrowPortSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       // Master 0 writes to full slave, then to lite slave
-      SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0100L, 0xDEAD0000L, id = 5)
-      SimHelpers.fullWrite(dut.io.masters(0), cd, slave1Base.toLong + 0x0100L, 0xBEEF0000L, id = 6)
+      SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0100L, 0xdead0000L, id = 5)
+      SimHelpers.fullWrite(dut.io.masters(0), cd, slave1Base.toLong + 0x0100L, 0xbeef0000L, id = 6)
 
-      assert(mem0.getOrElse(0x0100L, -1L) == 0xDEAD0000L, "write to full slave")
-      assert(mem1.getOrElse(slave1Base.toLong + 0x0100L, -1L) == 0xBEEF0000L, "write to lite slave")
+      assert(mem0.getOrElse(0x0100L, -1L) == 0xdead0000L, "write to full slave")
+      assert(mem1.getOrElse(slave1Base.toLong + 0x0100L, -1L) == 0xbeef0000L, "write to lite slave")
 
       // Read back both
       val (r0, _) = SimHelpers.fullBurstRead(dut.io.masters(0), cd, 0x0100L, 1, id = 7)
-      val (r1, _) = SimHelpers.fullBurstRead(dut.io.masters(0), cd, slave1Base.toLong + 0x0100L, 1, id = 8)
-      assert(r0.head == 0xDEAD0000L, "read from full slave")
-      assert(r1.head == 0xBEEF0000L, "read from lite slave")
+      val (r1, _) =
+        SimHelpers.fullBurstRead(dut.io.masters(0), cd, slave1Base.toLong + 0x0100L, 1, id = 8)
+      assert(r0.head == 0xdead0000L, "read from full slave")
+      assert(r1.head == 0xbeef0000L, "read from lite slave")
     }
   }
 }

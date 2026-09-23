@@ -18,8 +18,8 @@ class ArbitrationSpec extends AnyFunSuite {
 
   private val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -33,15 +33,17 @@ class ArbitrationSpec extends AnyFunSuite {
 
   // Slave ID width must accommodate masterIndexBits = ceil(log2(nMasters))
   private def slaveCfg(nMasters: Int) = Axi4Config(
-    addressWidth = 32, dataWidth = 32,
-    idWidth      = 4 + (if (nMasters <= 1) 0 else scala.math.ceil(scala.math.log(nMasters) / scala.math.log(2)).toInt)
+    addressWidth = 32,
+    dataWidth = 32,
+    idWidth = 4 + (if (nMasters <= 1) 0
+                   else scala.math.ceil(scala.math.log(nMasters) / scala.math.log(2)).toInt)
   )
 
   // ── FixedPriority helpers ─────────────────────────────────────────────────
 
   private def makeFpCfg(nMasters: Int) = AxiZeroConfig(
-    masters     = Seq.fill(nMasters)(MasterPort(masterCfg, FullAxi4)),
-    slaves      = Seq(SlavePort(slaveCfg(nMasters), FullAxi4, slaveBase, slaveSize)),
+    masters = Seq.fill(nMasters)(MasterPort(masterCfg, FullAxi4)),
+    slaves = Seq(SlavePort(slaveCfg(nMasters), FullAxi4, slaveBase, slaveSize)),
     arbitration = FixedPriority
   )
 
@@ -50,8 +52,8 @@ class ArbitrationSpec extends AnyFunSuite {
   private def makeWrrCfg(weights: Seq[Int]) = {
     val n = weights.length
     AxiZeroConfig(
-      masters     = Seq.fill(n)(MasterPort(masterCfg, FullAxi4)),
-      slaves      = Seq(SlavePort(slaveCfg(n), FullAxi4, slaveBase, slaveSize)),
+      masters = Seq.fill(n)(MasterPort(masterCfg, FullAxi4)),
+      slaves = Seq(SlavePort(slaveCfg(n), FullAxi4, slaveBase, slaveSize)),
       arbitration = WeightedRoundRobin(weights)
     )
   }
@@ -64,8 +66,8 @@ class ArbitrationSpec extends AnyFunSuite {
     // Smoke test: just verify that a FixedPriority crossbar elaborates and
     // passes traffic without error.
     simCfg.compile(new AxiZeroMixedTop(makeFpCfg(2))).doSim { dut =>
-      val cd   = dut.clockDomain
-      val mem  = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
+      val cd  = dut.clockDomain
+      val mem = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
       SimHelpers.initMaster(dut.io.masters(0))
       SimHelpers.initMaster(dut.io.masters(1))
       dut.io.masters(0).b.ready #= true
@@ -73,9 +75,9 @@ class ArbitrationSpec extends AnyFunSuite {
       cd.forkStimulus(10)
       cd.waitSampling(5)
 
-      SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0000L, 0xDEADBEEFL)
+      SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0000L, 0xdeadbeefL)
       val (rdata, _) = SimHelpers.fullBurstRead(dut.io.masters(0), cd, 0x0000L, 1)
-      assert(rdata.head == 0xDEADBEEFL, f"Expected 0xDEADBEEF, got 0x${rdata.head}%08X")
+      assert(rdata.head == 0xdeadbeefL, f"Expected 0xDEADBEEF, got 0x${rdata.head}%08X")
     }
   }
 
@@ -83,16 +85,16 @@ class ArbitrationSpec extends AnyFunSuite {
     // Both masters request simultaneously; master 0 (lower index = higher
     // fixed priority) must be granted first every time.
     simCfg.compile(new AxiZeroMixedTop(makeFpCfg(2))).doSim { dut =>
-      val cd   = dut.clockDomain
-      val mem  = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
+      val cd  = dut.clockDomain
+      val mem = SimHelpers.spawnFullSlave(dut.io.slaves(0), cd)
       SimHelpers.initMaster(dut.io.masters(0))
       SimHelpers.initMaster(dut.io.masters(1))
       cd.forkStimulus(10)
       cd.waitSampling(5)
 
       // Pre-write distinct values at two addresses so read-back is unambiguous
-      SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0000L, 0xAAAAAAAAL)
-      SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0004L, 0xBBBBBBBBL)
+      SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0000L, 0xaaaaaaaaL)
+      SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0004L, 0xbbbbbbbbL)
       cd.waitSampling(2)
 
       // Launch both reads concurrently; master 0 should always complete first
@@ -117,8 +119,10 @@ class ArbitrationSpec extends AnyFunSuite {
       f1.join()
 
       // Master 0 (higher priority) must have finished before master 1
-      assert(done0 <= done1,
-        s"Expected master 0 (done at $done0) to finish before master 1 (done at $done1)")
+      assert(
+        done0 <= done1,
+        s"Expected master 0 (done at $done0) to finish before master 1 (done at $done1)"
+      )
     }
   }
 
@@ -153,10 +157,14 @@ class ArbitrationSpec extends AnyFunSuite {
       go = true
       fs.foreach(_.join())
 
-      assert(times(0) <= times(1),
-        s"master 0 (${times(0)}) should finish before master 1 (${times(1)})")
-      assert(times(1) <= times(2),
-        s"master 1 (${times(1)}) should finish before master 2 (${times(2)})")
+      assert(
+        times(0) <= times(1),
+        s"master 0 (${times(0)}) should finish before master 1 (${times(1)})"
+      )
+      assert(
+        times(1) <= times(2),
+        s"master 1 (${times(1)}) should finish before master 2 (${times(2)})"
+      )
     }
   }
 
@@ -175,9 +183,9 @@ class ArbitrationSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       // Master 0 writes, master 1 reads back
-      SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0010L, 0xCAFEBABEL)
+      SimHelpers.fullWrite(dut.io.masters(0), cd, 0x0010L, 0xcafebabeL)
       val (rdata, _) = SimHelpers.fullBurstRead(dut.io.masters(1), cd, 0x0010L, 1)
-      assert(rdata.head == 0xCAFEBABEL, f"Expected 0xCAFEBABE, got 0x${rdata.head}%08X")
+      assert(rdata.head == 0xcafebabeL, f"Expected 0xCAFEBABE, got 0x${rdata.head}%08X")
     }
   }
 
@@ -194,7 +202,7 @@ class ArbitrationSpec extends AnyFunSuite {
       cd.forkStimulus(10)
       cd.waitSampling(5)
 
-      val N = 8
+      val N     = 8
       var done0 = 0L
       var done1 = 0L
       var go    = false
@@ -218,8 +226,10 @@ class ArbitrationSpec extends AnyFunSuite {
       f1.join()
 
       // With 3× weight advantage, master 0 must finish before master 1
-      assert(done0 < done1,
-        s"master 0 (done at $done0) should finish before master 1 (done at $done1) with weights [3,1]")
+      assert(
+        done0 < done1,
+        s"master 0 (done at $done0) should finish before master 1 (done at $done1) with weights [3,1]"
+      )
     }
   }
 
@@ -259,8 +269,10 @@ class ArbitrationSpec extends AnyFunSuite {
 
       // Allow up to 1-cycle skew per transaction (8 transactions × 10ns = 80ns)
       val skew = math.abs(t0 - t1)
-      assert(skew <= N * 10 * 5,
-        s"Equal-weight masters diverged by $skew ns — expected near-equal throughput")
+      assert(
+        skew <= N * 10 * 5,
+        s"Equal-weight masters diverged by $skew ns — expected near-equal throughput"
+      )
     }
   }
 
@@ -276,10 +288,10 @@ class ArbitrationSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       val pairs = Seq(
-        (0x0000L, 0xDEAD0000L, 0),
-        (0x0004L, 0xDEAD0001L, 1),
-        (0x0008L, 0xDEAD0002L, 0),
-        (0x000CL, 0xDEAD0003L, 1)
+        (0x0000L, 0xdead0000L, 0),
+        (0x0004L, 0xdead0001L, 1),
+        (0x0008L, 0xdead0002L, 0),
+        (0x000cL, 0xdead0003L, 1)
       )
 
       for ((addr, data, master) <- pairs)

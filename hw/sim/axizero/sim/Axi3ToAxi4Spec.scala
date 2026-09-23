@@ -25,8 +25,8 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
 
   private val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -40,18 +40,18 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
   private val axi3Cfg = Axi3Config(addressWidth = addrW, dataWidth = dataW, idWidth = idW)
   private val axi4Cfg = Axi4Config(
     addressWidth = addrW,
-    dataWidth    = dataW,
-    idWidth      = idW,
-    useLen       = true,
-    useSize      = true,
-    useBurst     = true,
-    useLock      = true,
-    useCache     = true,
-    useProt      = true,
-    useQos       = true,
-    useRegion    = true,
-    useLast      = true,
-    useResp      = true
+    dataWidth = dataW,
+    idWidth = idW,
+    useLen = true,
+    useSize = true,
+    useBurst = true,
+    useLock = true,
+    useCache = true,
+    useProt = true,
+    useQos = true,
+    useRegion = true,
+    useLast = true,
+    useResp = true
   )
 
   // Test harness: adapter with AXI4 port exposed for sim driving
@@ -70,55 +70,60 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
 
   private def initAxi3Master(m: Axi3): Unit = {
     m.aw.valid #= false
-    m.aw.id    #= 0
-    m.aw.addr  #= 0
-    m.aw.len   #= 0
-    m.aw.size  #= 2  // 4 bytes
-    m.aw.burst #= 1  // INCR
-    m.aw.lock  #= 0
+    m.aw.id #= 0
+    m.aw.addr #= 0
+    m.aw.len #= 0
+    m.aw.size #= 2  // 4 bytes
+    m.aw.burst #= 1 // INCR
+    m.aw.lock #= 0
     m.aw.cache #= 0
-    m.aw.prot  #= 0
-    m.w.valid  #= false
-    m.w.id     #= 0
-    m.w.data   #= 0
-    m.w.strb   #= 0
-    m.w.last   #= false
-    m.b.ready  #= false
+    m.aw.prot #= 0
+    m.w.valid #= false
+    m.w.id #= 0
+    m.w.data #= 0
+    m.w.strb #= 0
+    m.w.last #= false
+    m.b.ready #= false
     m.ar.valid #= false
-    m.ar.id    #= 0
-    m.ar.addr  #= 0
-    m.ar.len   #= 0
-    m.ar.size  #= 2
+    m.ar.id #= 0
+    m.ar.addr #= 0
+    m.ar.len #= 0
+    m.ar.size #= 2
     m.ar.burst #= 1
-    m.ar.lock  #= 0
+    m.ar.lock #= 0
     m.ar.cache #= 0
-    m.ar.prot  #= 0
-    m.r.ready  #= false
+    m.ar.prot #= 0
+    m.r.ready #= false
   }
 
   // Send AW and return immediately (for interleaving tests)
-  private def sendAw(m: Axi3, cd: ClockDomain,
-                     id: Int, addr: Long, len: Int,
-                     burst: Int = 1, lock: Int = 0): Unit = {
+  private def sendAw(
+    m: Axi3,
+    cd: ClockDomain,
+    id: Int,
+    addr: Long,
+    len: Int,
+    burst: Int = 1,
+    lock: Int = 0
+  ): Unit = {
     m.aw.valid #= true
-    m.aw.id    #= id
-    m.aw.addr  #= addr
-    m.aw.len   #= len
-    m.aw.size  #= 2
+    m.aw.id #= id
+    m.aw.addr #= addr
+    m.aw.len #= len
+    m.aw.size #= 2
     m.aw.burst #= burst
-    m.aw.lock  #= lock
+    m.aw.lock #= lock
     cd.waitSamplingWhere(m.aw.ready.toBoolean)
     m.aw.valid #= false
   }
 
   // Send one W beat
-  private def sendWBeat(m: Axi3, cd: ClockDomain,
-                        wid: Int, data: Long, last: Boolean): Unit = {
+  private def sendWBeat(m: Axi3, cd: ClockDomain, wid: Int, data: Long, last: Boolean): Unit = {
     m.w.valid #= true
-    m.w.id    #= wid
-    m.w.data  #= data
-    m.w.strb  #= 0xF
-    m.w.last  #= last
+    m.w.id #= wid
+    m.w.data #= data
+    m.w.strb #= 0xf
+    m.w.last #= last
     cd.waitSamplingWhere(m.w.ready.toBoolean)
     m.w.valid #= false
   }
@@ -134,8 +139,7 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
   }
 
   // Single-beat write (AW+W+B)
-  private def writeWord(m: Axi3, cd: ClockDomain,
-                        addr: Long, data: Long, id: Int = 0): Int = {
+  private def writeWord(m: Axi3, cd: ClockDomain, addr: Long, data: Long, id: Int = 0): Int = {
     sendAw(m, cd, id, addr, len = 0)
     sendWBeat(m, cd, wid = id, data, last = true)
     val (_, resp) = collectB(m, cd)
@@ -143,13 +147,12 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
   }
 
   // Single-beat read
-  private def readWord(m: Axi3, cd: ClockDomain,
-                       addr: Long, id: Int = 0): (Long, Int) = {
+  private def readWord(m: Axi3, cd: ClockDomain, addr: Long, id: Int = 0): (Long, Int) = {
     m.ar.valid #= true
-    m.ar.id    #= id
-    m.ar.addr  #= addr
-    m.ar.len   #= 0
-    m.ar.size  #= 2
+    m.ar.id #= id
+    m.ar.addr #= addr
+    m.ar.len #= 0
+    m.ar.size #= 2
     m.ar.burst #= 1
     cd.waitSamplingWhere(m.ar.ready.toBoolean)
     m.ar.valid #= false
@@ -165,20 +168,21 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
   // ── AXI4 slave model (spawned in sim) ───────────────────────────────────
 
   private def spawnAxi4Slave(
-    axi4: Axi4, cd: ClockDomain
+    axi4: Axi4,
+    cd: ClockDomain
   ): scala.collection.mutable.HashMap[Long, Long] = {
     val mem = new scala.collection.mutable.HashMap[Long, Long]()
 
     // Init slave outputs
     axi4.aw.ready #= false
-    axi4.w.ready  #= false
-    axi4.b.valid  #= false
-    if (axi4.config.useId)   axi4.b.id   #= 0
+    axi4.w.ready #= false
+    axi4.b.valid #= false
+    if (axi4.config.useId) axi4.b.id #= 0
     if (axi4.config.useResp) axi4.b.resp #= 0
     axi4.ar.ready #= false
-    axi4.r.valid  #= false
-    axi4.r.data   #= 0
-    if (axi4.config.useId)   axi4.r.id   #= 0
+    axi4.r.valid #= false
+    axi4.r.data #= 0
+    if (axi4.config.useId) axi4.r.id #= 0
     if (axi4.config.useResp) axi4.r.resp #= 0
     if (axi4.config.useLast) axi4.r.last #= false
 
@@ -190,7 +194,7 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
         cd.waitSamplingWhere(axi4.aw.valid.toBoolean)
         val awAddr = axi4.aw.addr.toLong
         val awLen  = if (axi4.config.useLen) axi4.aw.len.toInt else 0
-        val awId   = if (axi4.config.useId)  axi4.aw.id.toInt  else 0
+        val awId   = if (axi4.config.useId) axi4.aw.id.toInt else 0
         axi4.aw.ready #= false
 
         // Accept W beats
@@ -204,7 +208,7 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
 
         // Send B
         axi4.b.valid #= true
-        if (axi4.config.useId)   axi4.b.id   #= awId
+        if (axi4.config.useId) axi4.b.id #= awId
         if (axi4.config.useResp) axi4.b.resp #= 0
         cd.waitSamplingWhere(axi4.b.ready.toBoolean)
         axi4.b.valid #= false
@@ -218,13 +222,13 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
         cd.waitSamplingWhere(axi4.ar.valid.toBoolean)
         val arAddr = axi4.ar.addr.toLong
         val arLen  = if (axi4.config.useLen) axi4.ar.len.toInt else 0
-        val arId   = if (axi4.config.useId)  axi4.ar.id.toInt  else 0
+        val arId   = if (axi4.config.useId) axi4.ar.id.toInt else 0
         axi4.ar.ready #= false
 
         for (beat <- 0 to arLen) {
           axi4.r.valid #= true
-          axi4.r.data  #= mem.getOrElse(arAddr + beat * 4, 0L)
-          if (axi4.config.useId)   axi4.r.id   #= arId
+          axi4.r.data #= mem.getOrElse(arAddr + beat * 4, 0L)
+          if (axi4.config.useId) axi4.r.id #= arId
           if (axi4.config.useResp) axi4.r.resp #= 0
           if (axi4.config.useLast) axi4.r.last #= (beat == arLen)
           cd.waitSamplingWhere(axi4.r.ready.toBoolean)
@@ -246,11 +250,11 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
       val mem = spawnAxi4Slave(dut.io.axi4, cd)
       cd.waitSampling(5)
 
-      writeWord(dut.io.axi3, cd, 0x1000L, 0xDEADBEEFL, id = 3)
+      writeWord(dut.io.axi3, cd, 0x1000L, 0xdeadbeefL, id = 3)
       val (data, _) = readWord(dut.io.axi3, cd, 0x1000L, id = 3)
 
-      assert(data == 0xDEADBEEFL, f"expected 0xDEADBEEF, got 0x$data%08X")
-      assert(mem(0x1000L) == 0xDEADBEEFL)
+      assert(data == 0xdeadbeefL, f"expected 0xDEADBEEF, got 0x$data%08X")
+      assert(mem(0x1000L) == 0xdeadbeefL)
       cd.waitSampling(5)
     }
   }
@@ -264,7 +268,7 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
       cd.waitSampling(5)
 
       val baseAddr = 0x2000L
-      val beats = Seq(0x11111111L, 0x22222222L, 0x33333333L, 0x44444444L)
+      val beats    = Seq(0x11111111L, 0x22222222L, 0x33333333L, 0x44444444L)
 
       // AW: len=3 (4 beats)
       sendAw(dut.io.axi3, cd, id = 1, addr = baseAddr, len = 3)
@@ -297,10 +301,10 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
       sendAw(dut.io.axi3, cd, id = 2, addr = 0x4000L, len = 1)
 
       // Interleave W beats: ID2 beat0, ID1 beat0, ID2 beat1, ID1 beat1
-      sendWBeat(dut.io.axi3, cd, wid = 2, 0xAAAA0000L, last = false)
-      sendWBeat(dut.io.axi3, cd, wid = 1, 0xBBBB0000L, last = false)
-      sendWBeat(dut.io.axi3, cd, wid = 2, 0xAAAA1111L, last = true)
-      sendWBeat(dut.io.axi3, cd, wid = 1, 0xBBBB1111L, last = true)
+      sendWBeat(dut.io.axi3, cd, wid = 2, 0xaaaa0000L, last = false)
+      sendWBeat(dut.io.axi3, cd, wid = 1, 0xbbbb0000L, last = false)
+      sendWBeat(dut.io.axi3, cd, wid = 2, 0xaaaa1111L, last = true)
+      sendWBeat(dut.io.axi3, cd, wid = 1, 0xbbbb1111L, last = true)
 
       // Collect both B responses (ID=1 first since it was AW'd first)
       val (b1Id, b1Resp) = collectB(dut.io.axi3, cd)
@@ -312,10 +316,10 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
       assert(b2Resp == 0)
 
       // Verify memory: ID1 → 0x3000, ID2 → 0x4000
-      assert(mem(0x3000L) == 0xBBBB0000L, f"ID1 beat0: got 0x${mem(0x3000L)}%08X")
-      assert(mem(0x3004L) == 0xBBBB1111L, f"ID1 beat1: got 0x${mem(0x3004L)}%08X")
-      assert(mem(0x4000L) == 0xAAAA0000L, f"ID2 beat0: got 0x${mem(0x4000L)}%08X")
-      assert(mem(0x4004L) == 0xAAAA1111L, f"ID2 beat1: got 0x${mem(0x4004L)}%08X")
+      assert(mem(0x3000L) == 0xbbbb0000L, f"ID1 beat0: got 0x${mem(0x3000L)}%08X")
+      assert(mem(0x3004L) == 0xbbbb1111L, f"ID1 beat1: got 0x${mem(0x3004L)}%08X")
+      assert(mem(0x4000L) == 0xaaaa0000L, f"ID2 beat0: got 0x${mem(0x4000L)}%08X")
+      assert(mem(0x4004L) == 0xaaaa1111L, f"ID2 beat1: got 0x${mem(0x4004L)}%08X")
       cd.waitSampling(5)
     }
   }
@@ -352,7 +356,7 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
         sendAw(dut.io.axi3, cd, id = i, addr = 0x6000L + i * 4, len = 0)
       }
       for (i <- 0 until 3) {
-        sendWBeat(dut.io.axi3, cd, wid = i, (0xA0 + i).toLong << 24, last = true)
+        sendWBeat(dut.io.axi3, cd, wid = i, (0xa0 + i).toLong << 24, last = true)
       }
 
       // Collect 3 B responses in AW order
@@ -364,9 +368,11 @@ class Axi3ToAxi4Spec extends AnyFunSuite {
 
       // Verify memory
       for (i <- 0 until 3) {
-        val expected = (0xA0 + i).toLong << 24
-        assert(mem(0x6000L + i * 4) == expected,
-          f"addr 0x${0x6000L + i * 4}%04X: expected 0x$expected%08X, got 0x${mem(0x6000L + i * 4)}%08X")
+        val expected = (0xa0 + i).toLong << 24
+        assert(
+          mem(0x6000L + i * 4) == expected,
+          f"addr 0x${0x6000L + i * 4}%04X: expected 0x$expected%08X, got 0x${mem(0x6000L + i * 4)}%08X"
+        )
       }
       cd.waitSampling(5)
     }

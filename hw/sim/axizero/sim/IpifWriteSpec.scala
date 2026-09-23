@@ -34,8 +34,8 @@ class IpifWriteSpec extends AnyFunSuite {
 
   private val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -47,33 +47,46 @@ class IpifWriteSpec extends AnyFunSuite {
 
   // AXI4-Lite config (no IDs, no bursts)
   private val liteSlaveCfg = Axi4Config(
-    addressWidth = 32, dataWidth = 32,
-    useId     = false, useRegion = false,
-    useBurst  = false, useLock   = false,
-    useCache  = false, useSize   = false,
-    useQos    = false, useLen    = false,
-    useLast   = false, useResp   = true,
-    useProt   = true,  useStrb   = true
+    addressWidth = 32,
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useCache = false,
+    useSize = false,
+    useQos = false,
+    useLen = false,
+    useLast = false,
+    useResp = true,
+    useProt = true,
+    useStrb = true
   )
 
   // Full AXI4 master config
   private val fullMasterCfg = Axi4Config(
-    addressWidth = 32, dataWidth = 32, idWidth = 4
+    addressWidth = 32,
+    dataWidth = 32,
+    idWidth = 4
   )
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   private def makeAxiZeroCfg(maxOut: Int) = AxiZeroConfig(
     masters = Seq(MasterPort(fullMasterCfg, FullAxi4)),
-    slaves  = Seq(SlavePort(liteSlaveCfg, LiteAxi4, slaveBase, slaveSize)),
-    arbitration    = RoundRobin,
+    slaves = Seq(SlavePort(liteSlaveCfg, LiteAxi4, slaveBase, slaveSize)),
+    arbitration = RoundRobin,
     maxOutstanding = maxOut
   )
 
   // Run a single IPIF write→read round-trip and assert correctness.
   // Times out after 500 cycles if the slave never accepts the write.
-  private def runIpifRoundTrip(dut: AxiZeroMixedTop, addr: Long,
-                                wdata: Long, expectedMem: Long): Unit = {
+  private def runIpifRoundTrip(
+    dut: AxiZeroMixedTop,
+    addr: Long,
+    wdata: Long,
+    expectedMem: Long
+  ): Unit = {
     val cd  = dut.clockDomain
     val mem = SimHelpers.spawnIpifLiteSlave(dut.io.slaves(0), cd)
     SimHelpers.initMaster(dut.io.masters(0))
@@ -84,9 +97,11 @@ class IpifWriteSpec extends AnyFunSuite {
     SimHelpers.liteWriteSimul(dut.io.masters(0), cd, addr, wdata)
 
     val got = mem.getOrElse(addr, -1L)
-    assert(got == expectedMem,
+    assert(
+      got == expectedMem,
       f"IPIF write round-trip failed at 0x$addr%08x: " +
-      f"expected 0x$expectedMem%08x, got 0x$got%08x")
+        f"expected 0x$expectedMem%08x, got 0x$got%08x"
+    )
   }
 
   // ── Test 1: blocking mode (maxOutstanding = 1) ───────────────────────────
@@ -94,10 +109,12 @@ class IpifWriteSpec extends AnyFunSuite {
   test("IPIF write completes without deadlock — blocking mode (maxOutstanding=1)") {
     simCfg.compile(new AxiZeroMixedTop(makeAxiZeroCfg(1))).doSim { dut =>
       dut.clockDomain.forkStimulus(10)
-      runIpifRoundTrip(dut,
-        addr         = slaveBase.toLong + 0x0100L,
-        wdata        = 0xDEADBEEFL,
-        expectedMem  = 0xDEADBEEFL)
+      runIpifRoundTrip(
+        dut,
+        addr = slaveBase.toLong + 0x0100L,
+        wdata = 0xdeadbeefL,
+        expectedMem = 0xdeadbeefL
+      )
       dut.clockDomain.waitSampling(10)
     }
   }
@@ -107,10 +124,12 @@ class IpifWriteSpec extends AnyFunSuite {
   test("IPIF write completes without deadlock — pipelined mode (maxOutstanding=4)") {
     simCfg.compile(new AxiZeroMixedTop(makeAxiZeroCfg(4))).doSim { dut =>
       dut.clockDomain.forkStimulus(10)
-      runIpifRoundTrip(dut,
-        addr         = slaveBase.toLong + 0x0200L,
-        wdata        = 0xCAFEBABEL,
-        expectedMem  = 0xCAFEBABEL)
+      runIpifRoundTrip(
+        dut,
+        addr = slaveBase.toLong + 0x0200L,
+        wdata = 0xcafebabeL,
+        expectedMem = 0xcafebabeL
+      )
       dut.clockDomain.waitSampling(10)
     }
   }
@@ -135,8 +154,10 @@ class IpifWriteSpec extends AnyFunSuite {
 
       for ((addr, expected) <- writes) {
         val got = mem.getOrElse(addr, -1L)
-        assert(got == expected,
-          f"multi-write: addr 0x$addr%08x expected 0x$expected%08x got 0x$got%08x")
+        assert(
+          got == expected,
+          f"multi-write: addr 0x$addr%08x expected 0x$expected%08x got 0x$got%08x"
+        )
       }
       cd.waitSampling(10)
     }
@@ -153,17 +174,19 @@ class IpifWriteSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       val writes = Seq(
-        (slaveBase.toLong + 0x20L, 0xAAAAAAAAL),
-        (slaveBase.toLong + 0x24L, 0xBBBBBBBBL),
-        (slaveBase.toLong + 0x28L, 0xCCCCCCCCL)
+        (slaveBase.toLong + 0x20L, 0xaaaaaaaaL),
+        (slaveBase.toLong + 0x24L, 0xbbbbbbbbL),
+        (slaveBase.toLong + 0x28L, 0xccccccccL)
       )
       for ((addr, data) <- writes)
         SimHelpers.liteWriteSimul(dut.io.masters(0), cd, addr, data)
 
       for ((addr, expected) <- writes) {
         val got = mem.getOrElse(addr, -1L)
-        assert(got == expected,
-          f"multi-write pipelined: addr 0x$addr%08x expected 0x$expected%08x got 0x$got%08x")
+        assert(
+          got == expected,
+          f"multi-write pipelined: addr 0x$addr%08x expected 0x$expected%08x got 0x$got%08x"
+        )
       }
       cd.waitSampling(10)
     }
@@ -183,13 +206,12 @@ class IpifWriteSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       val addr  = slaveBase.toLong + 0x0300L
-      val wdata = 0xFACEFACEL
+      val wdata = 0xfacefaceL
       SimHelpers.liteWriteSimul(dut.io.masters(0), cd, addr, wdata)
 
       // Standard read via fullRead (AR then R — works for any slave)
       val (rdata, _) = SimHelpers.fullRead(dut.io.masters(0), cd, addr)
-      assert(rdata == wdata,
-        f"IPIF write then read: expected 0x$wdata%08x got 0x$rdata%08x")
+      assert(rdata == wdata, f"IPIF write then read: expected 0x$wdata%08x got 0x$rdata%08x")
 
       cd.waitSampling(10)
     }

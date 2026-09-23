@@ -15,7 +15,11 @@ Thank you for your interest in contributing! Bug reports, feature requests, and 
    ```
    Every test must pass. The counts are in the README; a change that adds tests should
    update them there.
-4. If your change touches the RTL or the generator, regenerate the pre-built Verilog and
+4. Format before you push — CI checks it, for main and test sources alike:
+   ```bash
+   sbt scalafmtAll Test/scalafmtAll vexZero/scalafmtAll vexZero/Test/scalafmtAll
+   ```
+5. If your change touches the RTL or the generator, regenerate the pre-built Verilog and
    confirm nothing else moved:
    ```bash
    python3 scripts/axizero.py generate scripts/example.yaml --output generated

@@ -25,8 +25,8 @@ class BurstTypeSpec extends AnyFunSuite {
 
   private val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -43,7 +43,7 @@ class BurstTypeSpec extends AnyFunSuite {
 
   private def makeCfg = AxiZeroConfig(
     masters = Seq(MasterPort(masterCfg, FullAxi4)),
-    slaves  = Seq(SlavePort(slaveCfg, FullAxi4, slaveBase, slaveSize))
+    slaves = Seq(SlavePort(slaveCfg, FullAxi4, slaveBase, slaveSize))
   )
 
   // Safely convert a Long (possibly negative due to bit 63) to unsigned BigInt
@@ -53,26 +53,26 @@ class BurstTypeSpec extends AnyFunSuite {
 
   // Helper: send a raw AXI4 burst with configurable burst type
   private def sendBurst(
-    m:         spinal.lib.bus.amba4.axi.Axi4,
-    cd:        ClockDomain,
-    addr:      Long,
-    beats:     Seq[Long],
-    burstType: Int,          // 0=FIXED, 1=INCR, 2=WRAP
-    id:        Int = 0
+    m: spinal.lib.bus.amba4.axi.Axi4,
+    cd: ClockDomain,
+    addr: Long,
+    beats: Seq[Long],
+    burstType: Int, // 0=FIXED, 1=INCR, 2=WRAP
+    id: Int = 0
   ): Unit = {
     m.aw.valid #= true
-    m.aw.addr  #= addr
-    if (m.config.useId)    m.aw.id    #= id
-    if (m.config.useLen)   m.aw.len   #= beats.length - 1
-    if (m.config.useSize)  m.aw.size  #= 3 // log2(8 bytes) = 3 for 64-bit bus
+    m.aw.addr #= addr
+    if (m.config.useId) m.aw.id #= id
+    if (m.config.useLen) m.aw.len #= beats.length - 1
+    if (m.config.useSize) m.aw.size #= 3 // log2(8 bytes) = 3 for 64-bit bus
     if (m.config.useBurst) m.aw.burst #= burstType
     while ({ cd.waitSampling(); !m.aw.ready.toBoolean }) {}
     m.aw.valid #= false
 
     for ((beat, i) <- beats.zipWithIndex) {
       m.w.valid #= true
-      m.w.data  #= u64(beat)   // use unsigned BigInt — bit 63 safe
-      if (m.config.useStrb) m.w.strb #= 0xFF
+      m.w.data #= u64(beat) // use unsigned BigInt — bit 63 safe
+      if (m.config.useStrb) m.w.strb #= 0xff
       if (m.config.useLast) m.w.last #= (i == beats.length - 1)
       while ({ cd.waitSampling(); !m.w.ready.toBoolean }) {}
     }
@@ -101,14 +101,19 @@ class BurstTypeSpec extends AnyFunSuite {
       // INCR: beat0 → addr 0x00 (lo=0x22222222, hi=0x11111111)
       //        beat1 → addr 0x08 (lo=0x44444444, hi=0x33333333)
       val base = 0x0100L
-      sendBurst(dut.io.masters(0), cd, base,
-        Seq(0x1111111122222222L, 0x3333333344444444L), burstType = 1)
+      sendBurst(
+        dut.io.masters(0),
+        cd,
+        base,
+        Seq(0x1111111122222222L, 0x3333333344444444L),
+        burstType = 1
+      )
       cd.waitSampling(4)
 
-      assert(mem.getOrElse(base,       0L) == 0x22222222L, "INCR beat0 lo")
-      assert(mem.getOrElse(base + 4,   0L) == 0x11111111L, "INCR beat0 hi")
-      assert(mem.getOrElse(base + 8,   0L) == 0x44444444L, "INCR beat1 lo")
-      assert(mem.getOrElse(base + 12,  0L) == 0x33333333L, "INCR beat1 hi")
+      assert(mem.getOrElse(base, 0L) == 0x22222222L, "INCR beat0 lo")
+      assert(mem.getOrElse(base + 4, 0L) == 0x11111111L, "INCR beat0 hi")
+      assert(mem.getOrElse(base + 8, 0L) == 0x44444444L, "INCR beat1 lo")
+      assert(mem.getOrElse(base + 12, 0L) == 0x33333333L, "INCR beat1 hi")
     }
   }
 
@@ -127,13 +132,12 @@ class BurstTypeSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       val base = 0x0200L
-      sendBurst(dut.io.masters(0), cd, base,
-        Seq(0xDEADBEEFCAFEBABEL), burstType = 0)
+      sendBurst(dut.io.masters(0), cd, base, Seq(0xdeadbeefcafebabeL), burstType = 0)
       cd.waitSampling(4)
 
       // Lo half written to base, hi half to base+4
-      assert(mem.getOrElse(base,     0L) == 0xCAFEBABEL, "FIXED lo word")
-      assert(mem.getOrElse(base + 4, 0L) == 0xDEADBEEFL, "FIXED hi word")
+      assert(mem.getOrElse(base, 0L) == 0xcafebabeL, "FIXED lo word")
+      assert(mem.getOrElse(base + 4, 0L) == 0xdeadbeefL, "FIXED hi word")
     }
   }
 
@@ -152,15 +156,24 @@ class BurstTypeSpec extends AnyFunSuite {
       // Beat 0: 0xDEADBEEFCAFEBABE → lo=0xCAFEBABE, hi=0xDEADBEEF
       // Beat 1: 0x1234567890ABCDEF → lo=0x90ABCDEF, hi=0x12345678
       // FIXED: beat 1 overwrites beat 0 at the same addresses
-      sendBurst(dut.io.masters(0), cd, base,
-        Seq(0xDEADBEEFCAFEBABEL, 0x1234567890ABCDEFL), burstType = 0)
+      sendBurst(
+        dut.io.masters(0),
+        cd,
+        base,
+        Seq(0xdeadbeefcafebabeL, 0x1234567890abcdefL),
+        burstType = 0
+      )
       cd.waitSampling(8)
 
       // Final memory should contain beat 1's data (it overwrote beat 0)
-      assert(mem.getOrElse(base,     0L) == 0x90ABCDEFL,
-        f"FIXED 2-beat lo: expected 0x90ABCDEF, got 0x${mem.getOrElse(base, 0L)}%08X")
-      assert(mem.getOrElse(base + 4, 0L) == 0x12345678L,
-        f"FIXED 2-beat hi: expected 0x12345678, got 0x${mem.getOrElse(base + 4, 0L)}%08X")
+      assert(
+        mem.getOrElse(base, 0L) == 0x90abcdefL,
+        f"FIXED 2-beat lo: expected 0x90ABCDEF, got 0x${mem.getOrElse(base, 0L)}%08X"
+      )
+      assert(
+        mem.getOrElse(base + 4, 0L) == 0x12345678L,
+        f"FIXED 2-beat hi: expected 0x12345678, got 0x${mem.getOrElse(base + 4, 0L)}%08X"
+      )
     }
   }
 
@@ -179,15 +192,20 @@ class BurstTypeSpec extends AnyFunSuite {
       cd.forkStimulus(10)
       cd.waitSampling(5)
 
-      val base = 0x0400L  // 16-byte aligned
-      sendBurst(dut.io.masters(0), cd, base,
-        Seq(0xAAAAAAAABBBBBBBBL, 0xCCCCCCCCDDDDDDDDL), burstType = 2)
+      val base = 0x0400L // 16-byte aligned
+      sendBurst(
+        dut.io.masters(0),
+        cd,
+        base,
+        Seq(0xaaaaaaaabbbbbbbbL, 0xccccccccddddddddL),
+        burstType = 2
+      )
       cd.waitSampling(4)
 
-      assert(mem.getOrElse(base,      0L) == 0xBBBBBBBBL, "WRAP beat0 lo")
-      assert(mem.getOrElse(base + 4,  0L) == 0xAAAAAAAAL, "WRAP beat0 hi")
-      assert(mem.getOrElse(base + 8,  0L) == 0xDDDDDDDDL, "WRAP beat1 lo")
-      assert(mem.getOrElse(base + 12, 0L) == 0xCCCCCCCCL, "WRAP beat1 hi")
+      assert(mem.getOrElse(base, 0L) == 0xbbbbbbbbL, "WRAP beat0 lo")
+      assert(mem.getOrElse(base + 4, 0L) == 0xaaaaaaaaL, "WRAP beat0 hi")
+      assert(mem.getOrElse(base + 8, 0L) == 0xddddddddL, "WRAP beat1 lo")
+      assert(mem.getOrElse(base + 12, 0L) == 0xccccccccL, "WRAP beat1 hi")
     }
   }
 
@@ -203,12 +221,12 @@ class BurstTypeSpec extends AnyFunSuite {
       cd.forkStimulus(10)
       cd.waitSampling(5)
 
-      val base  = 0x0500L  // 32-byte aligned
+      val base = 0x0500L // 32-byte aligned
       val beats = Seq(
-        0x1111111122222222L,  // beat0 → 0x0500
-        0x3333333344444444L,  // beat1 → 0x0508
-        0x5555555566666666L,  // beat2 → 0x0510
-        0x7777777788888888L   // beat3 → 0x0518
+        0x1111111122222222L, // beat0 → 0x0500
+        0x3333333344444444L, // beat1 → 0x0508
+        0x5555555566666666L, // beat2 → 0x0510
+        0x7777777788888888L  // beat3 → 0x0518
       )
 
       sendBurst(dut.io.masters(0), cd, base, beats, burstType = 2)
@@ -218,11 +236,11 @@ class BurstTypeSpec extends AnyFunSuite {
       assert(mem.getOrElse(0x0500L, 0L) == 0x22222222L, "WRAP beat0 lo @ 0x500")
       assert(mem.getOrElse(0x0504L, 0L) == 0x11111111L, "WRAP beat0 hi @ 0x504")
       assert(mem.getOrElse(0x0508L, 0L) == 0x44444444L, "WRAP beat1 lo @ 0x508")
-      assert(mem.getOrElse(0x050CL, 0L) == 0x33333333L, "WRAP beat1 hi @ 0x50C")
+      assert(mem.getOrElse(0x050cL, 0L) == 0x33333333L, "WRAP beat1 hi @ 0x50C")
       assert(mem.getOrElse(0x0510L, 0L) == 0x66666666L, "WRAP beat2 lo @ 0x510")
       assert(mem.getOrElse(0x0514L, 0L) == 0x55555555L, "WRAP beat2 hi @ 0x514")
       assert(mem.getOrElse(0x0518L, 0L) == 0x88888888L, "WRAP beat3 lo @ 0x518")
-      assert(mem.getOrElse(0x051CL, 0L) == 0x77777777L, "WRAP beat3 hi @ 0x51C")
+      assert(mem.getOrElse(0x051cL, 0L) == 0x77777777L, "WRAP beat3 hi @ 0x51C")
     }
   }
 
@@ -238,24 +256,30 @@ class BurstTypeSpec extends AnyFunSuite {
       cd.forkStimulus(10)
       cd.waitSampling(5)
 
-      val base = 0x0508L  // NOT aligned to 32-byte wrap boundary
-      sendBurst(dut.io.masters(0), cd, base, Seq(
-        0xAAAA0000BBBB0000L,  // beat0 → 0x0508
-        0xCCCC0000DDDD0000L,  // beat1 → 0x0510
-        0xEEEE0000FFFF0000L,  // beat2 → 0x0518
-        0x1111000022220000L   // beat3 → 0x0500 (wrap!)
-      ), burstType = 2)
+      val base = 0x0508L // NOT aligned to 32-byte wrap boundary
+      sendBurst(
+        dut.io.masters(0),
+        cd,
+        base,
+        Seq(
+          0xaaaa0000bbbb0000L, // beat0 → 0x0508
+          0xcccc0000dddd0000L, // beat1 → 0x0510
+          0xeeee0000ffff0000L, // beat2 → 0x0518
+          0x1111000022220000L  // beat3 → 0x0500 (wrap!)
+        ),
+        burstType = 2
+      )
       cd.waitSampling(12)
 
       // beat0 at 0x0508 (lo) and 0x050C (hi)
-      assert(mem.getOrElse(0x0508L, 0L) == 0xBBBB0000L, "WRAP-around beat0 lo @ 0x0508")
-      assert(mem.getOrElse(0x050CL, 0L) == 0xAAAA0000L, "WRAP-around beat0 hi @ 0x050C")
+      assert(mem.getOrElse(0x0508L, 0L) == 0xbbbb0000L, "WRAP-around beat0 lo @ 0x0508")
+      assert(mem.getOrElse(0x050cL, 0L) == 0xaaaa0000L, "WRAP-around beat0 hi @ 0x050C")
       // beat1 at 0x0510 (lo) and 0x0514 (hi)
-      assert(mem.getOrElse(0x0510L, 0L) == 0xDDDD0000L, "WRAP-around beat1 lo @ 0x0510")
-      assert(mem.getOrElse(0x0514L, 0L) == 0xCCCC0000L, "WRAP-around beat1 hi @ 0x0514")
+      assert(mem.getOrElse(0x0510L, 0L) == 0xdddd0000L, "WRAP-around beat1 lo @ 0x0510")
+      assert(mem.getOrElse(0x0514L, 0L) == 0xcccc0000L, "WRAP-around beat1 hi @ 0x0514")
       // beat2 at 0x0518 (lo) and 0x051C (hi)
-      assert(mem.getOrElse(0x0518L, 0L) == 0xFFFF0000L, "WRAP-around beat2 lo @ 0x0518")
-      assert(mem.getOrElse(0x051CL, 0L) == 0xEEEE0000L, "WRAP-around beat2 hi @ 0x051C")
+      assert(mem.getOrElse(0x0518L, 0L) == 0xffff0000L, "WRAP-around beat2 lo @ 0x0518")
+      assert(mem.getOrElse(0x051cL, 0L) == 0xeeee0000L, "WRAP-around beat2 hi @ 0x051C")
       // beat3 at 0x0500 (lo) and 0x0504 (hi) — WRAPPED addresses!
       assert(mem.getOrElse(0x0500L, 0L) == 0x22220000L, "WRAP-around beat3 lo @ 0x0500")
       assert(mem.getOrElse(0x0504L, 0L) == 0x11110000L, "WRAP-around beat3 hi @ 0x0504")

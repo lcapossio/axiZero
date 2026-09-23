@@ -90,9 +90,9 @@ class AxiMonitor(name: String) {
   def monitorWriteBursts(ifc: Axi4, cd: ClockDomain): Unit = fork {
     // Queue of AWLEN values for accepted AW transactions not yet started on W
     val pendingLens = mutable.Queue[Int]()
-    var curLen   = -1   // -1 = no active burst
-    var curBeats = 0    //  expected beats for active burst
-    var beat     = 0    //  beats seen so far
+    var curLen      = -1 // -1 = no active burst
+    var curBeats    = 0  //  expected beats for active burst
+    var beat        = 0  //  beats seen so far
 
     while (true) {
       cd.waitSampling()
@@ -110,9 +110,9 @@ class AxiMonitor(name: String) {
           if (pendingLens.isEmpty)
             err(s"W beat with no pending AW")
           else {
-            curLen   = pendingLens.dequeue()
+            curLen = pendingLens.dequeue()
             curBeats = curLen + 1
-            beat     = 0
+            beat = 0
           }
         }
         if (curLen >= 0) {
@@ -135,9 +135,9 @@ class AxiMonitor(name: String) {
 
   def monitorReadBursts(ifc: Axi4, cd: ClockDomain): Unit = fork {
     val pendingLens = mutable.Queue[Int]()
-    var curLen   = -1
-    var curBeats = 0
-    var beat     = 0
+    var curLen      = -1
+    var curBeats    = 0
+    var beat        = 0
 
     while (true) {
       cd.waitSampling()
@@ -154,9 +154,9 @@ class AxiMonitor(name: String) {
           if (pendingLens.isEmpty)
             err(s"R beat with no pending AR")
           else {
-            curLen   = pendingLens.dequeue()
+            curLen = pendingLens.dequeue()
             curBeats = curLen + 1
-            beat     = 0
+            beat = 0
           }
         }
         if (curLen >= 0) {
@@ -204,8 +204,10 @@ class AxiMonitor(name: String) {
         cd.waitSampling()
         if (ifc.ar.valid.toBoolean && ifc.ar.ready.toBoolean)
           outstanding(ifc.ar.id.toInt) += 1
-        if (ifc.r.valid.toBoolean && ifc.r.ready.toBoolean &&
-            (if (ifc.config.useLast) ifc.r.last.toBoolean else true)) {
+        if (
+          ifc.r.valid.toBoolean && ifc.r.ready.toBoolean &&
+          (if (ifc.config.useLast) ifc.r.last.toBoolean else true)
+        ) {
           val rid = ifc.r.id.toInt
           if (outstanding(rid) == 0)
             err(s"R.id=0x${rid.toHexString} (last beat) has no matching outstanding AR.id")
@@ -219,10 +221,9 @@ class AxiMonitor(name: String) {
 
 object AxiMonitor {
 
-  /**
-   * Attach a full-featured monitor to an AXI4 interface.
-   * Starts all checks immediately as background threads.
-   */
+  /** Attach a full-featured monitor to an AXI4 interface. Starts all checks immediately as
+    * background threads.
+    */
   def attach(ifc: Axi4, cd: ClockDomain, name: String): AxiMonitor = {
     val mon = new AxiMonitor(name)
     mon.monitorAwStability(ifc, cd)

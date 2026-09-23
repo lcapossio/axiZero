@@ -28,8 +28,8 @@ class WidthConverterSpec extends AnyFunSuite {
 
   private val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -49,7 +49,7 @@ class WidthConverterSpec extends AnyFunSuite {
 
   private def makeUpsizeCfg = AxiZeroConfig(
     masters = Seq(MasterPort(up32MasterCfg, FullAxi4)),
-    slaves  = Seq(SlavePort(up64SlaveCfg, FullAxi4, slave0Base, slaveSize))
+    slaves = Seq(SlavePort(up64SlaveCfg, FullAxi4, slave0Base, slaveSize))
     // fabricDataWidth = max(32, 64) = 64  →  upsizer at master port
   )
 
@@ -59,7 +59,7 @@ class WidthConverterSpec extends AnyFunSuite {
 
   private def makeDownsizeCfg = AxiZeroConfig(
     masters = Seq(MasterPort(down64MasterCfg, FullAxi4)),
-    slaves  = Seq(SlavePort(down32SlaveCfg, FullAxi4, slave0Base, slaveSize))
+    slaves = Seq(SlavePort(down32SlaveCfg, FullAxi4, slave0Base, slaveSize))
     // fabricDataWidth = max(64, 32) = 64  →  downsizer at slave port
   )
 
@@ -67,8 +67,8 @@ class WidthConverterSpec extends AnyFunSuite {
   private val narrow32Cfg = Axi4Config(addressWidth = 32, dataWidth = 32, idWidth = idW)
 
   private def makeBothConvCfg = AxiZeroConfig(
-    masters           = Seq(MasterPort(narrow32Cfg, FullAxi4)),
-    slaves            = Seq(SlavePort(narrow32Cfg, FullAxi4, slave0Base, slaveSize)),
+    masters = Seq(MasterPort(narrow32Cfg, FullAxi4)),
+    slaves = Seq(SlavePort(narrow32Cfg, FullAxi4, slave0Base, slaveSize)),
     internalDataWidth = Some(64)
     // upsizer at master (32→64), downsizer at slave (64→32)
   )
@@ -84,13 +84,18 @@ class WidthConverterSpec extends AnyFunSuite {
 
       cd.waitSampling(5)
 
-      val bid = SimHelpers.fullWrite(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x100L, data = 0xAABBCCDDL, id = 1)
+      val bid = SimHelpers.fullWrite(
+        dut.io.masters(0),
+        cd,
+        addr = slave0Base.toLong + 0x100L,
+        data = 0xaabbccddL,
+        id = 1
+      )
       assert(bid == 1, s"B.id echo mismatch: got $bid")
 
-      val (rData, rid) = SimHelpers.fullRead(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x100L, id = 2)
-      assert(rData == 0xAABBCCDDL, f"read back mismatch: got 0x${rData}%08x")
+      val (rData, rid) =
+        SimHelpers.fullRead(dut.io.masters(0), cd, addr = slave0Base.toLong + 0x100L, id = 2)
+      assert(rData == 0xaabbccddL, f"read back mismatch: got 0x${rData}%08x")
       assert(rid == 2, s"R.id echo mismatch: got $rid")
 
       cd.waitSampling(5)
@@ -115,15 +120,16 @@ class WidthConverterSpec extends AnyFunSuite {
       val baseAddr  = slave0Base.toLong + 0x200L
       val writeData = (0 until 4).map(i => 0x10000000L | i.toLong)
 
-      SimHelpers.fullBurstWrite(dut.io.masters(0), cd,
-        addr = baseAddr, data = writeData, id = 3)
+      SimHelpers.fullBurstWrite(dut.io.masters(0), cd, addr = baseAddr, data = writeData, id = 3)
 
-      val (readData, rid) = SimHelpers.fullBurstRead(dut.io.masters(0), cd,
-        addr = baseAddr, beats = 4, id = 3)
+      val (readData, rid) =
+        SimHelpers.fullBurstRead(dut.io.masters(0), cd, addr = baseAddr, beats = 4, id = 3)
       assert(rid == 3, s"R.id mismatch: got $rid")
       for (i <- 0 until 4)
-        assert(readData(i) == writeData(i),
-          f"beat $i: wrote 0x${writeData(i)}%08x, read 0x${readData(i)}%08x")
+        assert(
+          readData(i) == writeData(i),
+          f"beat $i: wrote 0x${writeData(i)}%08x, read 0x${readData(i)}%08x"
+        )
 
       cd.waitSampling(5)
     }
@@ -144,12 +150,18 @@ class WidthConverterSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       val writeVal = 0x0102030405060708L
-      val bid = SimHelpers.fullWrite(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x300L, data = writeVal, id = 1, strb = 0xFF)
+      val bid = SimHelpers.fullWrite(
+        dut.io.masters(0),
+        cd,
+        addr = slave0Base.toLong + 0x300L,
+        data = writeVal,
+        id = 1,
+        strb = 0xff
+      )
       assert(bid == 1, s"B.id echo mismatch: got $bid")
 
-      val (rData, rid) = SimHelpers.fullRead(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x300L, id = 2)
+      val (rData, rid) =
+        SimHelpers.fullRead(dut.io.masters(0), cd, addr = slave0Base.toLong + 0x300L, id = 2)
       assert(rData == writeVal, f"read back mismatch: got 0x${rData}%016x")
       assert(rid == 2, s"R.id echo mismatch: got $rid")
 
@@ -169,17 +181,25 @@ class WidthConverterSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       val baseAddr  = slave0Base.toLong + 0x400L
-      val writeData = Seq(0x0102030405060708L, 0x090A0B0C0D0E0F10L)
+      val writeData = Seq(0x0102030405060708L, 0x090a0b0c0d0e0f10L)
 
-      SimHelpers.fullBurstWrite(dut.io.masters(0), cd,
-        addr = baseAddr, data = writeData, id = 3, strb = 0xFF)
+      SimHelpers.fullBurstWrite(
+        dut.io.masters(0),
+        cd,
+        addr = baseAddr,
+        data = writeData,
+        id = 3,
+        strb = 0xff
+      )
 
-      val (readData, rid) = SimHelpers.fullBurstRead(dut.io.masters(0), cd,
-        addr = baseAddr, beats = 2, id = 3)
+      val (readData, rid) =
+        SimHelpers.fullBurstRead(dut.io.masters(0), cd, addr = baseAddr, beats = 2, id = 3)
       assert(rid == 3, s"R.id mismatch: got $rid")
       for (i <- 0 until 2)
-        assert(readData(i) == writeData(i),
-          f"beat $i: wrote 0x${writeData(i)}%016x, read 0x${readData(i)}%016x")
+        assert(
+          readData(i) == writeData(i),
+          f"beat $i: wrote 0x${writeData(i)}%016x, read 0x${readData(i)}%016x"
+        )
 
       cd.waitSampling(5)
     }
@@ -201,22 +221,28 @@ class WidthConverterSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       // Single-beat round-trip
-      SimHelpers.fullWrite(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x500L, data = 0xDEADBEEFL, id = 1)
-      val (r0, _) = SimHelpers.fullRead(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x500L, id = 1)
-      assert(r0 == 0xDEADBEEFL, f"single-beat mismatch: got 0x${r0}%08x")
+      SimHelpers.fullWrite(
+        dut.io.masters(0),
+        cd,
+        addr = slave0Base.toLong + 0x500L,
+        data = 0xdeadbeefL,
+        id = 1
+      )
+      val (r0, _) =
+        SimHelpers.fullRead(dut.io.masters(0), cd, addr = slave0Base.toLong + 0x500L, id = 1)
+      assert(r0 == 0xdeadbeefL, f"single-beat mismatch: got 0x${r0}%08x")
 
       // 4-beat burst round-trip
       val baseAddr  = slave0Base.toLong + 0x600L
       val writeData = (0 until 4).map(i => 0x20000000L | i.toLong)
-      SimHelpers.fullBurstWrite(dut.io.masters(0), cd,
-        addr = baseAddr, data = writeData, id = 2)
-      val (readData, _) = SimHelpers.fullBurstRead(dut.io.masters(0), cd,
-        addr = baseAddr, beats = 4, id = 2)
+      SimHelpers.fullBurstWrite(dut.io.masters(0), cd, addr = baseAddr, data = writeData, id = 2)
+      val (readData, _) =
+        SimHelpers.fullBurstRead(dut.io.masters(0), cd, addr = baseAddr, beats = 4, id = 2)
       for (i <- 0 until 4)
-        assert(readData(i) == writeData(i),
-          f"burst beat $i: wrote 0x${writeData(i)}%08x, read 0x${readData(i)}%08x")
+        assert(
+          readData(i) == writeData(i),
+          f"burst beat $i: wrote 0x${writeData(i)}%08x, read 0x${readData(i)}%08x"
+        )
 
       cd.waitSampling(5)
     }
@@ -226,7 +252,7 @@ class WidthConverterSpec extends AnyFunSuite {
   test("upsize 32→64: address routing to correct slave") {
     val twoSlaveCfg = AxiZeroConfig(
       masters = Seq(MasterPort(up32MasterCfg, FullAxi4)),
-      slaves  = Seq(
+      slaves = Seq(
         SlavePort(up64SlaveCfg, FullAxi4, slave0Base, slaveSize),
         SlavePort(up64SlaveCfg, FullAxi4, slave1Base, slaveSize)
       )
@@ -242,15 +268,25 @@ class WidthConverterSpec extends AnyFunSuite {
 
       cd.waitSampling(5)
 
-      SimHelpers.fullWrite(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x100L, data = 0x11111111L, id = 1)
-      SimHelpers.fullWrite(dut.io.masters(0), cd,
-        addr = slave1Base.toLong + 0x200L, data = 0x22222222L, id = 2)
+      SimHelpers.fullWrite(
+        dut.io.masters(0),
+        cd,
+        addr = slave0Base.toLong + 0x100L,
+        data = 0x11111111L,
+        id = 1
+      )
+      SimHelpers.fullWrite(
+        dut.io.masters(0),
+        cd,
+        addr = slave1Base.toLong + 0x200L,
+        data = 0x22222222L,
+        id = 2
+      )
 
-      val (r0, _) = SimHelpers.fullRead(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x100L, id = 1)
-      val (r1, _) = SimHelpers.fullRead(dut.io.masters(0), cd,
-        addr = slave1Base.toLong + 0x200L, id = 2)
+      val (r0, _) =
+        SimHelpers.fullRead(dut.io.masters(0), cd, addr = slave0Base.toLong + 0x100L, id = 1)
+      val (r1, _) =
+        SimHelpers.fullRead(dut.io.masters(0), cd, addr = slave1Base.toLong + 0x200L, id = 2)
 
       assert(r0 == 0x11111111L, f"slave 0 read mismatch: 0x${r0}%08x")
       assert(r1 == 0x22222222L, f"slave 1 read mismatch: 0x${r1}%08x")

@@ -23,8 +23,8 @@ class LiteCrossbarSpec extends AnyFunSuite {
 
   private val spinalCfg = SpinalConfig(
     defaultConfigForClockDomains = ClockDomainConfig(
-      clockEdge        = RISING,
-      resetKind        = SYNC,
+      clockEdge = RISING,
+      resetKind = SYNC,
       resetActiveLevel = LOW
     )
   )
@@ -40,20 +40,20 @@ class LiteCrossbarSpec extends AnyFunSuite {
   // ── Design configs ─────────────────────────────────────────────────────────
 
   private def make1M2S = AxiZeroConfig.allLite(
-    numMasters  = 1,
-    numSlaves   = 2,
-    addrWidth   = 32,
-    dataWidth   = 32,
-    addressMap  = Seq(slave0Base -> slaveSize, slave1Base -> slaveSize),
+    numMasters = 1,
+    numSlaves = 2,
+    addrWidth = 32,
+    dataWidth = 32,
+    addressMap = Seq(slave0Base -> slaveSize, slave1Base -> slaveSize),
     arbitration = RoundRobin
   )
 
   private def make2M2S = AxiZeroConfig.allLite(
-    numMasters  = 2,
-    numSlaves   = 2,
-    addrWidth   = 32,
-    dataWidth   = 32,
-    addressMap  = Seq(slave0Base -> slaveSize, slave1Base -> slaveSize),
+    numMasters = 2,
+    numSlaves = 2,
+    addrWidth = 32,
+    dataWidth = 32,
+    addressMap = Seq(slave0Base -> slaveSize, slave1Base -> slaveSize),
     arbitration = RoundRobin
   )
 
@@ -74,22 +74,30 @@ class LiteCrossbarSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       // Write to slave 0's range
-      SimHelpers.liteWrite(dut.io.masters(0), cd,
-        addr = slave0Base.toLong + 0x1000L, data = 0xABCD1234L)
+      SimHelpers
+        .liteWrite(dut.io.masters(0), cd, addr = slave0Base.toLong + 0x1000L, data = 0xabcd1234L)
 
-      assert(mem0.getOrElse(slave0Base.toLong + 0x1000L, -1L) == 0xABCD1234L,
-        "write to slave-0 range must arrive at slave 0")
-      assert(!mem1.contains(slave0Base.toLong + 0x1000L),
-        "write to slave-0 range must NOT arrive at slave 1")
+      assert(
+        mem0.getOrElse(slave0Base.toLong + 0x1000L, -1L) == 0xabcd1234L,
+        "write to slave-0 range must arrive at slave 0"
+      )
+      assert(
+        !mem1.contains(slave0Base.toLong + 0x1000L),
+        "write to slave-0 range must NOT arrive at slave 1"
+      )
 
       // Write to slave 1's range
-      SimHelpers.liteWrite(dut.io.masters(0), cd,
-        addr = slave1Base.toLong + 0x0080L, data = 0x5678AABBL)
+      SimHelpers
+        .liteWrite(dut.io.masters(0), cd, addr = slave1Base.toLong + 0x0080L, data = 0x5678aabbL)
 
-      assert(mem1.getOrElse(slave1Base.toLong + 0x0080L, -1L) == 0x5678AABBL,
-        "write to slave-1 range must arrive at slave 1")
-      assert(!mem0.contains(slave1Base.toLong + 0x0080L),
-        "write to slave-1 range must NOT arrive at slave 0")
+      assert(
+        mem1.getOrElse(slave1Base.toLong + 0x0080L, -1L) == 0x5678aabbL,
+        "write to slave-1 range must arrive at slave 1"
+      )
+      assert(
+        !mem0.contains(slave1Base.toLong + 0x0080L),
+        "write to slave-1 range must NOT arrive at slave 0"
+      )
 
       cd.waitSampling(5)
     }
@@ -137,27 +145,31 @@ class LiteCrossbarSpec extends AnyFunSuite {
       SimHelpers.initMaster(dut.io.masters(0))
       SimHelpers.initMaster(dut.io.masters(1))
       val mem0 = SimHelpers.spawnLiteSlave(dut.io.slaves(0), cd)
-      SimHelpers.spawnLiteSlave(dut.io.slaves(1), cd)   // not used, but needs a responder
+      SimHelpers.spawnLiteSlave(dut.io.slaves(1), cd) // not used, but needs a responder
 
       cd.waitSampling(5)
 
       // Launch both masters concurrently into slave 0's address space
       val f0 = fork {
-        SimHelpers.liteWrite(dut.io.masters(0), cd,
-          addr = slave0Base.toLong + 0x0100L, data = 0xAAAA0000L)
+        SimHelpers
+          .liteWrite(dut.io.masters(0), cd, addr = slave0Base.toLong + 0x0100L, data = 0xaaaa0000L)
       }
       val f1 = fork {
-        SimHelpers.liteWrite(dut.io.masters(1), cd,
-          addr = slave0Base.toLong + 0x0200L, data = 0xBBBB0000L)
+        SimHelpers
+          .liteWrite(dut.io.masters(1), cd, addr = slave0Base.toLong + 0x0200L, data = 0xbbbb0000L)
       }
 
       f0.join()
       f1.join()
 
-      assert(mem0.getOrElse(slave0Base.toLong + 0x0100L, -1L) == 0xAAAA0000L,
-        "master-0 write must complete and data must match")
-      assert(mem0.getOrElse(slave0Base.toLong + 0x0200L, -1L) == 0xBBBB0000L,
-        "master-1 write must complete and data must match")
+      assert(
+        mem0.getOrElse(slave0Base.toLong + 0x0100L, -1L) == 0xaaaa0000L,
+        "master-0 write must complete and data must match"
+      )
+      assert(
+        mem0.getOrElse(slave0Base.toLong + 0x0200L, -1L) == 0xbbbb0000L,
+        "master-1 write must complete and data must match"
+      )
 
       cd.waitSampling(5)
     }
@@ -177,13 +189,15 @@ class LiteCrossbarSpec extends AnyFunSuite {
       cd.waitSampling(5)
 
       val testAddr = slave0Base.toLong + 0x0400L
-      val testData = 0xCAFEBABEL
+      val testData = 0xcafebabeL
 
       SimHelpers.liteWrite(dut.io.masters(0), cd, testAddr, testData)
       val readBack = SimHelpers.liteRead(dut.io.masters(0), cd, testAddr)
 
-      assert(readBack == testData,
-        f"round-trip failed: wrote 0x${testData}%08x, read back 0x${readBack}%08x")
+      assert(
+        readBack == testData,
+        f"round-trip failed: wrote 0x${testData}%08x, read back 0x${readBack}%08x"
+      )
 
       cd.waitSampling(5)
     }
@@ -192,11 +206,11 @@ class LiteCrossbarSpec extends AnyFunSuite {
   // ── WRR config ──────────────────────────────────────────────────────────────
 
   private def make2M2S_WRR = AxiZeroConfig.allLite(
-    numMasters  = 2,
-    numSlaves   = 2,
-    addrWidth   = 32,
-    dataWidth   = 32,
-    addressMap  = Seq(slave0Base -> slaveSize, slave1Base -> slaveSize),
+    numMasters = 2,
+    numSlaves = 2,
+    addrWidth = 32,
+    dataWidth = 32,
+    addressMap = Seq(slave0Base -> slaveSize, slave1Base -> slaveSize),
     arbitration = WeightedRoundRobin(Seq(3, 1))
   )
 
@@ -222,21 +236,29 @@ class LiteCrossbarSpec extends AnyFunSuite {
       // We record which master's AW handshake fires on each cycle by
       // observing the completion order: master 0 (weight 3) should
       // finish its batch faster than master 1 (weight 1).
-      val N = 16
+      val N       = 16
       var done0at = 0L
       var done1at = 0L
 
       val f0 = fork {
         for (i <- 0 until N) {
-          SimHelpers.liteWrite(dut.io.masters(0), cd,
-            addr = slave0Base.toLong + (i * 4).toLong, data = 0xA0000000L | i)
+          SimHelpers.liteWrite(
+            dut.io.masters(0),
+            cd,
+            addr = slave0Base.toLong + (i * 4).toLong,
+            data = 0xa0000000L | i
+          )
         }
         done0at = simTime()
       }
       val f1 = fork {
         for (i <- 0 until N) {
-          SimHelpers.liteWrite(dut.io.masters(1), cd,
-            addr = slave0Base.toLong + 0x1000L + (i * 4).toLong, data = 0xB0000000L | i)
+          SimHelpers.liteWrite(
+            dut.io.masters(1),
+            cd,
+            addr = slave0Base.toLong + 0x1000L + (i * 4).toLong,
+            data = 0xb0000000L | i
+          )
         }
         done1at = simTime()
       }
@@ -246,9 +268,11 @@ class LiteCrossbarSpec extends AnyFunSuite {
 
       // Master 0 (weight 3) should finish before master 1 (weight 1)
       // when both contend for the same slave.
-      assert(done0at < done1at,
+      assert(
+        done0at < done1at,
         s"WRR: master-0 (weight=3) should finish before master-1 (weight=1). " +
-        s"done0at=$done0at, done1at=$done1at")
+          s"done0at=$done0at, done1at=$done1at"
+      )
 
       cd.waitSampling(5)
     }
@@ -271,17 +295,23 @@ class LiteCrossbarSpec extends AnyFunSuite {
       // Master 1 (low weight) writes 16 distinct values
       val f1 = fork {
         for (i <- 0 until 16) {
-          SimHelpers.liteWrite(dut.io.masters(1), cd,
+          SimHelpers.liteWrite(
+            dut.io.masters(1),
+            cd,
             addr = slave0Base.toLong + 0x2000L + (i * 4).toLong,
-            data = 0xDEAD0000L | i)
+            data = 0xdead0000L | i
+          )
         }
       }
       // Master 0 (high weight) writes concurrently
       val f0 = fork {
         for (i <- 0 until 16) {
-          SimHelpers.liteWrite(dut.io.masters(0), cd,
+          SimHelpers.liteWrite(
+            dut.io.masters(0),
+            cd,
             addr = slave0Base.toLong + (i * 4).toLong,
-            data = 0xBEEF0000L | i)
+            data = 0xbeef0000L | i
+          )
         }
       }
 
@@ -291,8 +321,10 @@ class LiteCrossbarSpec extends AnyFunSuite {
       // Verify all master-1 writes arrived
       for (i <- 0 until 16) {
         val got = mem0.getOrElse(slave0Base.toLong + 0x2000L + (i * 4).toLong, -1L)
-        assert(got == (0xDEAD0000L | i),
-          f"master-1 write[$i] expected 0x${0xDEAD0000L | i}%08x, got 0x$got%08x")
+        assert(
+          got == (0xdead0000L | i),
+          f"master-1 write[$i] expected 0x${0xdead0000L | i}%08x, got 0x$got%08x"
+        )
       }
 
       cd.waitSampling(5)
