@@ -193,6 +193,52 @@ class RegSliceAndLiteWidthSpec extends AnyFunSuite {
     }
   }
 
+  // Both halves of one wide word, through a 16-bit port.
+  //
+  // This is the case the address-aligned tests above cannot reach. A 16-bit
+  // master writing at 0x2 must land on byte lanes 2..3 of the 32-bit word at
+  // 0x0; if the converter drops it in the low lanes instead, this write
+  // silently destroys the one at 0x0 and both reads return the same value.
+  // Every address in the tests above has its lane-select bit clear, so the
+  // placement is never exercised there.
+  test("LiteWidthConverter: 16→32 writes to both halves of one wide word") {
+    simCfg.compile(new AxiZeroLiteTop(makeLiteWidthConvCfg)).doSim { dut =>
+      val cd = dut.clockDomain
+      SimHelpers.spawnLiteSlave(dut.io.slaves(0), cd)
+      SimHelpers.initMaster(dut.io.masters(0))
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0000L, 0xAAAAL, strb = 0x3)
+      SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0002L, 0xBBBBL, strb = 0x3)
+
+      val lo = SimHelpers.liteRead(dut.io.masters(0), cd, 0x0000L) & 0xFFFFL
+      val hi = SimHelpers.liteRead(dut.io.masters(0), cd, 0x0002L) & 0xFFFFL
+      assert(lo == 0xAAAAL, f"low half: exp 0xAAAA got 0x$lo%04X (upper write clobbered it)")
+      assert(hi == 0xBBBBL, f"high half: exp 0xBBBB got 0x$hi%04X (read off the wrong lanes)")
+    }
+  }
+
+  // The strobe has to travel with the data. A byte written through the narrow
+  // port must leave its neighbour in the same wide word alone -- which only
+  // means anything now that the slave model honours WSTRB.
+  test("LiteWidthConverter: 16→32 byte strobe leaves the other byte alone") {
+    simCfg.compile(new AxiZeroLiteTop(makeLiteWidthConvCfg)).doSim { dut =>
+      val cd = dut.clockDomain
+      SimHelpers.spawnLiteSlave(dut.io.slaves(0), cd)
+      SimHelpers.initMaster(dut.io.masters(0))
+      cd.forkStimulus(10)
+      cd.waitSampling(5)
+
+      SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0002L, 0xFFFFL, strb = 0x3)
+      // Rewrite only the low byte of that half-word.
+      SimHelpers.liteWrite(dut.io.masters(0), cd, 0x0002L, 0x0011L, strb = 0x1)
+
+      val got = SimHelpers.liteRead(dut.io.masters(0), cd, 0x0002L) & 0xFFFFL
+      assert(got == 0xFF11L, f"strobed byte write: exp 0xFF11 got 0x$got%04X")
+    }
+  }
+
   test("LiteWidthConverter: 16→32 multiple writes at different addresses") {
     simCfg.compile(new AxiZeroLiteTop(makeLiteWidthConvCfg)).doSim { dut =>
       val cd  = dut.clockDomain

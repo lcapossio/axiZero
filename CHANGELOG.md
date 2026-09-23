@@ -4,6 +4,16 @@ All notable changes to axiZero will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`Axi4LiteWidthConverter` put write data on the wrong byte lanes.** A narrow AXI4-Lite master on a wider fabric had its WDATA and WSTRB zero-extended into the *low* lanes and its RDATA taken from the low lanes, whatever the address said. AXI places a transfer on the lanes its address selects: a 16-bit master writing at `0x2` on a 32-bit bus must drive lanes 2..3 with WSTRB `0b1100`, and it drove lanes 0..1 with `0b0011` instead. A slave that decodes the address read the upper half and found nothing there, and a second write to the other half of the same word destroyed the first. The converter now shifts data and strobe onto the lanes the address chooses, and takes read data back off those same lanes. Because W carries no address and AXI4-Lite allows W before AW and several writes in flight, the lane offset is captured from AW (and AR) into a small queue and applied to the beat it belongs to; `outstanding` sets its depth.
+
+  The defect was invisible to every existing test: with a 16→32 converter the lane-select bit is address bit 1, and the suite's addresses were `0x0`, `0x4` and `0x8` — all of them zero in that bit, so the data always happened to belong exactly where the zero-extension put it. Two tests now cover it, both mutation-verified against the old RTL.
+
+- **The AXI4-Lite and full AXI4 simulation slaves ignored WSTRB**, storing each write beat whole. No test asserting that untouched bytes survive a partial-strobe write could ever have failed, which is why the coverage report has carried that as a gap. Both models now merge by strobe, on the same helper the IPIF model already used, and the Lite model keys its memory on the bus word rather than the raw address — a half-word write at `0x2` belongs in word `0x0`, and keying it separately meant the lane it travelled on was never checked.
+
+- **A narrower AXI4-Lite slave than the fabric now fails with a reason.** `AxiZeroLiteTop` wired the width converter backwards for that case — the component is built around a narrow *master* — and elaboration died in 39 autoconnect direction errors naming signals rather than the cause. The configuration is rejected up front with a message saying what is unsupported. Narrowing at a Lite slave port remains unimplemented.
+
 ### Added
 
 - **`RegSliceSkidSpec`** — 6 tests, the first that tell `regSliceSkid` apart from the plain register slice. It is on the AW/W/AR path of every registered master on both boards, and until now the only evidence it did anything was that timing closed. The tests measure what it buys: a stalled plain slice accepts one beat and a skid two; the plain slice's READY is combinational from the far side and the skid's is not, shown by stalling and releasing on the same cycle; 400 beats survive random back-pressure through both with their payloads intact and in order; latency stays one cycle and throughput full either way; B and R keep the plain slice they are given rather than quietly getting a skid; and the Lite slice behaves the same. Mutation-verified — disabling the skid fails three of them.

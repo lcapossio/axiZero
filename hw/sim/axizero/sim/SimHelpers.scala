@@ -24,6 +24,31 @@ import scala.collection.mutable
 // ---------------------------------------------------------------------------
 object SimHelpers {
 
+  /** Merge one write beat into a memory model, honouring WSTRB.
+    *
+    * A slave that stores WDATA whole cannot fail a test about untouched bytes being preserved, so
+    * every model here goes through this. `bytes` is the beat width in bytes; a deasserted strobe
+    * lane leaves the byte already in memory alone.
+    */
+  private def mergeBeat(old: Long, data: Long, strb: Int, bytes: Int): Long = {
+    var merged = old
+    for (b <- 0 until bytes) {
+      if (((strb >> b) & 1) != 0) {
+        val shift = b * 8
+        merged = (merged & ~(0xffL << shift)) | (((data >> shift) & 0xffL) << shift)
+      }
+    }
+    merged
+  }
+
+  /** The address of the bus word holding `addr`.
+    *
+    * AXI places a transfer on the byte lanes its address selects, so a model keyed on the raw
+    * address would store a half-word write at 0x2 somewhere a read of word 0 never looks, and the
+    * lane the data actually travelled on would never be checked.
+    */
+  private def wordAddr(addr: Long, bytes: Int): Long = addr & ~(bytes.toLong - 1)
+
   // ── Initialise ─────────────────────────────────────────────────────────────
 
   def initMaster(m: Axi4): Unit = {
@@ -263,7 +288,10 @@ object SimHelpers {
 
         s.w.ready #= true
         while ({ cd.waitSampling(); !s.w.valid.toBoolean }) {}
-        mem(addr) = s.w.data.toLong
+        val bytes = s.config.dataWidth / 8
+        val strb  = if (s.config.useStrb) s.w.strb.toInt else (1 << bytes) - 1
+        val key   = wordAddr(addr, bytes)
+        mem(key) = mergeBeat(mem.getOrElse(key, 0L), s.w.data.toLong, strb, bytes)
         s.w.ready #= false
 
         s.b.valid #= true
@@ -280,7 +308,7 @@ object SimHelpers {
         val addr = s.ar.addr.toLong
         s.ar.ready #= false
 
-        s.r.data #= mem.getOrElse(addr, 0xdeadbeefL)
+        s.r.data #= mem.getOrElse(wordAddr(addr, s.config.dataWidth / 8), 0xdeadbeefL)
         s.r.valid #= true
         if (s.config.useResp) s.r.resp #= 0
         if (s.config.useLast) s.r.last #= true
@@ -317,14 +345,7 @@ object SimHelpers {
         val data         = s.w.data.toLong
         val strb         = if (s.config.useStrb) s.w.strb.toInt else 0xff
         val bytesPerBeat = s.config.dataWidth / 8
-        var merged       = mem.getOrElse(addr, 0L)
-        for (b <- 0 until bytesPerBeat) {
-          if (((strb >> b) & 1) != 0) {
-            val shift = b * 8
-            merged = (merged & ~(0xffL << shift)) | ((data >> shift & 0xffL) << shift)
-          }
-        }
-        mem(addr) = merged
+        mem(addr) = mergeBeat(mem.getOrElse(addr, 0L), data, strb, bytesPerBeat)
         cd.waitSampling()
         s.aw.ready #= false
         s.w.ready #= false
@@ -400,7 +421,11 @@ object SimHelpers {
           for (_ <- 0 until stallW) cd.waitSampling()
           s.w.ready #= true
           while ({ cd.waitSampling(); !s.w.valid.toBoolean }) {}
-          mem(baseAddr + beatIdx * bytesPerBeat) = s.w.data.toLong
+          val beatAddr = baseAddr + beatIdx * bytesPerBeat
+          val beatStrb =
+            if (s.config.useStrb) s.w.strb.toInt else (1 << bytesPerBeat) - 1
+          mem(beatAddr) =
+            mergeBeat(mem.getOrElse(beatAddr, 0L), s.w.data.toLong, beatStrb, bytesPerBeat)
           isLast = if (s.config.useLast) s.w.last.toBoolean else true
           s.w.ready #= false
           beatIdx += 1

@@ -18,16 +18,32 @@ import spinal.lib.bus.amba4.axi._
 // width conversion is straightforward:
 //
 //   Upsizing  (narrow master → wide slave-side bus):
-//     • WDATA is zero-extended;  WSTRB is zero-extended.
-//     • RDATA is truncated to the master's data width.
+//     • WDATA and WSTRB are placed on the byte lanes the address selects.
+//     • RDATA is taken from those same lanes.
 //     Both master and slave still transfer one beat per transaction.
-//     The slave sees more data lanes than used; unused WSTRB lanes are 0.
 //
-//   Downsizing (wide master → narrow slave-side bus):
-//     • WDATA and WSTRB are truncated to the narrow width.
-//     • RDATA is zero-extended back to the wide width.
-//     This is a lossless operation only when the master only uses the low
-//     bytes; the caller is responsible for ensuring this contract.
+//     The lane placement is the whole job here, and it is easy to get wrong.
+//     AXI does not carry data in the low lanes and let the slave work out
+//     where it belongs: a transfer occupies the lanes its address points at.
+//     A 16-bit master writing at 0x2 on a 32-bit bus must drive lanes 2..3
+//     with WSTRB 0b1100, not lanes 0..1 with 0b0011 -- a slave decoding the
+//     address reads the upper half and would find nothing there. The bug is
+//     invisible whenever the lane-select address bits happen to be zero,
+//     which is every naturally-aligned-to-the-wide-word access, so it hides
+//     from any test that only walks whole wide words.
+//
+//     W carries no address of its own, so the lane offset has to be taken
+//     from AW and held until the beat it belongs to arrives -- AXI4-Lite
+//     permits W before AW, and permits more than one write in flight. Hence
+//     the two small offset queues below, one per direction; `outstanding`
+//     sets how many transactions may be in flight before the address channel
+//     back-pressures.
+//
+//   Narrowing at a Lite *slave* port is not implemented. This component is
+//   built around a narrow master -- io.narrow receives AW, io.wide drives it
+//   -- and a narrow slave needs the mirror of it. AxiZeroLiteTop rejects that
+//   configuration with a message rather than letting it fail as a page of
+//   autoconnect direction errors.
 //
 // Full AXI4 width conversion
 // ──────────────────────────
@@ -61,7 +77,11 @@ import spinal.lib.bus.amba4.axi._
 /** Converts between two AXI4-Lite configs that differ only in data width. The narrower side is
   * always io.narrow; the wider side is io.wide. If narrow == wide this is just a wire-through.
   */
-class Axi4LiteWidthConverter(narrowCfg: Axi4Config, wideCfg: Axi4Config) extends Component {
+class Axi4LiteWidthConverter(
+  narrowCfg: Axi4Config,
+  wideCfg: Axi4Config,
+  outstanding: Int = 4
+) extends Component {
 
   require(
     narrowCfg.dataWidth <= wideCfg.dataWidth,
@@ -82,31 +102,50 @@ class Axi4LiteWidthConverter(narrowCfg: Axi4Config, wideCfg: Axi4Config) extends
     io.wide <> io.narrow
 
   } else {
-    // ── AW / AR: address channels are address-width only — wire through ──
-    io.wide.aw.valid := io.narrow.aw.valid
-    io.wide.aw.payload.assignSomeByName(io.narrow.aw.payload)
-    io.narrow.aw.ready := io.wide.aw.ready
+    require(outstanding >= 1, s"outstanding must be at least 1 (got $outstanding)")
 
-    io.wide.ar.valid := io.narrow.ar.valid
-    io.wide.ar.payload.assignSomeByName(io.narrow.ar.payload)
-    io.narrow.ar.ready := io.wide.ar.ready
+    val wideBytes = wideW / 8
+    // Bits of the address that select a byte lane within the wide word. The
+    // low log2(narrowBytes) of them are zero for any naturally aligned
+    // access, which is the only kind AXI4-Lite defines.
+    val offBits = log2Up(wideBytes)
 
-    // ── W: zero-extend data and strobe ────────────────────────────────────
-    io.wide.w.valid   := io.narrow.w.valid
-    io.wide.w.data    := io.narrow.w.data.resize(wideW)
-    io.wide.w.strb    := io.narrow.w.strb.resize(wideW / 8)
-    io.narrow.w.ready := io.wide.w.ready
+    /** Queue of lane offsets taken from an address channel, read back on the matching data beat. */
+    def offsetQueue(
+      addrIn: Stream[_ <: Axi4Ax],
+      addrOut: Stream[_ <: Axi4Ax]
+    ): Stream[UInt] = {
+      val q = StreamFifo(UInt(offBits bits), outstanding)
+      q.io.push.valid   := addrIn.valid && addrOut.ready
+      q.io.push.payload := addrIn.addr(offBits - 1 downto 0)
+      addrOut.valid     := addrIn.valid && q.io.push.ready
+      addrIn.ready      := addrOut.ready && q.io.push.ready
+      addrOut.payload.assignSomeByName(addrIn.payload)
+      q.io.pop
+    }
+
+    // ── AW / AR: pass the address through, remember its lane offset ───────
+    val awOff = offsetQueue(io.narrow.aw, io.wide.aw)
+    val arOff = offsetQueue(io.narrow.ar, io.wide.ar)
+
+    // ── W: shift data and strobe onto the lanes the address chose ─────────
+    io.wide.w.valid   := io.narrow.w.valid && awOff.valid
+    io.narrow.w.ready := io.wide.w.ready && awOff.valid
+    awOff.ready       := io.narrow.w.valid && io.wide.w.ready
+    io.wide.w.data    := io.narrow.w.data.resize(wideW) |<< (awOff.payload << 3)
+    io.wide.w.strb    := io.narrow.w.strb.resize(wideBytes) |<< awOff.payload
 
     // ── B: pass through (resp only) ───────────────────────────────────────
     io.narrow.b.valid := io.wide.b.valid
     io.narrow.b.payload.assignSomeByName(io.wide.b.payload)
     io.wide.b.ready := io.narrow.b.ready
 
-    // ── R: truncate data to narrow width ─────────────────────────────────
-    io.narrow.r.valid := io.wide.r.valid
-    io.narrow.r.data  := io.wide.r.data(narrowW - 1 downto 0)
+    // ── R: take the data off the lanes the read address chose ─────────────
+    io.narrow.r.valid := io.wide.r.valid && arOff.valid
+    io.wide.r.ready   := io.narrow.r.ready && arOff.valid
+    arOff.ready       := io.wide.r.valid && io.narrow.r.ready
+    io.narrow.r.data  := (io.wide.r.data |>> (arOff.payload << 3)).resize(narrowW)
     if (narrowCfg.useResp && wideCfg.useResp) io.narrow.r.resp := io.wide.r.resp
-    io.wide.r.ready                                            := io.narrow.r.ready
   }
 }
 

@@ -57,14 +57,21 @@ class AxiZeroLiteTop(cfg: AxiZeroConfig) extends Component {
     val sp      = cfg.slaves(si)
     val extPort = io.slaves(si) // external (user-facing)
 
-    // Step 1: optional width conversion (fabric width → slave width)
-    val afterConv: Axi4 = if (sp.config.dataWidth != cfg.fabricDataWidth) {
-      val fabricCfg = sp.config.copy(dataWidth = cfg.fabricDataWidth)
-      val conv      = new Axi4LiteWidthConverter(sp.config, fabricCfg)
-      // xbar drives wide side; narrow side goes to slave
-      conv.io.wide <> xbar.io.slaves(si)
-      conv.io.narrow
-    } else xbar.io.slaves(si)
+    // Step 1: width conversion (fabric width → slave width)
+    //
+    // Axi4LiteWidthConverter is built around a narrow *master*: io.narrow is
+    // the slave-side port that receives AW and io.wide the master-side port
+    // that drives it. A narrow slave needs the mirror of that component, and
+    // wiring this one backwards does not elaborate -- it fails with a page of
+    // autoconnect direction errors that name signals rather than the cause.
+    // Refuse it here instead, and say why.
+    require(
+      sp.config.dataWidth == cfg.fabricDataWidth,
+      s"Slave $si is ${sp.config.dataWidth} bits wide on a ${cfg.fabricDataWidth}-bit " +
+        "AXI4-Lite fabric. Narrowing at a Lite slave port is not implemented; give every " +
+        "Lite port on this crossbar the same data width."
+    )
+    val afterConv: Axi4 = xbar.io.slaves(si)
 
     // Step 2: optional register slice
     if (sp.regSlice) {

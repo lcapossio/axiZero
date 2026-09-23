@@ -1,6 +1,6 @@
 # axiZero Verification Coverage Report
 
-Status as of 2026-09-18 — 181 SpinalSim tests in 27 suites, 24 VexZero SoC tests in 10
+Status as of 2026-09-23 — 183 SpinalSim tests in 27 suites, 24 VexZero SoC tests in 10
 suites, 36 cocotb tests in 6 suites, and 2 SymbiYosys proofs, all passing. Every design
 listed below is also built and run on an Arty A7-100T (Vivado) and a DE25-Nano (Quartus).
 
@@ -30,12 +30,13 @@ listed below is also built and run on an Arty A7-100T (Vivado) and a DE25-Nano (
 | Register slices / skid buffers | `RegSliceSkidSpec`, `RegSliceAndLiteWidthSpec`, `Axi3MixedCrossbarSpec` | Full, Lite and Axi3Mode, both sides; capacity while stalled, READY-arc recovery, throughput, plus a formal proof (`axis_ready_valid_regslice.sby`) |
 | Channel skew / response stability | `ChannelSkewSpec`, `ResponseStabilitySpec` | AW/W arriving apart; payload stable while VALID && !READY |
 | Real CPU through the fabric | VexZero suites + both boards | VexRiscv boots and runs its self test while traffic generators saturate the crossbar |
+| Byte-lane placement (Lite width conversion) | `RegSliceAndLiteWidthSpec` | Both halves of one wide word through a narrow port, and a partial strobe leaving its neighbour alone |
 
 ### Gaps — not tested
 
 | Gap | Severity | Notes |
 |-----|----------|-------|
-| **Narrow transfers (sub-word WSTRB)** | HIGH | Every cocotb write uses full strobe. `NarrowPortSpec` drives a partial strobe, but no test verifies that untouched bytes are preserved. |
+| **Narrow transfers (sub-word WSTRB)** | MEDIUM | Covered for the AXI4-Lite width converter in `RegSliceAndLiteWidthSpec`, now that the SpinalSim slave models honour WSTRB. Still open elsewhere: every cocotb write uses a full strobe, so the generated Verilog is never asked to preserve untouched bytes. |
 | **WRAP / FIXED bursts in cocotb** | HIGH | Only INCR tested in cocotb. SpinalSim covers WRAP/FIXED via `BurstTypeSpec` but generated Verilog is never exercised with non-INCR. |
 | **Mid-burst backpressure** | HIGH | No test where slave holds WREADY low mid-burst or master stalls WVALID between beats. |
 | **Varied burst lengths** | MEDIUM | Only 1, 4, 16, 64 tested. No 2, 3, 8, 32. |
