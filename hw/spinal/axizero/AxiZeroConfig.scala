@@ -187,15 +187,15 @@ case class AxiZeroConfig(
   /** True when every master AND every slave is AXI4-Lite. Enables the resource-efficient all-lite
     * crossbar path.
     */
-  val isAllLite: Boolean =
+  lazy val isAllLite: Boolean =
     masters.forall(_.mode == LiteAxi4) && slaves.forall(_.mode == LiteAxi4)
 
   /** True when every master AND every slave is full AXI4 (no Lite, no AXI3). */
-  val isAllFull: Boolean =
+  lazy val isAllFull: Boolean =
     masters.forall(_.mode == FullAxi4) && slaves.forall(_.mode == FullAxi4)
 
   /** True when at least one master is AXI3 (uses Axi3Mode). */
-  val hasAxi3Masters: Boolean = masters.exists(_.mode == Axi3Mode)
+  lazy val hasAxi3Masters: Boolean = masters.exists(_.mode == Axi3Mode)
 
   // ---- fabric data width --------------------------------------------------
   val fabricDataWidth: Int = internalDataWidth.getOrElse(

@@ -39,11 +39,24 @@ import spinal.lib.bus.amba4.axi._
 //     sets how many transactions may be in flight before the address channel
 //     back-pressures.
 //
-//   Narrowing at a Lite *slave* port is not implemented. This component is
-//   built around a narrow master -- io.narrow receives AW, io.wide drives it
-//   -- and a narrow slave needs the mirror of it. AxiZeroLiteTop rejects that
-//   configuration with a message rather than letting it fail as a page of
-//   autoconnect direction errors.
+//   Downsizing (wide side upstream → narrow side downstream):
+//     Axi4LiteDownsizer. A Lite transfer is the full width of its bus, so one
+//     wide beat becomes one narrow transaction per chunk of the wide word:
+//     • Writes go out only for chunks with a strobe set. A slave with write
+//       side effects -- a FIFO, a clear-on-write flag -- must not see a write
+//       to bytes the master did not name. A write with no strobe at all still
+//       goes out once, to the chunk its address names, so it is not lost.
+//     • Reads start at the chunk the address names and run to the end of the
+//       wide word. Bytes below the address are not part of the transfer; bytes
+//       above it may be, and Lite carries no size to say otherwise, so they
+//       are read. Lanes not read come back as zero.
+//     • The response is the worst of the chunks' responses, so an error from
+//       any one of them reaches the master.
+//     One transaction per direction is in flight at a time.
+//
+//   Axi4LiteWidth.adapt picks between the two, or a plain wire, for any pair
+//   of widths. Both tops route every Lite width change through it, so a Lite
+//   master or slave on either side of the fabric's width is handled alike.
 //
 // Full AXI4 width conversion
 // ──────────────────────────
@@ -146,6 +159,202 @@ class Axi4LiteWidthConverter(
     arOff.ready       := io.wide.r.valid && io.narrow.r.ready
     io.narrow.r.data  := (io.wide.r.data |>> (arOff.payload << 3)).resize(narrowW)
     if (narrowCfg.useResp && wideCfg.useResp) io.narrow.r.resp := io.wide.r.resp
+  }
+}
+
+// ── AXI4-Lite downsizer ──────────────────────────────────────────────────────
+
+/** Splits each wide AXI4-Lite transaction into one narrow transaction per chunk of the wide word.
+  *
+  * io.wide receives from upstream (a wide master, or the fabric); io.narrow drives downstream (the
+  * fabric, or a narrow slave). The two configs may differ in address width and in which optional
+  * signals they carry as well as in data width -- the Lite fabric normalises its own ports -- so
+  * every field is mapped across explicitly.
+  */
+class Axi4LiteDownsizer(wideCfg: Axi4Config, narrowCfg: Axi4Config) extends Component {
+  require(
+    wideCfg.dataWidth > narrowCfg.dataWidth,
+    s"Axi4LiteDownsizer narrows (wide=${wideCfg.dataWidth}, narrow=${narrowCfg.dataWidth})"
+  )
+  require(
+    wideCfg.dataWidth % narrowCfg.dataWidth == 0,
+    "Axi4LiteDownsizer: dataWidth ratio must be a whole number"
+  )
+
+  val io = new Bundle {
+    val wide   = slave(Axi4(wideCfg))
+    val narrow = master(Axi4(narrowCfg))
+  }
+
+  private val wideW     = wideCfg.dataWidth
+  private val narrowW   = narrowCfg.dataWidth
+  private val ratio     = wideW / narrowW
+  private val wideBytes = wideW / 8
+  private val chunkBits = log2Up(ratio)
+  private val narrowOff = log2Up(narrowW / 8)
+  private val wideOff   = log2Up(wideBytes)
+  private val addrW     = wideCfg.addressWidth
+  private val withProt  = wideCfg.useProt && narrowCfg.useProt
+  private val withStrb  = wideCfg.useStrb && narrowCfg.useStrb
+
+  /** Which chunk of its wide word an address falls in. */
+  private def chunkOf(addr: UInt): UInt = addr(wideOff - 1 downto narrowOff)
+
+  /** The address of chunk `k` of the wide word holding `addr`. */
+  private def chunkAddr(addr: UInt, k: UInt): UInt = {
+    val word = addr(addrW - 1 downto wideOff) ## k
+    (if (narrowOff > 0) word ## B(0, narrowOff bits) else word).asUInt
+  }
+
+  /** The worse of two responses: DECERR > SLVERR > OKAY, which is their numeric order. */
+  private def worst(a: Bits, b: Bits): Bits = Mux(a.asUInt > b.asUInt, a, b)
+
+  // ── Write ────────────────────────────────────────────────────────────────
+  val wr = new Area {
+    val haveAw    = RegInit(False)
+    val haveW     = RegInit(False)
+    val issuing   = RegInit(False)
+    val answering = RegInit(False)
+    val awDone    = RegInit(False)
+    val wDone     = RegInit(False)
+    val addr      = Reg(UInt(addrW bits)) init (0)
+    val prot      = Reg(Bits(3 bits)) init (0)
+    val data      = Reg(Bits(wideW bits)) init (0)
+    val strb      = Reg(Bits(wideBytes bits)) init (0)
+    val chunk     = Reg(UInt(chunkBits bits)) init (0)
+    val resp      = Reg(Bits(2 bits)) init (0)
+
+    val idle = !issuing && !answering
+    io.wide.aw.ready := !haveAw && idle
+    io.wide.w.ready  := !haveW && idle
+    when(io.wide.aw.fire) {
+      haveAw             := True
+      addr               := io.wide.aw.addr
+      if (withProt) prot := io.wide.aw.prot
+    }
+    when(io.wide.w.fire) {
+      haveW := True
+      data  := io.wide.w.data
+      strb  := (if (wideCfg.useStrb) io.wide.w.strb else B(wideBytes bits, default -> True))
+    }
+    when(haveAw && haveW && idle) {
+      haveAw  := False
+      haveW   := False
+      issuing := True
+      chunk   := 0
+      resp    := 0
+    }
+
+    val chunkStrb = strb.subdivideIn(ratio slices)(chunk)
+    // Send this chunk if it carries a strobe -- or, for a write with none at
+    // all, if it is the chunk the address names, so the write is not lost.
+    val take = chunkStrb =/= 0 || (strb === 0 && chunk === chunkOf(addr))
+    val last = chunk === ratio - 1
+
+    io.narrow.aw.valid                       := issuing && take && !awDone
+    io.narrow.aw.addr                        := chunkAddr(addr, chunk).resized
+    if (narrowCfg.useProt) io.narrow.aw.prot := (if (withProt) prot else B"010")
+
+    io.narrow.w.valid                       := issuing && take && !wDone
+    io.narrow.w.data                        := data.subdivideIn(ratio slices)(chunk)
+    if (narrowCfg.useStrb) io.narrow.w.strb := chunkStrb
+
+    io.narrow.b.ready := issuing && awDone && wDone
+
+    when(io.narrow.aw.fire) { awDone := True }
+    when(io.narrow.w.fire) { wDone := True }
+
+    def advance(): Unit =
+      when(last) {
+        issuing   := False
+        answering := True
+      } otherwise {
+        chunk := chunk + 1
+      }
+
+    when(issuing && !take) { advance() }
+    when(io.narrow.b.fire) {
+      awDone                      := False
+      wDone                       := False
+      if (narrowCfg.useResp) resp := worst(resp, io.narrow.b.resp)
+      advance()
+    }
+
+    io.wide.b.valid                     := answering
+    if (wideCfg.useResp) io.wide.b.resp := resp
+    when(io.wide.b.fire) { answering := False }
+  }
+
+  // ── Read ─────────────────────────────────────────────────────────────────
+  val rd = new Area {
+    val busy      = RegInit(False)
+    val answering = RegInit(False)
+    val arDone    = RegInit(False)
+    val addr      = Reg(UInt(addrW bits)) init (0)
+    val prot      = Reg(Bits(3 bits)) init (0)
+    val data      = Reg(Bits(wideW bits)) init (0)
+    val chunk     = Reg(UInt(chunkBits bits)) init (0)
+    val resp      = Reg(Bits(2 bits)) init (0)
+
+    io.wide.ar.ready := !busy && !answering
+    when(io.wide.ar.fire) {
+      busy               := True
+      arDone             := False
+      addr               := io.wide.ar.addr
+      if (withProt) prot := io.wide.ar.prot
+      // Start at the chunk the address names: bytes below it are not part of
+      // the transfer, and lanes that are not read come back as zero.
+      chunk := chunkOf(io.wide.ar.addr)
+      data  := 0
+      resp  := 0
+    }
+
+    io.narrow.ar.valid                       := busy && !arDone
+    io.narrow.ar.addr                        := chunkAddr(addr, chunk).resized
+    if (narrowCfg.useProt) io.narrow.ar.prot := (if (withProt) prot else B"010")
+    when(io.narrow.ar.fire) { arDone := True }
+
+    io.narrow.r.ready := busy && arDone
+    when(io.narrow.r.fire) {
+      for (k <- 0 until ratio)
+        when(chunk === k) { data(k * narrowW, narrowW bits) := io.narrow.r.data }
+      if (narrowCfg.useResp) resp := worst(resp, io.narrow.r.resp)
+      arDone                      := False
+      when(chunk === ratio - 1) {
+        busy      := False
+        answering := True
+      } otherwise {
+        chunk := chunk + 1
+      }
+    }
+
+    io.wide.r.valid                     := answering
+    io.wide.r.data                      := data
+    if (wideCfg.useResp) io.wide.r.resp := resp
+    when(io.wide.r.fire) { answering := False }
+  }
+}
+
+/** Carry an AXI4-Lite port across a change of data width, in whichever direction it goes. */
+object Axi4LiteWidth {
+
+  /** The downstream end of `upstream` at `dataWidth` bits, its config otherwise unchanged: through
+    * the upsizer when it widens, the downsizer when it narrows, and `upstream` itself when the
+    * width already agrees.
+    */
+  def adapt(upstream: Axi4, dataWidth: Int): Axi4 = {
+    val inCfg  = upstream.config
+    val outCfg = inCfg.copy(dataWidth = dataWidth)
+    if (inCfg.dataWidth == dataWidth) upstream
+    else if (inCfg.dataWidth < outCfg.dataWidth) {
+      val up = new Axi4LiteWidthConverter(inCfg, outCfg)
+      up.io.narrow << upstream
+      up.io.wide
+    } else {
+      val down = new Axi4LiteDownsizer(inCfg, outCfg)
+      down.io.wide << upstream
+      down.io.narrow
+    }
   }
 }
 

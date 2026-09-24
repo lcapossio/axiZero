@@ -40,16 +40,12 @@ class AxiZeroLiteTop(cfg: AxiZeroConfig) extends Component {
       rs.io.downstream
     } else extPort
 
-    // Step 2: optional width conversion (narrow → fabric width)
-    val afterConv: Axi4 = if (mp.config.dataWidth != cfg.fabricDataWidth) {
-      val fabricCfg = mp.config.copy(dataWidth = cfg.fabricDataWidth)
-      val conv      = new Axi4LiteWidthConverter(mp.config, fabricCfg)
-      conv.io.narrow <> afterRS
-      conv.io.wide
-    } else afterRS
+    // Step 2: width conversion to the fabric's width, in either direction --
+    // internalDataWidth can make the fabric narrower than a master
+    val afterConv: Axi4 = Axi4LiteWidth.adapt(afterRS, cfg.fabricDataWidth)
 
     // Step 3: connect to crossbar (normCfg port)
-    xbar.io.masters(mi) <> afterConv
+    link(afterConv, xbar.io.masters(mi))
   }
 
   // ── Slave-side wiring ────────────────────────────────────────────────────
@@ -57,30 +53,60 @@ class AxiZeroLiteTop(cfg: AxiZeroConfig) extends Component {
     val sp      = cfg.slaves(si)
     val extPort = io.slaves(si) // external (user-facing)
 
-    // Step 1: width conversion (fabric width → slave width)
-    //
-    // Axi4LiteWidthConverter is built around a narrow *master*: io.narrow is
-    // the slave-side port that receives AW and io.wide the master-side port
-    // that drives it. A narrow slave needs the mirror of that component, and
-    // wiring this one backwards does not elaborate -- it fails with a page of
-    // autoconnect direction errors that name signals rather than the cause.
-    // Refuse it here instead, and say why.
-    require(
-      sp.config.dataWidth == cfg.fabricDataWidth,
-      s"Slave $si is ${sp.config.dataWidth} bits wide on a ${cfg.fabricDataWidth}-bit " +
-        "AXI4-Lite fabric. Narrowing at a Lite slave port is not implemented; give every " +
-        "Lite port on this crossbar the same data width."
-    )
-    val afterConv: Axi4 = xbar.io.slaves(si)
+    // Step 1: width conversion (fabric width → slave width), in either direction
+    val afterConv: Axi4 = Axi4LiteWidth.adapt(xbar.io.slaves(si), sp.config.dataWidth)
 
     // Step 2: optional register slice
     if (sp.regSlice) {
       val rs = new Axi4LiteRegSlice(sp.config, sp.regSliceSkid)
-      rs.io.upstream <> afterConv
+      link(afterConv, rs.io.upstream)
       extPort <> rs.io.downstream
     } else {
-      extPort <> afterConv
+      link(afterConv, extPort)
     }
+  }
+
+  /** Joins two Lite ports of the same data width whose configs may otherwise differ.
+    *
+    * The crossbar runs every port at its own normalised config -- the widest address of any port,
+    * with PROT, strobe and response all present -- so a port can be narrower in address or lack an
+    * optional signal, and `<>` refuses both. The address is resized (the decoder has already picked
+    * the slave, so the bits a slave does not have are the ones that chose it), and a signal only
+    * one side has is given what its absence means: PROT unprivileged/non-secure/data, every byte
+    * strobed, the response OKAY.
+    */
+  private def link(up: Axi4, down: Axi4): Unit = {
+    val u = up.config
+    val d = down.config
+    require(u.dataWidth == d.dataWidth, "link joins ports of one data width")
+
+    def ax(from: Stream[_ <: Axi4Ax], to: Stream[_ <: Axi4Ax]): Unit = {
+      to.valid               := from.valid
+      from.ready             := to.ready
+      to.addr                := from.addr.resized
+      if (d.useProt) to.prot := (if (u.useProt) from.prot else B"010")
+    }
+    // Channel by channel in AW, W, B, AR, R order, which is the order `<>`
+    // emits them in -- so a design whose ports all match gets the same
+    // netlist it always did.
+    ax(up.aw, down.aw)
+
+    down.w.valid := up.w.valid
+    up.w.ready   := down.w.ready
+    down.w.data  := up.w.data
+    if (d.useStrb)
+      down.w.strb := (if (u.useStrb) up.w.strb else B(d.bytePerWord bits, default -> True))
+
+    up.b.valid               := down.b.valid
+    down.b.ready             := up.b.ready
+    if (u.useResp) up.b.resp := (if (d.useResp) down.b.resp else B"00")
+
+    ax(up.ar, down.ar)
+
+    up.r.valid               := down.r.valid
+    down.r.ready             := up.r.ready
+    up.r.data                := down.r.data
+    if (u.useResp) up.r.resp := (if (d.useResp) down.r.resp else B"00")
   }
 }
 
@@ -172,8 +198,16 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
     // Lite → Full adapter, AXI3 → AXI4 adapter, or pass-through
     val afterAdapt: Axi4 = mp.mode match {
       case LiteAxi4 =>
-        val adpt = new Axi4LiteToFullAdapter(mp.config, xbarCfg.masters(mi).config)
-        adpt.io.lite <> afterRS
+        // Bring the Lite port to the fabric's width first, so its data sits on
+        // the lanes its address selects; the adapter then only adds the
+        // burst fields.
+        val atFabric = Axi4LiteWidth.adapt(afterRS, cfg.fabricDataWidth)
+        val adpt = new Axi4LiteToFullAdapter(
+          atFabric.config,
+          xbarCfg.masters(mi).config,
+          transferBytes = Some(scala.math.min(mp.config.dataWidth, cfg.fabricDataWidth) / 8)
+        )
+        adpt.io.lite <> atFabric
         adpt.io.full
       case Axi3Mode =>
         // Auto-insert AXI3→AXI4 bridge.  The external port (extPort) is an
@@ -224,11 +258,15 @@ class AxiZeroMixedTop(cfg: AxiZeroConfig) extends Component {
     val extPort  = io.slaves(si)
     val xbarPort = xbar.io.slaves(si) // Full AXI4 with slaveIdW-bit IDs
 
-    // Full → Lite adapter if this slave port is AXI4-Lite
+    // Full → Lite adapter if this slave port is AXI4-Lite, at the fabric's
+    // width, then narrowed or widened to the slave's own.
     val afterAdapt: Axi4 = if (sp.mode == LiteAxi4) {
-      val adpt = new Axi4FullToLiteAdapter(xbarCfg.slaves(si).config, sp.config)
+      val adpt = new Axi4FullToLiteAdapter(
+        xbarCfg.slaves(si).config,
+        sp.config.copy(dataWidth = cfg.fabricDataWidth)
+      )
       adpt.io.full <> xbarPort
-      adpt.io.lite
+      Axi4LiteWidth.adapt(adpt.io.lite, sp.config.dataWidth)
     } else xbarPort
 
     // Data-width downsizing for narrow Full AXI4 slave ports

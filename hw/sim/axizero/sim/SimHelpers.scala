@@ -410,7 +410,10 @@ object SimHelpers {
       while (true) {
         s.aw.ready #= true
         while ({ cd.waitSampling(); !s.aw.valid.toBoolean }) {}
-        val baseAddr = s.aw.addr.toLong
+        // Beats land on bus words: a narrow single beat at 0x4 on a 64-bit bus
+        // belongs to word 0x0, and a model keyed on the raw address would put
+        // it where a full-width read of that word never looks.
+        val baseAddr = wordAddr(s.aw.addr.toLong, bytesPerBeat)
         val id       = if (s.config.useId) s.aw.id.toLong else 0L
         s.aw.ready #= false
 
@@ -444,7 +447,7 @@ object SimHelpers {
       while (true) {
         s.ar.ready #= true
         while ({ cd.waitSampling(); !s.ar.valid.toBoolean }) {}
-        val baseAddr = s.ar.addr.toLong
+        val baseAddr = wordAddr(s.ar.addr.toLong, bytesPerBeat)
         val id       = if (s.config.useId) s.ar.id.toLong else 0L
         val len      = if (s.config.useLen) s.ar.len.toInt else 0
         s.ar.ready #= false

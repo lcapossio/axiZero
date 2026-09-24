@@ -19,7 +19,16 @@ import spinal.lib.bus.amba4.axi._
 //   B      resp passed back; id from fabric discarded (Lite has no IDs).
 //   R      data + resp passed back; id and last from fabric discarded.
 // ---------------------------------------------------------------------------
-class Axi4LiteToFullAdapter(liteCfg: Axi4Config, fullCfg: Axi4Config) extends Component {
+class Axi4LiteToFullAdapter(
+  liteCfg: Axi4Config,
+  fullCfg: Axi4Config,
+  transferBytes: Option[Int] = None
+) extends Component {
+
+  // The size each transfer reports. A Lite master already brought up to the
+  // fabric width still moves only its own width per transfer, and a narrow
+  // Full slave downstream splits by AxSIZE, so it must say so.
+  private val sizeLog2 = log2Up(transferBytes.getOrElse(liteCfg.dataWidth / 8))
 
   val io = new Bundle {
     val lite = slave(Axi4(liteCfg))  // external Lite master
@@ -33,9 +42,9 @@ class Axi4LiteToFullAdapter(liteCfg: Axi4Config, fullCfg: Axi4Config) extends Co
   if (liteCfg.useProt && fullCfg.useProt) io.full.aw.prot.allowOverride := io.lite.aw.prot
   if (fullCfg.useId) io.full.aw.id.allowOverride                        := 0
   if (fullCfg.useLen) io.full.aw.len.allowOverride                      := 0
-  if (fullCfg.useSize) io.full.aw.size.allowOverride   := log2Up(liteCfg.dataWidth / 8)
-  if (fullCfg.useBurst) io.full.aw.burst.allowOverride := 1 // INCR
-  io.lite.aw.ready                                     := io.full.aw.ready
+  if (fullCfg.useSize) io.full.aw.size.allowOverride                    := sizeLog2
+  if (fullCfg.useBurst) io.full.aw.burst.allowOverride                  := 1 // INCR
+  io.lite.aw.ready                                                      := io.full.aw.ready
 
   // ── W ─────────────────────────────────────────────────────────────────────
   io.full.w.valid := io.lite.w.valid
@@ -58,9 +67,9 @@ class Axi4LiteToFullAdapter(liteCfg: Axi4Config, fullCfg: Axi4Config) extends Co
   if (liteCfg.useProt && fullCfg.useProt) io.full.ar.prot.allowOverride := io.lite.ar.prot
   if (fullCfg.useId) io.full.ar.id.allowOverride                        := 0
   if (fullCfg.useLen) io.full.ar.len.allowOverride                      := 0
-  if (fullCfg.useSize) io.full.ar.size.allowOverride   := log2Up(liteCfg.dataWidth / 8)
-  if (fullCfg.useBurst) io.full.ar.burst.allowOverride := 1 // INCR
-  io.lite.ar.ready                                     := io.full.ar.ready
+  if (fullCfg.useSize) io.full.ar.size.allowOverride                    := sizeLog2
+  if (fullCfg.useBurst) io.full.ar.burst.allowOverride                  := 1 // INCR
+  io.lite.ar.ready                                                      := io.full.ar.ready
 
   // ── R ─────────────────────────────────────────────────────────────────────
   io.lite.r.valid := io.full.r.valid
