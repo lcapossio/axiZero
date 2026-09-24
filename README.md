@@ -10,7 +10,7 @@ Open source AXI4 / AXI4-Lite interconnect generator. Describe your bus topology 
 
 MIT licensed. Built with [SpinalHDL](https://spinalhdl.github.io/SpinalDoc-RTD/).
 
-Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 185 SpinalSim + 36 cocotb tests pass.
+Hardware-validated on Xilinx Arty A7-100T and Altera DE25-Nano. 245 SpinalSim + 46 cocotb tests pass.
 
 ---
 
@@ -418,7 +418,10 @@ Address regions must not overlap. The crossbar uses a bitmask decoder: for each 
 
 When a port's `data_width` differs from `fabric_data_width`, the generator inserts a converter automatically:
 
-- **AXI4-Lite**: zero-extends writes to the wider bus, truncates reads to the narrower bus. Single-cycle, no buffering.
+- **AXI4-Lite upsize** (narrow port → wider bus): data and strobe go on the byte lanes the address selects, and read data comes back off them. One beat in, one beat out; the lane offset is taken from AW/AR and held for its data beat, since W carries no address.
+- **AXI4-Lite downsize** (wide port → narrower bus): one narrow transaction per chunk of the wide word. Writes go out only for chunks with a strobe set, so a slave with write side effects never sees bytes the master did not name; reads run from the chunk the address names to the end of the word; the worst of the chunk responses comes back. One transaction per direction at a time.
+
+  Both apply wherever a Lite port and the bus it meets differ in width — a master or a slave, on the all-Lite fabric or on the mixed one, including a fabric that `internalDataWidth` makes narrower than its ports.
 - **Full AXI4 upsize** (narrow port → wider fabric): SpinalHDL `Axi4Upsizer`. Assembles narrow beats into wide beats.
 - **Full AXI4 downsize** (wide port → narrower fabric): `Axi4DownsizerExt` (local fork). Splits wide beats into narrow sub-transactions. INCR bursts stay multi-beat for efficiency. FIXED and WRAP bursts are flattened to single-beat sub-transactions with addresses computed internally.
 
@@ -547,7 +550,7 @@ Requires Verilator 5.x on Linux or WSL.
 sbt test
 ```
 
-185 tests pass across 28 suites:
+245 tests pass across 32 suites:
 
 For the focused AXI4-Stream loop, including lint, YAML generator smoke tests, and cocotbext-axi generated-RTL tests:
 
@@ -571,6 +574,10 @@ python3 scripts/run_sim.py axis
 | `WidthConverterSpec` | 6 | Full AXI4 width conversion: 32→64 upsize, 64→32 downsize, 32→64→32 passthrough; single-beat, burst, routing |
 | `BurstTypeSpec` | 6 | Downsizer burst types: INCR baseline, FIXED 1-beat and 2-beat overwrite, WRAP aligned, WRAP 4-beat, WRAP with actual wrap-around |
 | `ArbitrationSpec` | 7 | FixedPriority and WeightedRoundRobin: contention ordering, throughput proportionality, data integrity |
+| `LiteWidthPathsSpec` | 7 | Every other place an AXI4-Lite port changes width: a narrow slave on the Lite fabric (both halves written, a strobed half going out alone, the worst response of the halves returned), a fabric narrower than its master, a narrow Lite master and a narrow Lite slave on the mixed fabric, and a slave with a narrower address bus than the crossbar. Every address is chosen so a converter using the low lanes regardless would fail |
+| `ConfigSweepSpec` | 47 | Elaborates 30 configurations no simulation suite builds — every arbitration policy against one to three masters, 8- to 128-bit ports on one fabric, fabrics narrower than their ports, AXI3 + Full + Lite masters with register slices everywhere, mismatched address and ID widths, observed masters — and checks 17 invalid configurations are refused with a message naming the problem |
+| `Axi4ToAxi3Spec` | 5 | The AXI4→AXI3 shim VexZeroSoc uses: every field mapped (AXI4 exclusive is AXI3 `01`), what a missing field is driven to, a burst out to AXI3 and back through `Axi3ToAxi4Adapter`, and WID naming its own burst whether the data trails the address or leads it |
+| `AxiStreamArtySmokeSpec` | 1 | The self-checking AXI4-Stream design the Arty build runs, simulated to its status word: every check bit set, the pass bit latched and still set 200 cycles later |
 | `RegSliceAndLiteWidthSpec` | 10 | Register slices (Full + Lite, master/slave/both), AXI4-Lite width conversion (16→32 upsizing) including byte-lane placement and strobe preservation |
 | `MixedIdWidthSpec` | 2 | Masters declaring different numbers of IDs, so the narrow port's requests cross `Axi4IdWidener`. Every test checks the ID a response came back under, not just the data: the padding is constant zero outward, so the truncation back is exact only if the fabric returns the same zeros. No other root test builds a mixed-ID-width config — the widener's only exercise was through the VexRiscv example, a separate sbt project |
 | `RegSliceSkidSpec` | 6 | What `regSliceSkid` actually buys, rather than inferring it from timing closure: a stalled plain slice accepts one beat and a skid two; the plain slice's READY is combinational from the far side and the skid's is not, shown by stalling and releasing on one cycle; 400 beats survive random back-pressure through both; latency stays one cycle and throughput full for both; B and R keep the plain slice they are given; and the Lite slice behaves the same way. The skid buffer is on the AW/W/AR path of every registered master on both boards, and until now no test told the two apart |
@@ -612,14 +619,14 @@ python3 sim/cocotb_gen/run_all.py ipif     # MyLite_1M4S.v IPIF slave only
 python3 sim/cocotb_gen/run_all.py axis     # generated AXI4-Stream cocotb suite
 ```
 
-36 tests pass across 6 suites:
+46 tests pass across 6 suites:
 
 | Suite | DUT | Tests | Description |
 |---|---|---|---|
-| `lite` | `MyLite_1M4S.v` | 6 | AxiLiteMaster → 4-slave crossbar: single R/W, address routing, sequential writes, multi-slave pattern, overwrite isolation, 60× random |
-| `full` | `MyFull_2M2S.v` | 6 | AxiMaster → 2-slave crossbar: single R/W, address routing + isolation, 16-beat burst, 64-beat burst (AWLEN=63), alternating slaves, 40× random |
+| `lite` | `MyLite_1M4S.v` | 7 | AxiLiteMaster → 4-slave crossbar: single R/W, address routing, sequential writes, multi-slave pattern, overwrite isolation, 60× random, byte and half-word strobes through every slave |
+| `full` | `MyFull_2M2S.v` | 14 | AxiMaster → 2-slave crossbar: single R/W, address routing + isolation, 16-beat burst, 64-beat burst (AWLEN=63), alternating slaves, 40× random; WRAP and FIXED bursts (checked in the slave RAM, not only by read-back), sub-word strobes and narrow AxSIZE, 2/3/8/32-beat bursts, unaligned starts and ends, W ahead of AW and AW ahead of W, every handshake stalling mid-burst, and AxLOCK/AxCACHE/AxPROT arriving at the slave as sent |
 | `wrr` | `MyLite_2M2S_WRR.v` | 6 | 2-master WRR crossbar: dual-master R/W, address routing, concurrent bandwidth, no starvation, concurrent different slaves, 80× random |
-| `qos` | `MyFull_2M2S_QoS.v` | 6 | 2-master QoS crossbar: dual-master R/W, address routing, higher QoS wins contention, equal-QoS round-robin, aging anti-starvation, QoS read priority |
+| `qos` | `MyFull_2M2S_QoS.v` | 7 | 2-master QoS crossbar: dual-master R/W, address routing, higher QoS wins contention, equal-QoS round-robin, aging anti-starvation, QoS read priority, eight reads with distinct IDs outstanding together (the test asserts they overlapped) |
 | `ipif` | `MyLite_1M4S.v` | 4 | IPIF slave compatibility: strict IpifRam model requires AWVALID+WVALID simultaneously, routing unaffected |
 | `axis` | generated AXI4-Stream cores | 8 | cocotbext-axi stream BFM tests for reg slice, width adapter, FIFO, arb-mux, demux, broadcaster |
 

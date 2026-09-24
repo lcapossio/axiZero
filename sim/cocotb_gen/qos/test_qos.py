@@ -21,6 +21,9 @@ s0_axi_awqos / s0_axi_arqos / s1_axi_awqos / s1_axi_arqos manually
 after reset.
 """
 
+import itertools
+import random
+
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, Combine
@@ -282,3 +285,47 @@ async def test_qos_read_priority(dut):
     for i in range(N):
         exp = (0xF100_0000 | i).to_bytes(DATA_BYTES, "little")
         assert m1_results[i] == exp, f"m1 read[{i}]: {m1_results[i].hex()} != {exp.hex()}"
+
+
+# ── Test 7: several reads outstanding, each with its own ID ────────────────
+
+@cocotb.test(timeout_time=2, timeout_unit="ms")
+async def test_id_interleaving(dut):
+    """Eight reads in flight at once, different IDs and slaves, each gets its own data."""
+    cocotb.start_soon(Clock(dut.aclk, 10, units="ns").start())
+    await reset_dut(dut)
+    master, _, ram0, ram1 = make_bfms(dut)
+    set_qos(dut, 0, 0)
+    # A slow, uneven R channel on one slave so responses from the two slaves
+    # come back in an order other than the one they were asked in.
+    ram0.read_if.r_channel.set_pause_generator(itertools.cycle([1, 1, 0]))
+
+    expected = {}
+    for i in range(8):
+        base = SLAVE0_BASE if i % 2 == 0 else SLAVE1_BASE
+        addr = base + 0x7000 + i * 0x100
+        data = bytes(random.randint(0, 255) for _ in range((i % 3 + 1) * DATA_BYTES))
+        (ram0 if i % 2 == 0 else ram1).write(addr % RAM_SIZE, data)
+        expected[i] = (addr, data)
+
+    # Count, at the master port, how many reads the crossbar has accepted and
+    # not yet finished -- the point of the test is that it is more than one.
+    depth = {"now": 0, "max": 0}
+
+    async def track():
+        while True:
+            await RisingEdge(dut.aclk)
+            if dut.s0_axi_arvalid.value == 1 and dut.s0_axi_arready.value == 1:
+                depth["now"] += 1
+            if (dut.s0_axi_rvalid.value == 1 and dut.s0_axi_rready.value == 1
+                    and dut.s0_axi_rlast.value == 1):
+                depth["now"] -= 1
+            depth["max"] = max(depth["max"], depth["now"])
+
+    cocotb.start_soon(track())
+    tasks = [cocotb.start_soon(master.read(addr, len(data), arid=i))
+             for i, (addr, data) in expected.items()]
+    for i, t in enumerate(tasks):
+        got = await t
+        assert got.data == expected[i][1], f"read with ARID {i} got another read's data"
+    assert depth["max"] >= 2, f"reads never overlapped (at most {depth['max']} outstanding)"

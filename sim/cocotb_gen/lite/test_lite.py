@@ -193,3 +193,29 @@ async def test_random_accesses(dut):
         result = await master.read(addr, DATA_BYTES)
         assert result.data == expected, \
             f"Random r/w mismatch at {addr:#010x}: {result.data.hex()} != {expected.hex()}"
+
+
+# ── Test 7: sub-word strobes ─────────────────────────────────────────────────
+
+@cocotb.test(timeout_time=2, timeout_unit="ms")
+async def test_sub_word_strobes(dut):
+    """Byte and half-word writes, through every slave, change only the bytes they name."""
+    cocotb.start_soon(Clock(dut.aclk, 10, units="ns").start())
+    await reset_dut(dut)
+    master, _ = make_bfms(dut)
+
+    for base in SLAVE_BASES:
+        addr = base + 0x40
+        ref = bytearray(b"\xa5" * 2 * DATA_BYTES)
+        await master.write(addr, bytes(ref))
+
+        # One byte in each lane of the first word, then a half-word on the
+        # upper lanes of the second and a byte on its lowest.
+        for off, data in ((0, b"\x10"), (1, b"\x21"), (2, b"\x32"), (3, b"\x43"),
+                          (6, b"\x66\x77"), (4, b"\x04")):
+            await master.write(addr + off, data)
+            ref[off:off + len(data)] = data
+
+        got = await master.read(addr, len(ref))
+        assert got.data == bytes(ref), \
+            f"slave at {base:#x}: {got.data.hex()} != {bytes(ref).hex()}"

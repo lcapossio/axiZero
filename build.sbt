@@ -65,19 +65,21 @@ lazy val root = project
     // this is untested" when what it meant was "some of this is tested by
     // something else".
     coverageExcludedPackages := "axizero\\.gen\\..*",
-    // Floors, not targets. Measured at 82.30% statement and 58.40% branch on
-    // 2026-09-23 over 185 tests in 28 suites; these sit three to four points
-    // under, so a refactor that adds a defensive branch or two does not trip
-    // them but losing a suite does. A report without them is a number nobody
-    // reads until someone goes looking, which is the wrong time.
+    // Floors, not targets. Measured at 91.08% statement and 66.04% branch on
+    // 2026-09-24 over 245 tests in 32 suites; these sit four points under, so
+    // a refactor that adds a defensive branch or two does not trip them but
+    // losing a suite does. A report without them is a number nobody reads
+    // until someone goes looking, which is the wrong time.
     //
-    // Branch sits much lower than statement because a branch here is usually a
-    // configuration choice, and no test builds every combination -- that is a
-    // real gap and the floor is set to catch it getting worse, not to bless it.
+    // Branch sits lower than statement because a branch here is usually a
+    // configuration choice. ConfigSweepSpec elaborates the combinations no
+    // simulation suite builds, which is what took branch coverage from 58% to
+    // 66%; what remains is mostly combinations still unbuilt, and the floor is
+    // set to catch that getting worse, not to bless it.
     //
     // Raise them when coverage rises; they are only useful just below it.
-    coverageMinimumStmtTotal   := 78,
-    coverageMinimumBranchTotal := 55,
+    coverageMinimumStmtTotal   := 87,
+    coverageMinimumBranchTotal := 62,
     coverageFailOnMinimum      := true
   )
 
