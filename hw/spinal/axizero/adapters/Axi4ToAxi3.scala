@@ -8,10 +8,11 @@ import spinal.lib.bus.amba4.axi._
 
 /** Presents an AXI4 master's traffic on an AXI3 bus.
   *
-  * This is not an adapter and does nothing clever: AXI4 and AXI3 differ, on the master side, only
-  * in how wide two fields are. AWLEN/ARLEN narrow from eight bits to four, AWLOCK/ARLOCK widen from
-  * one to two, and AXI3 adds WID, which is zero for a master that uses a single ID. Everything else
-  * is the same wire.
+  * On the master side AXI4 and AXI3 differ in how wide two fields are -- AWLEN/ARLEN narrow from
+  * eight bits to four, AWLOCK/ARLOCK widen from one to two -- and in WID, which AXI3 adds.
+  * Everything but WID is the same wire. WID is zero for a master with no ID; for one with IDs it
+  * has to name the burst each beat belongs to, which takes a small queue of accepted AWIDs (see
+  * below).
   *
   * It exists so that a test can put a real AXI3 master in front of [[Axi3ToAxi4Adapter]] without a
   * second traffic generator: whatever drives the AXI4 side -- a CPU, a bridge, a stress generator
@@ -28,9 +29,12 @@ import spinal.lib.bus.amba4.axi._
   *
   * @param src
   *   the upstream bus, whose VALIDs are driven by the master and whose READYs this drives.
+  * @param outstanding
+  *   with IDs, how many accepted write bursts may still be waiting for their data before AW
+  *   back-pressures. Unused without IDs.
   */
 object Axi4ToAxi3 {
-  def apply(src: Axi4, axi3Cfg: Axi3Config): Axi3 = {
+  def apply(src: Axi4, axi3Cfg: Axi3Config, outstanding: Int = 4): Axi3 = {
     val cfg  = src.config
     val axi3 = Axi3(axi3Cfg)
 
@@ -44,11 +48,55 @@ object Axi4ToAxi3 {
     val noCache = B(0, 4 bits)
     val noProt  = B(0, 3 bits)
 
+    val wLast = if (cfg.useLast) src.w.last else True
+
+    // AW and W. With no ID at all, every burst is ID 0 and WID is 0: wires.
+    //
+    // With IDs, WID has to name the burst each beat belongs to, which AXI4's
+    // W does not carry -- Axi3ToAxi4Adapter sorts beats by WID, and a beat
+    // tagged with the wrong one waits for an AW that never comes. AXI4 sends
+    // W in AW order, so each accepted AWID goes into a queue and the head of
+    // the queue tags the beats until the burst's last one.
+    //
+    // AXI4 also lets W arrive before its AW, and lets a slave wait for W
+    // before taking AW, so W cannot simply wait for AW to be accepted. With
+    // the queue empty, a beat is tagged with the AWID being offered, and
+    // `wLeads` remembers a burst whose data finished first, so its AW is not
+    // queued again when it is accepted. A second early burst waits: its AW is
+    // not visible yet, so there is nothing to tag it with.
+    if (!cfg.useId) {
+      axi3.aw.valid := src.aw.valid
+      src.aw.ready  := axi3.aw.ready
+      axi3.w.valid  := src.w.valid
+      src.w.ready   := axi3.w.ready
+      axi3.w.id     := 0
+    } else {
+      val ids    = StreamFifo(UInt(axi3Cfg.idWidth bits), outstanding)
+      val wLeads = RegInit(False)
+      val awId   = src.aw.id.resize(axi3Cfg.idWidth)
+
+      val fromQueue = ids.io.pop.valid
+      val canTag    = fromQueue || (src.aw.valid && !wLeads)
+      axi3.w.valid := src.w.valid && canTag
+      src.w.ready  := axi3.w.ready && canTag
+      axi3.w.id    := Mux(fromQueue, ids.io.pop.payload, awId)
+
+      val wBurstDone = src.w.valid && axi3.w.ready && canTag && wLast
+      ids.io.pop.ready := wBurstDone
+
+      axi3.aw.valid := src.aw.valid && ids.io.push.ready
+      src.aw.ready  := axi3.aw.ready && ids.io.push.ready
+      val awFire    = src.aw.valid && axi3.aw.ready && ids.io.push.ready
+      val dataFirst = wBurstDone && !fromQueue // this burst's data used the offered AWID
+      ids.io.push.valid   := awFire && !wLeads && !dataFirst
+      ids.io.push.payload := awId
+      when(awFire && wLeads) { wLeads := False }
+      when(dataFirst && !awFire) { wLeads := True }
+    }
+
     // AW. Axi3Aw and Axi3Ar are separate bundles with the same fields, so the
     // two address channels are written out rather than shared through a
     // common supertype that does not exist.
-    axi3.aw.valid := src.aw.valid
-    src.aw.ready  := axi3.aw.ready
     axi3.aw.id    := (if (cfg.useId) src.aw.id.resized else U(0))
     axi3.aw.addr  := src.aw.addr
     axi3.aw.len   := (if (cfg.useLen) src.aw.len.resize(4) else noLen)
@@ -58,12 +106,9 @@ object Axi4ToAxi3 {
     axi3.aw.cache := (if (cfg.useCache) src.aw.cache else noCache)
     axi3.aw.prot  := (if (cfg.useProt) src.aw.prot else noProt)
 
-    axi3.w.valid := src.w.valid
-    src.w.ready  := axi3.w.ready
-    axi3.w.id    := 0 // one ID in, one ID out; AXI3 write interleaving is not used
-    axi3.w.data  := src.w.data
-    axi3.w.strb  := (if (cfg.useStrb) src.w.strb else B(axi3Cfg.bytePerWord bits, default -> True))
-    axi3.w.last  := (if (cfg.useLast) src.w.last else True)
+    axi3.w.data := src.w.data
+    axi3.w.strb := (if (cfg.useStrb) src.w.strb else B(axi3Cfg.bytePerWord bits, default -> True))
+    axi3.w.last := wLast
 
     src.b.valid                 := axi3.b.valid
     axi3.b.ready                := src.b.ready
